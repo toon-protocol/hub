@@ -1,0 +1,57 @@
+{
+  "name": "@agent-society/protocol",
+  "version": "0.1.0",
+  "description": "Nostr-based peer discovery and SPSP for Interledger agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./discovery": {
+      "types": "./dist/discovery/index.d.ts",
+      "import": "./dist/discovery/index.js"
+    },
+    "./spsp": {
+      "types": "./dist/spsp/index.d.ts",
+      "import": "./dist/spsp/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\""
+  },
+  "keywords": [
+    "nostr",
+    "interledger",
+    "ilp",
+    "spsp",
+    "payment",
+    "agent",
+    "nip-02",
+    "social-graph"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "nostr-tools": "^2.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.0",
+    "vitest": "^2.0.0",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "prettier": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
