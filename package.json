@@ -1,5 +1,5 @@
 {
-  "name": "agent-society",
+  "name": "crosstown",
   "version": "0.2.0",
   "private": true,
   "description": "Nostr-based peer discovery and SPSP for Interledger agents",
