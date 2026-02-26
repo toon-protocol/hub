@@ -46,3 +46,7 @@ pnpm-debug.log*
 *.png
 *.jpg
 *.jpeg
+
+# Generated deployment files
+docker-compose-peer*.yml
+genesis.env
