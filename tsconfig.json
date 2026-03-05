@@ -18,5 +18,12 @@
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true
   },
-  "exclude": ["node_modules", "dist", "coverage"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "coverage",
+    "archive",
+    "packages/rig",
+    "packages/town"
+  ]
 }

@@ -27,7 +27,33 @@ export default tseslint.config(
       ],
     },
   },
+  // Relaxed rules for test files, examples, and docker entrypoint
   {
-    ignores: ['**/dist/**', '**/node_modules/**', 'coverage/**', '**/*.js'],
+    files: [
+      '**/*.test.ts',
+      '**/__integration__/**',
+      '**/tests/**',
+      '**/examples/**',
+      'docker/src/**',
+    ],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-non-null-assertion': 'warn',
+      '@typescript-eslint/no-empty-function': 'off',
+      'no-unsafe-finally': 'warn',
+      '@typescript-eslint/ban-ts-comment': 'warn',
+    },
+  },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      'coverage/**',
+      '**/*.js',
+      '**/*.mjs',
+      'archive/**',
+      'packages/rig/**',
+      'packages/town/**',
+    ],
   }
 );

@@ -17,6 +17,9 @@ importers:
       '@types/node':
         specifier: ^20.11.0
         version: 20.19.32
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       eslint:
         specifier: ^9.0.0
         version: 9.39.2
@@ -155,6 +158,9 @@ importers:
       '@ardrive/turbo-sdk':
         specifier: ^1.21.0
         version: 1.40.2(typescript@5.9.3)
+      '@toon-format/toon':
+        specifier: ^1.1.0
+        version: 1.4.0
       arweave:
         specifier: ^1.15.5
         version: 1.15.7
@@ -171,9 +177,6 @@ importers:
       '@crosstown/relay':
         specifier: workspace:*
         version: link:../relay
-      '@toon-format/toon':
-        specifier: ^1.1.0
-        version: 1.4.0
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.32
@@ -224,22 +227,6 @@ importers:
         specifier: ^4.18.2
         version: 4.22.1
 
-  packages/git-proxy:
-    dependencies:
-      '@hono/node-server':
-        specifier: ^1.14.0
-        version: 1.19.9(hono@4.11.8)
-      hono:
-        specifier: ^4.0.0
-        version: 4.11.8
-      undici:
-        specifier: ^6.0.0
-        version: 6.23.0
-    devDependencies:
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.32
-
   packages/relay:
     dependencies:
       '@crosstown/bls':
@@ -270,6 +257,43 @@ importers:
       '@types/ws':
         specifier: ^8.0.0
         version: 8.18.1
+
+  packages/sdk:
+    dependencies:
+      '@crosstown/core':
+        specifier: workspace:*
+        version: link:../core
+      '@noble/curves':
+        specifier: ^2.0.0
+        version: 2.0.1
+      '@noble/hashes':
+        specifier: ^2.0.0
+        version: 2.0.1
+      '@scure/bip32':
+        specifier: ^2.0.0
+        version: 2.0.1
+      '@scure/bip39':
+        specifier: ^2.0.0
+        version: 2.0.1
+      nostr-tools:
+        specifier: ^2.20.0
+        version: 2.23.1(typescript@5.9.3)
+    devDependencies:
+      '@crosstown/relay':
+        specifier: workspace:*
+        version: link:../relay
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.32
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.0.0
+        version: 1.6.1(@types/node@20.19.32)
 
 packages:
 
@@ -6823,6 +6847,7 @@ packages:
   /ansi-regex@5.0.1:
     resolution: {integrity: sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==}
     engines: {node: '>=8'}
+    requiresBuild: true
     dev: false
 
   /ansi-styles@4.3.0:
@@ -12079,11 +12104,6 @@ packages:
     engines: {node: '>=14.0'}
     dependencies:
       '@fastify/busboy': 2.1.1
-    dev: false
-
-  /undici@6.23.0:
-    resolution: {integrity: sha512-VfQPToRA5FZs/qJxLIinmU59u0r7LXqoJkCzinq3ckNJp3vKEh7jTWN589YQ5+aoAC/TGRLyJLCPKcLQbM8r9g==}
-    engines: {node: '>=18.17'}
     dev: false
 
   /unpipe@1.0.0:
