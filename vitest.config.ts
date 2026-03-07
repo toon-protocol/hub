@@ -11,6 +11,7 @@ export default defineConfig({
       '@crosstown/bls': resolve(__dirname, 'packages/bls/src/index.ts'),
       '@crosstown/sdk': resolve(__dirname, 'packages/sdk/src/index.ts'),
       '@crosstown/client': resolve(__dirname, 'packages/client/src/index.ts'),
+      '@crosstown/town': resolve(__dirname, 'packages/town/src/index.ts'),
     },
   },
   test: {
