@@ -59,6 +59,9 @@ importers:
       '@crosstown/bls':
         specifier: workspace:*
         version: link:../packages/bls
+      '@crosstown/connector':
+        specifier: ^1.6.0
+        version: 1.6.0(@types/node@20.19.32)(typescript@5.9.3)
       '@crosstown/core':
         specifier: workspace:*
         version: link:../packages/core
@@ -134,8 +137,8 @@ importers:
   packages/client:
     dependencies:
       '@crosstown/connector':
-        specifier: ^1.5.0
-        version: 1.5.0(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^1.6.0
+        version: 1.6.0(@types/node@20.19.32)(typescript@5.9.3)
       '@crosstown/core':
         specifier: workspace:*
         version: link:../core
@@ -289,8 +292,8 @@ importers:
         version: 2.23.1(typescript@5.9.3)
     devDependencies:
       '@crosstown/connector':
-        specifier: ^1.5.0
-        version: 1.5.0(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^1.6.0
+        version: 1.6.0(@types/node@20.19.32)(typescript@5.9.3)
       '@crosstown/relay':
         specifier: workspace:*
         version: link:../relay
@@ -1402,8 +1405,8 @@ packages:
     resolution: {integrity: sha512-UnLHDY6KMmC+UXf3Ufyh+onE19xzEXjT4VZ504Acmk4PXxqyvG4cCPprlKUFnGUX7f0z8Or9MAOHXBx41uHBcg==}
     dev: false
 
-  /@crosstown/connector@1.5.0(@types/node@20.19.32)(typescript@5.9.3):
-    resolution: {integrity: sha512-e+CoVZskyLTEo6B+fWKZW4/r+9EVWAyV5CE8i2fAluEp5JxIcMd3Z85m6AWmzkUjgtw/7kvI2Vnod9IGkNCw1Q==}
+  /@crosstown/connector@1.6.0(@types/node@20.19.32)(typescript@5.9.3):
+    resolution: {integrity: sha512-JE0/5r84c+XKUocDKdAgY94K3YlSrplBO41uWptZRVV7ocyj09CkVRx/EPe70CUSzCets6JRSFZkaVPV3nqwUQ==}
     engines: {node: '>=22.11.0'}
     hasBin: true
     peerDependencies:
