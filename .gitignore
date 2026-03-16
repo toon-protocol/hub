@@ -21,6 +21,7 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+.env.publish
 
 # Test
 coverage/
@@ -48,6 +49,9 @@ pnpm-debug.log*
 *.png
 *.jpg
 *.jpeg
+
+# Nix build output (symlink to /nix/store result)
+/result
 
 # Generated deployment files
 docker-compose-peer*.yml
