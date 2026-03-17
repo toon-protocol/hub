@@ -49,6 +49,7 @@ pnpm-debug.log*
 *.png
 *.jpg
 *.jpeg
+!_bmad-output/branding/**/*.png
 
 # Nix build output (symlink to /nix/store result)
 /result
