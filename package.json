@@ -1,5 +1,5 @@
 {
-  "name": "crosstown",
+  "name": "toon-protocol",
   "version": "0.2.0",
   "private": true,
   "description": "ILP-gated Nostr relay. Pay to write, free to read.",

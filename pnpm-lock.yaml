@@ -5,6 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@toon-protocol/connector': npm:@crosstown/connector@^1.7.1
   protobufjs: '>=7.2.5'
   ws@>=7.0.0 <7.5.10: '>=7.5.10'
   body-parser: '>=1.20.3'
@@ -66,27 +67,27 @@ importers:
 
   docker:
     dependencies:
-      '@crosstown/bls':
-        specifier: workspace:*
-        version: link:../packages/bls
-      '@crosstown/connector':
-        specifier: ^1.7.1
-        version: 1.7.1(@types/node@20.19.32)(typescript@5.9.3)
-      '@crosstown/core':
-        specifier: workspace:*
-        version: link:../packages/core
-      '@crosstown/relay':
-        specifier: workspace:*
-        version: link:../packages/relay
-      '@crosstown/sdk':
-        specifier: workspace:*
-        version: link:../packages/sdk
-      '@crosstown/town':
-        specifier: workspace:*
-        version: link:../packages/town
       '@hono/node-server':
         specifier: ^1.13.7
         version: 1.19.9(hono@4.12.7)
+      '@toon-protocol/bls':
+        specifier: workspace:*
+        version: link:../packages/bls
+      '@toon-protocol/connector':
+        specifier: npm:@crosstown/connector@^1.7.1
+        version: /@crosstown/connector@1.7.1(@types/node@20.19.32)(typescript@5.9.3)
+      '@toon-protocol/core':
+        specifier: workspace:*
+        version: link:../packages/core
+      '@toon-protocol/relay':
+        specifier: workspace:*
+        version: link:../packages/relay
+      '@toon-protocol/sdk':
+        specifier: workspace:*
+        version: link:../packages/sdk
+      '@toon-protocol/town':
+        specifier: workspace:*
+        version: link:../packages/town
       hono:
         specifier: ^4.11.10
         version: 4.12.7
@@ -112,13 +113,13 @@ importers:
 
   examples/client-example:
     dependencies:
-      '@crosstown/client':
+      '@toon-protocol/client':
         specifier: workspace:*
         version: link:../../packages/client
-      '@crosstown/core':
+      '@toon-protocol/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@crosstown/relay':
+      '@toon-protocol/relay':
         specifier: workspace:*
         version: link:../../packages/relay
       nostr-tools:
@@ -146,13 +147,13 @@ importers:
 
   examples/sdk-example:
     dependencies:
-      '@crosstown/connector':
-        specifier: ^1.7.1
-        version: 1.7.1(@types/node@20.19.32)(typescript@5.9.3)
-      '@crosstown/core':
+      '@toon-protocol/connector':
+        specifier: npm:@crosstown/connector@^1.7.1
+        version: /@crosstown/connector@1.7.1(@types/node@20.19.32)(typescript@5.9.3)
+      '@toon-protocol/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@crosstown/sdk':
+      '@toon-protocol/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
       nostr-tools:
@@ -177,16 +178,16 @@ importers:
 
   examples/town-example:
     dependencies:
-      '@crosstown/connector':
-        specifier: ^1.7.1
-        version: 1.7.1(@types/node@20.19.32)(typescript@5.9.3)
-      '@crosstown/core':
+      '@toon-protocol/connector':
+        specifier: npm:@crosstown/connector@^1.7.1
+        version: /@crosstown/connector@1.7.1(@types/node@20.19.32)(typescript@5.9.3)
+      '@toon-protocol/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@crosstown/sdk':
+      '@toon-protocol/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
-      '@crosstown/town':
+      '@toon-protocol/town':
         specifier: workspace:*
         version: link:../../packages/town
       nostr-tools:
@@ -217,18 +218,18 @@ importers:
 
   packages/bls:
     dependencies:
-      '@crosstown/core':
-        specifier: workspace:*
-        version: link:../core
-      '@crosstown/relay':
-        specifier: workspace:*
-        version: link:../relay
       '@hono/node-server':
         specifier: ^1.14.0
         version: 1.19.9(hono@4.12.7)
       '@toon-format/toon':
         specifier: ^1.0.0
         version: 1.4.0
+      '@toon-protocol/core':
+        specifier: workspace:*
+        version: link:../core
+      '@toon-protocol/relay':
+        specifier: workspace:*
+        version: link:../relay
       better-sqlite3:
         specifier: ^11.0.0
         version: 11.10.0
@@ -251,10 +252,10 @@ importers:
 
   packages/client:
     dependencies:
-      '@crosstown/connector':
-        specifier: ^1.7.1
-        version: 1.7.1(@types/node@20.19.32)(typescript@5.9.3)
-      '@crosstown/core':
+      '@toon-protocol/connector':
+        specifier: npm:@crosstown/connector@^1.7.1
+        version: /@crosstown/connector@1.7.1(@types/node@20.19.32)(typescript@5.9.3)
+      '@toon-protocol/core':
         specifier: workspace:*
         version: link:../core
       nostr-tools:
@@ -264,7 +265,7 @@ importers:
         specifier: ^2.0.0
         version: 2.45.1(typescript@5.9.3)
     devDependencies:
-      '@crosstown/relay':
+      '@toon-protocol/relay':
         specifier: workspace:*
         version: link:../relay
       '@types/node':
@@ -328,15 +329,15 @@ importers:
 
   packages/examples:
     dependencies:
-      '@crosstown/core':
-        specifier: workspace:*
-        version: link:../core
-      '@crosstown/relay':
-        specifier: workspace:*
-        version: link:../relay
       '@hono/node-server':
         specifier: ^1.13.7
         version: 1.19.9(hono@4.12.7)
+      '@toon-protocol/core':
+        specifier: workspace:*
+        version: link:../core
+      '@toon-protocol/relay':
+        specifier: workspace:*
+        version: link:../relay
       nostr-tools:
         specifier: ^2.10.4
         version: 2.23.0(typescript@5.9.3)
@@ -362,15 +363,15 @@ importers:
 
   packages/relay:
     dependencies:
-      '@crosstown/bls':
-        specifier: workspace:*
-        version: link:../bls
-      '@crosstown/core':
-        specifier: workspace:*
-        version: link:../core
       '@toon-format/toon':
         specifier: ^1.0.0
         version: 1.4.0
+      '@toon-protocol/bls':
+        specifier: workspace:*
+        version: link:../bls
+      '@toon-protocol/core':
+        specifier: workspace:*
+        version: link:../core
       better-sqlite3:
         specifier: ^11.0.0
         version: 11.10.0
@@ -393,9 +394,6 @@ importers:
 
   packages/sdk:
     dependencies:
-      '@crosstown/core':
-        specifier: workspace:*
-        version: link:../core
       '@noble/curves':
         specifier: ^2.0.0
         version: 2.0.1
@@ -408,14 +406,17 @@ importers:
       '@scure/bip39':
         specifier: ^2.0.0
         version: 2.0.1
+      '@toon-protocol/core':
+        specifier: workspace:*
+        version: link:../core
       nostr-tools:
         specifier: ^2.20.0
         version: 2.23.1(typescript@5.9.3)
     devDependencies:
-      '@crosstown/connector':
-        specifier: ^1.7.1
-        version: 1.7.1(@types/node@20.19.32)(typescript@5.9.3)
-      '@crosstown/relay':
+      '@toon-protocol/connector':
+        specifier: npm:@crosstown/connector@^1.7.1
+        version: /@crosstown/connector@1.7.1(@types/node@20.19.32)(typescript@5.9.3)
+      '@toon-protocol/relay':
         specifier: workspace:*
         version: link:../relay
       '@types/node':
@@ -442,18 +443,18 @@ importers:
 
   packages/town:
     dependencies:
-      '@crosstown/core':
-        specifier: workspace:*
-        version: link:../core
-      '@crosstown/relay':
-        specifier: workspace:*
-        version: link:../relay
-      '@crosstown/sdk':
-        specifier: workspace:*
-        version: link:../sdk
       '@hono/node-server':
         specifier: ^1.0.0
         version: 1.19.9(hono@4.12.7)
+      '@toon-protocol/core':
+        specifier: workspace:*
+        version: link:../core
+      '@toon-protocol/relay':
+        specifier: workspace:*
+        version: link:../relay
+      '@toon-protocol/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       better-sqlite3:
         specifier: ^11.0.0
         version: 11.10.0
@@ -1476,8 +1477,8 @@ packages:
     resolution: {integrity: sha512-KzAeorten6Vn20sMiM6NNWfgc7jbyVo4Zmxev1FXa5EaoLCZy48cmT3hJxUJQvJP/lAy8wPGEjZ/u4rmF11x9A==}
     dependencies:
       '@cosmjs/stream': 0.33.1
-      isomorphic-ws: 4.0.1(ws@7.5.10)
-      ws: 7.5.10
+      isomorphic-ws: 4.0.1(ws@8.19.0)
+      ws: 8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
       xstream: 11.14.0
     transitivePeerDependencies:
       - bufferutil
@@ -8609,6 +8610,14 @@ packages:
       ws: '>=7.5.10'
     dependencies:
       ws: 7.5.10
+    dev: false
+
+  /isomorphic-ws@4.0.1(ws@8.19.0):
+    resolution: {integrity: sha512-BhBvN2MBpWTaSHdWRb/bwdZJ1WaehQ2L1KngkCkfLUGF0mAWAT1sQUQacEmQ0jXkFw/czDXPNQSL5u2/Krsz1w==}
+    peerDependencies:
+      ws: '>=7.5.10'
+    dependencies:
+      ws: 8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     dev: false
 
   /isows@1.0.6(ws@8.18.0):
