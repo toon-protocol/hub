@@ -1,6 +1,6 @@
 {
-  "name": "crosstown",
-  "version": "0.2.0",
+  "name": "toon-protocol",
+  "version": "0.3.0",
   "private": true,
   "description": "ILP-gated Nostr relay. Pay to write, free to read.",
   "type": "module",
@@ -53,12 +53,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
+    "@hono/node-server": "^1.13.7",
     "@toon-format/toon": "^1.0.0",
     "@types/node": "^20.11.0",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^1.0.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.0.0",
+    "hono": "^4.11.10",
     "nostr-tools": "^2.23.1",
     "prettier": "^3.2.0",
     "tsup": "^8.0.0",

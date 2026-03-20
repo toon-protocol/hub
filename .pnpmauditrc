@@ -1,9 +1,9 @@
-# Crosstown Dependency Audit Acknowledgments
+# TOON Dependency Audit Acknowledgments
 # Last reviewed: 2026-03-16
 #
 # Remaining vulnerabilities are all in transitive dependencies of:
 #   - @ardrive/turbo-sdk (elliptic, bn.js, qs, undici, minimatch)
-#   - @crosstown/connector (elliptic via @google-cloud/kms and ai SDK)
+#   - @toon-protocol/connector (elliptic via @google-cloud/kms and ai SDK)
 #   - Dev tooling (rollup, esbuild, flatted, jsondiffpatch)
 #
 # These cannot be resolved via pnpm.overrides because:
@@ -13,7 +13,7 @@
 #   - undici: Locked by @hono/node-server peer chain
 #
 # Mitigations:
-#   - Crosstown does NOT use elliptic directly (uses @noble/curves instead)
+#   - TOON does NOT use elliptic directly (uses @noble/curves instead)
 #   - BTP/ILP connections are internal (Docker network), not user-facing
 #   - @ardrive/turbo-sdk is optional (ArDrive peer registry)
 #   - Production will pin exact versions via lock file
