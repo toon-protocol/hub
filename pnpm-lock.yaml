@@ -14,6 +14,11 @@ overrides:
   path-to-regexp: '>=0.1.10'
   express: '>=4.21.0'
 
+patchedDependencies:
+  '@toon-protocol/shared@1.2.0':
+    hash: 6zqy2jkcrig54aoewdy5gcjfdq
+    path: patches/@toon-protocol__shared@1.2.0.patch
+
 importers:
 
   .:
@@ -3494,7 +3499,7 @@ packages:
       '@metamask/superstruct': 3.2.1
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
-      '@types/debug': 4.1.12
+      '@types/debug': 4.1.13
       debug: 4.4.3
       pony-cause: 2.1.11
       semver: 7.7.4
@@ -5573,7 +5578,7 @@ packages:
       tigerbeetle-node:
         optional: true
     dependencies:
-      '@toon-protocol/shared': 1.2.0
+      '@toon-protocol/shared': 1.2.0(patch_hash=6zqy2jkcrig54aoewdy5gcjfdq)
       better-sqlite3: 11.10.0
       cors: 2.8.6
       ethers: 6.16.0
@@ -5610,9 +5615,10 @@ packages:
       - typescript
       - utf-8-validate
 
-  /@toon-protocol/shared@1.2.0:
+  /@toon-protocol/shared@1.2.0(patch_hash=6zqy2jkcrig54aoewdy5gcjfdq):
     resolution: {integrity: sha512-8bCkgzp7691texTEDZvcGA+61Nrsm5cg/y/PVQMzDLktVz+iCDpfxu+oEZT43hBQEbB2k2+39JcIrrHXDNmZmQ==}
     engines: {node: '>=22.11.0'}
+    patched: true
 
   /@types/better-sqlite3@7.6.13:
     resolution: {integrity: sha512-NMv9ASNARoKksWtsq/SHakpYAYnhBrQgGD8zkLYk/jaK8jUGn08CfEdTRgYhMypUQAfzSP8W6gNLe0q19/t4VA==}

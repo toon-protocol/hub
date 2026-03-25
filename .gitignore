@@ -38,6 +38,10 @@ pnpm-debug.log*
 *.tgz
 .auto-bmad-tmp/
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Claude Code local config (exclude skills/ which are project deliverables)
 .claude/*
 !.claude/skills/
