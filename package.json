@@ -49,6 +49,9 @@
         "GHSA-49q7-c7j4-3p7m",
         "GHSA-c2qf-rxjj-qqgw"
       ]
+    },
+    "patchedDependencies": {
+      "@toon-protocol/shared@1.2.0": "patches/@toon-protocol__shared@1.2.0.patch"
     }
   },
   "devDependencies": {
