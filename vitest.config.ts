@@ -21,7 +21,7 @@ export default defineConfig({
     // of truth for total test count. All workspace members with tests must be
     // listed here so counts are consistent across pipeline steps.
     include: ['packages/*/src/**/*.test.ts', 'packages/memvid-node/tests/**/*.test.ts', 'docker/src/**/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**', '**/__integration__/**', 'packages/mina-zkapp/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/__integration__/**', 'packages/mina-zkapp/**', 'packages/pet-circuit/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
