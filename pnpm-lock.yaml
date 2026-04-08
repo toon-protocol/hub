@@ -97,6 +97,9 @@ importers:
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../packages/core
+      '@toon-protocol/pet-dvm':
+        specifier: workspace:*
+        version: link:../packages/pet-dvm
       '@toon-protocol/relay':
         specifier: workspace:*
         version: link:../packages/relay
@@ -447,18 +450,12 @@ importers:
 
   packages/pet-dvm:
     dependencies:
-      '@toon-protocol/core':
-        specifier: workspace:*
-        version: link:../core
       '@toon-protocol/memvid-node':
         specifier: workspace:*
         version: link:../memvid-node
       '@toon-protocol/pet-circuit':
         specifier: workspace:*
         version: link:../pet-circuit
-      nostr-tools:
-        specifier: ^2.23.1
-        version: 2.23.1(typescript@5.9.3)
     devDependencies:
       '@types/jest':
         specifier: ^29.5.12
