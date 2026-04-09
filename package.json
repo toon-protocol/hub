@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r run build",
-    "test": "vitest run && pnpm --filter @toon-protocol/pet-circuit test && pnpm --filter @toon-protocol/pet-dvm test",
+    "test": "vitest run && pnpm --filter @toon-protocol/pet-dvm test",
+    "test:zk": "pnpm --filter @toon-protocol/pet-circuit test",
     "test:coverage": "vitest --coverage",
     "lint": "eslint .",
     "format": "prettier --write \"packages/*/src/**/*.ts\"",
