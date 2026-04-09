@@ -456,6 +456,9 @@ importers:
       '@toon-protocol/pet-circuit':
         specifier: workspace:*
         version: link:../pet-circuit
+      rot-js:
+        specifier: ^2.2.1
+        version: 2.2.1
     devDependencies:
       '@types/jest':
         specifier: ^29.5.12
@@ -15659,6 +15662,10 @@ packages:
       '@rollup/rollup-win32-x64-msvc': 4.57.1
       fsevents: 2.3.3
     dev: true
+
+  /rot-js@2.2.1:
+    resolution: {integrity: sha512-lItXH31vj4ebdypayCx9dh98qPr57E7jGW2lVMKxtBHooU3xpGRtLS8kdJIni232tvPJ8Sl0+aqXZj8c6W0MGw==}
+    dev: false
 
   /router@2.2.0:
     resolution: {integrity: sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ==}
