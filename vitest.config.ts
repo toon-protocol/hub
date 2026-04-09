@@ -19,6 +19,9 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 120_000,
     pool: 'forks',
+    poolOptions: {
+      forks: { minForks: 1, maxForks: 4 },
+    },
     // Canonical test count: `pnpm test` at the repo root is the single source
     // of truth for total test count. All workspace members with tests must be
     // listed here so counts are consistent across pipeline steps.
