@@ -97,6 +97,9 @@ importers:
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../packages/core
+      '@toon-protocol/mill':
+        specifier: workspace:*
+        version: link:../packages/mill
       '@toon-protocol/pet-dvm':
         specifier: workspace:*
         version: link:../packages/pet-dvm
