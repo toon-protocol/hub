@@ -21,3 +21,11 @@ export {
   validateConfig,
   ConfigValidationError,
 } from './config/index.js';
+
+export { DockerOrchestrator } from './docker/index.js';
+export type {
+  NodeType,
+  ContainerSpec,
+  OrchestratorEvents,
+  HealthCheckOptions,
+} from './docker/index.js';

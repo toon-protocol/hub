@@ -23,6 +23,8 @@ import Docker from 'dockerode';
 import { getDefaultConfig } from './config/defaults.js';
 import { loadConfig } from './config/loader.js';
 import type { TownhouseConfig } from './config/schema.js';
+import { DockerOrchestrator } from './docker/index.js';
+import type { NodeType } from './docker/types.js';
 
 /**
  * Error thrown when `main()` is invoked with `--help`. Callers (tests) can
@@ -40,45 +42,19 @@ const HELP_TEXT = `townhouse — TOON node orchestrator
 
 Usage:
   townhouse init [--force] [--config-dir <dir>]  Initialize config
-  townhouse up [-c <path>]                       Start enabled nodes
+  townhouse up [--town] [--mill] [--dvm] [-c <path>]  Start nodes
   townhouse down [-c <path>]                     Stop all nodes
   townhouse status                               Show node status
-  townhouse --help                               Show this help`;
+  townhouse --help                               Show this help
+
+Flags:
+  --town   Start Town (Nostr relay) node
+  --mill   Start Mill (swap) node
+  --dvm    Start DVM (compute) node
+  If no flags given, starts all enabled nodes from config.`;
 
 const DEFAULT_CONFIG_DIR = join(homedir(), '.townhouse');
 const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, 'config.yaml');
-
-/** Container name prefix used by Townhouse */
-const CONTAINER_PREFIX = 'townhouse-';
-
-/** Node types and their container name suffixes */
-const NODE_TYPES = ['connector', 'town', 'mill', 'dvm'] as const;
-
-interface StatusResult {
-  name: string;
-  state: string;
-}
-
-async function getContainerStatuses(docker: Docker): Promise<StatusResult[]> {
-  let containers: Docker.ContainerInfo[];
-  try {
-    containers = await docker.listContainers({ all: true });
-  } catch {
-    // Docker not available — all stopped
-    return NODE_TYPES.map((name) => ({ name, state: 'stopped' }));
-  }
-
-  return NODE_TYPES.map((nodeType) => {
-    const containerName = `${CONTAINER_PREFIX}${nodeType}`;
-    const info = containers.find((c) =>
-      c.Names.some((n) => n === `/${containerName}` || n === containerName)
-    );
-    return {
-      name: nodeType,
-      state: info?.State ?? 'stopped',
-    };
-  });
-}
 
 function handleInit(force: boolean, configDir?: string): void {
   const dir = resolve(configDir ?? DEFAULT_CONFIG_DIR);
@@ -105,35 +81,127 @@ function handleInit(force: boolean, configDir?: string): void {
   console.log(`Config created at ${configPath}`);
 }
 
-async function handleStatus(docker: Docker): Promise<void> {
-  const statuses = await getContainerStatuses(docker);
+async function handleStatus(
+  docker: Docker,
+  config: TownhouseConfig
+): Promise<void> {
+  const orchestrator = new DockerOrchestrator(docker, config);
+  const statuses = await orchestrator.status();
 
   console.log('Node Status:');
   console.log('------------');
   for (const s of statuses) {
-    console.log(`  ${s.name.padEnd(12)} ${s.state}`);
+    const health = s.health ? ` (${s.health})` : '';
+    console.log(`  ${s.name.padEnd(12)} ${s.state}${health}`);
   }
 }
 
-function handleUp(config: TownhouseConfig): void {
-  const enabled = Object.entries(config.nodes)
-    .filter(([, v]) => v.enabled)
-    .map(([k]) => k);
+/**
+ * Determine which node profiles to start based on CLI flags and config.
+ * If explicit flags (--town, --mill, --dvm) are provided, use those.
+ * Otherwise fall back to all enabled nodes from config.
+ */
+function resolveProfiles(
+  values: Record<string, unknown>,
+  config: TownhouseConfig
+): NodeType[] {
+  const explicitFlags: NodeType[] = [];
+  if (values['town']) explicitFlags.push('town');
+  if (values['mill']) explicitFlags.push('mill');
+  if (values['dvm']) explicitFlags.push('dvm');
 
-  if (enabled.length === 0) {
+  if (explicitFlags.length > 0) {
+    return explicitFlags;
+  }
+
+  // No explicit flags — start all enabled nodes from config
+  const enabled: NodeType[] = [];
+  if (config.nodes.town.enabled) enabled.push('town');
+  if (config.nodes.mill.enabled) enabled.push('mill');
+  if (config.nodes.dvm.enabled) enabled.push('dvm');
+  return enabled;
+}
+
+async function handleUp(
+  config: TownhouseConfig,
+  profiles: NodeType[],
+  docker: Docker
+): Promise<void> {
+  if (profiles.length === 0) {
     console.log(
       'No nodes enabled in config. Enable nodes in config.yaml first.'
     );
     return;
   }
 
-  console.log(`Starting nodes: ${enabled.join(', ')}...`);
-  // Full orchestration is Story 21.2
+  const orchestrator = new DockerOrchestrator(docker, config);
+
+  // Wire up progress reporting
+  orchestrator.on(
+    'containerState',
+    (event: { name: string; state: string }) => {
+      console.log(`  ${event.name}: ${event.state}`);
+    }
+  );
+  orchestrator.on(
+    'pullProgress',
+    (event: { image: string; status: string; progress?: string }) => {
+      const progress = event.progress ? ` ${event.progress}` : '';
+      console.log(`  [pull] ${event.image}: ${event.status}${progress}`);
+    }
+  );
+
+  // Register SIGINT handler for graceful shutdown
+  const sigintHandler = async () => {
+    console.log('\nReceived SIGINT, shutting down gracefully...');
+    try {
+      await orchestrator.down();
+    } catch {
+      // Best-effort cleanup
+    }
+    process.exit(0);
+  };
+  process.on('SIGINT', sigintHandler);
+
+  try {
+    console.log(`Starting nodes: ${profiles.join(', ')}...`);
+    await orchestrator.up(profiles);
+    console.log('All nodes started successfully.');
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (
+      msg.includes('Docker is not running') ||
+      msg.includes('ENOENT') ||
+      msg.includes('ECONNREFUSED') ||
+      msg.includes('socket')
+    ) {
+      throw new Error(
+        `Docker is not available. Please ensure Docker is running and try again. (${msg})`
+      );
+    }
+    throw error;
+  } finally {
+    // Remove SIGINT handler to prevent listener leak after handleUp completes
+    process.removeListener('SIGINT', sigintHandler);
+  }
 }
 
-function handleDown(_config: TownhouseConfig): void {
+async function handleDown(
+  config: TownhouseConfig,
+  docker: Docker
+): Promise<void> {
+  const orchestrator = new DockerOrchestrator(docker, config);
+
+  orchestrator.on(
+    'containerState',
+    (event: { name: string; state: string }) => {
+      console.log(`  ${event.name}: ${event.state}`);
+    }
+  );
+
   console.log('Stopping nodes...');
-  // Full orchestration is Story 21.2
+  await orchestrator.down();
+  console.log('All nodes stopped.');
 }
 
 /**
@@ -151,6 +219,9 @@ export async function main(
       force: { type: 'boolean' },
       config: { type: 'string', short: 'c' },
       'config-dir': { type: 'string' },
+      town: { type: 'boolean' },
+      mill: { type: 'boolean' },
+      dvm: { type: 'boolean' },
     },
     strict: false,
     allowPositionals: true,
@@ -177,20 +248,25 @@ export async function main(
       break;
     }
     case 'status': {
+      const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
+      const config = loadConfig(configPath);
       const docker = dockerInstance ?? new Docker();
-      await handleStatus(docker);
+      await handleStatus(docker, config);
       break;
     }
     case 'up': {
       const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
       const config = loadConfig(configPath);
-      handleUp(config);
+      const docker = dockerInstance ?? new Docker();
+      const profiles = resolveProfiles(values, config);
+      await handleUp(config, profiles, docker);
       break;
     }
     case 'down': {
       const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
       const config = loadConfig(configPath);
-      handleDown(config);
+      const docker = dockerInstance ?? new Docker();
+      await handleDown(config, docker);
       break;
     }
     default: {
