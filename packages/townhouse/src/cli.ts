@@ -25,6 +25,7 @@ import { loadConfig } from './config/loader.js';
 import type { TownhouseConfig } from './config/schema.js';
 import { DockerOrchestrator } from './docker/index.js';
 import type { NodeType } from './docker/types.js';
+import { ConnectorAdminClient } from './connector/index.js';
 
 /**
  * Error thrown when `main()` is invoked with `--help`. Callers (tests) can
@@ -44,7 +45,8 @@ Usage:
   townhouse init [--force] [--config-dir <dir>]  Initialize config
   townhouse up [--town] [--mill] [--dvm] [-c <path>]  Start nodes
   townhouse down [-c <path>]                     Stop all nodes
-  townhouse status                               Show node status
+  townhouse status [-c <path>]                   Show node status
+  townhouse metrics [-c <path>]                  Show connector metrics
   townhouse --help                               Show this help
 
 Flags:
@@ -93,6 +95,59 @@ async function handleStatus(
   for (const s of statuses) {
     const health = s.health ? ` (${s.health})` : '';
     console.log(`  ${s.name.padEnd(12)} ${s.state}${health}`);
+  }
+
+  // Try to include connector metrics (graceful degradation)
+  try {
+    const adminClient = new ConnectorAdminClient(
+      `http://127.0.0.1:${config.connector.adminPort}`
+    );
+    const metrics = await adminClient.getMetrics();
+    const peers = await adminClient.getPeers();
+    const activePeers = peers.filter((p) => p.connected).length;
+
+    console.log('');
+    console.log('Connector Metrics:');
+    console.log('------------------');
+    console.log(`  Packets forwarded: ${metrics.packetsForwarded}`);
+    console.log(`  Active peers:      ${activePeers}/${peers.length}`);
+  } catch {
+    console.log('');
+    console.log('Connector Metrics: unavailable');
+  }
+}
+
+async function handleMetrics(config: TownhouseConfig): Promise<void> {
+  const adminClient = new ConnectorAdminClient(
+    `http://127.0.0.1:${config.connector.adminPort}`
+  );
+
+  try {
+    const metrics = await adminClient.getMetrics();
+    const peers = await adminClient.getPeers();
+
+    console.log('Connector Metrics:');
+    console.log('------------------');
+    console.log(`  Packets forwarded: ${metrics.packetsForwarded}`);
+    console.log(`  Packets rejected:  ${metrics.packetsRejected}`);
+    console.log(`  Bytes sent:        ${metrics.bytesSent}`);
+    console.log('');
+    console.log('Peers:');
+    console.log('------');
+    if (peers.length === 0) {
+      console.log('  No peers connected');
+    } else {
+      for (const peer of peers) {
+        const status = peer.connected ? 'connected' : 'disconnected';
+        console.log(
+          `  ${peer.id.padEnd(12)} ${status}  (${peer.packetsForwarded} packets)`
+        );
+      }
+    }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to fetch connector metrics: ${msg}`);
+    process.exitCode = 1;
   }
 }
 
@@ -267,6 +322,12 @@ export async function main(
       const config = loadConfig(configPath);
       const docker = dockerInstance ?? new Docker();
       await handleDown(config, docker);
+      break;
+    }
+    case 'metrics': {
+      const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
+      const config = loadConfig(configPath);
+      await handleMetrics(config);
       break;
     }
     default: {

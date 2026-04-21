@@ -41,12 +41,22 @@ export interface OrchestratorEvents {
       | 'stopping'
       | 'stopped'
       | 'error';
+    /** Additional context for error states (e.g., error message) */
+    detail?: string;
   };
   /** Emitted during health check polling */
   healthCheck: {
     name: string;
     status: string;
     attempt: number;
+  };
+  /** Emitted before connector restart during peer registration update */
+  connectorRestarting: {
+    reason: string;
+  };
+  /** Emitted after connector restart and health check passes */
+  connectorRestarted: {
+    peers: string[];
   };
 }
 

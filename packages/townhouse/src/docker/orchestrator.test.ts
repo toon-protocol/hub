@@ -852,6 +852,234 @@ describe('DockerOrchestrator', () => {
     });
   });
 
+  // ── Story 21.3: regenerateConnectorConfig, addNode, removeNode ──
+
+  describe('regenerateConnectorConfig() (T-018)', () => {
+    it('stops, removes, and restarts connector with updated env vars', async () => {
+      const callOrder: string[] = [];
+
+      const connectorContainer = {
+        start: vi.fn().mockImplementation(async () => {
+          callOrder.push('start');
+        }),
+        stop: vi.fn().mockImplementation(async () => {
+          callOrder.push('stop');
+        }),
+        remove: vi.fn().mockImplementation(async () => {
+          callOrder.push('remove');
+        }),
+        inspect: vi.fn().mockResolvedValue({
+          State: { Health: { Status: 'healthy' }, Running: true },
+        }),
+      };
+
+      mockDocker.docker.getContainer.mockReturnValue(connectorContainer);
+      mockDocker.docker.createContainer.mockResolvedValue(connectorContainer);
+
+      const config = configWithNodes(['town', 'mill']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+
+      await orchestrator.regenerateConnectorConfig(['town', 'mill']);
+
+      expect(callOrder).toEqual(['stop', 'remove', 'start']);
+    });
+
+    it('emits connectorRestarting and connectorRestarted events', async () => {
+      const events: string[] = [];
+
+      mockDocker.docker.createContainer.mockResolvedValue(
+        mockDocker.mockContainer
+      );
+
+      const config = configWithNodes(['town']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+
+      orchestrator.on('connectorRestarting', () => events.push('restarting'));
+      orchestrator.on('connectorRestarted', () => events.push('restarted'));
+
+      await orchestrator.regenerateConnectorConfig(['town']);
+
+      expect(events).toEqual(['restarting', 'restarted']);
+    });
+
+    it('includes CONNECTOR_PEERS in env vars after regeneration', async () => {
+      mockDocker.docker.createContainer.mockResolvedValue(
+        mockDocker.mockContainer
+      );
+
+      const config = configWithNodes(['town', 'mill']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+
+      await orchestrator.regenerateConnectorConfig(['town', 'mill']);
+
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-connector',
+          Env: expect.arrayContaining([
+            expect.stringMatching(/^CONNECTOR_PEERS=.*town.*mill/),
+          ]),
+        })
+      );
+    });
+  });
+
+  describe('addNode() (T-018)', () => {
+    it('starts new node and regenerates connector config', async () => {
+      const callOrder: string[] = [];
+
+      mockDocker.docker.createContainer.mockImplementation(
+        async (opts: { name: string }) => {
+          callOrder.push(`create:${opts.name}`);
+          return {
+            start: vi.fn().mockImplementation(async () => {
+              callOrder.push(`start:${opts.name}`);
+            }),
+            stop: vi.fn().mockResolvedValue(undefined),
+            remove: vi.fn().mockResolvedValue(undefined),
+            inspect: vi.fn().mockResolvedValue({
+              State: { Health: { Status: 'healthy' }, Running: true },
+            }),
+          };
+        }
+      );
+
+      mockDocker.docker.getContainer.mockReturnValue({
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn().mockResolvedValue(undefined),
+        inspect: vi.fn().mockResolvedValue({
+          State: { Health: { Status: 'healthy' }, Running: true },
+        }),
+      });
+
+      const config = configWithNodes(['town', 'mill']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+
+      await orchestrator.addNode('mill');
+
+      // Should create mill container and then restart connector
+      expect(callOrder).toContain('create:townhouse-mill');
+      expect(callOrder).toContain('create:townhouse-connector');
+    });
+  });
+
+  describe('removeNode() (T-018)', () => {
+    it('stops node and regenerates connector config without it', async () => {
+      const stoppedContainers: string[] = [];
+
+      mockDocker.docker.getContainer.mockImplementation((name: string) => ({
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockImplementation(async () => {
+          stoppedContainers.push(name);
+        }),
+        remove: vi.fn().mockResolvedValue(undefined),
+        inspect: vi.fn().mockResolvedValue({
+          State: { Health: { Status: 'healthy' }, Running: true },
+        }),
+      }));
+
+      mockDocker.docker.createContainer.mockResolvedValue({
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn().mockResolvedValue(undefined),
+        inspect: vi.fn().mockResolvedValue({
+          State: { Health: { Status: 'healthy' }, Running: true },
+        }),
+      });
+
+      const config = configWithNodes(['town', 'mill']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+
+      // Simulate initial state with both nodes active
+      await orchestrator.up(['town', 'mill']);
+      vi.clearAllMocks();
+
+      // Reset mocks for removeNode
+      mockDocker.docker.getContainer.mockImplementation((name: string) => ({
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockImplementation(async () => {
+          stoppedContainers.push(name);
+        }),
+        remove: vi.fn().mockResolvedValue(undefined),
+        inspect: vi.fn().mockResolvedValue({
+          State: { Health: { Status: 'healthy' }, Running: true },
+        }),
+      }));
+
+      mockDocker.docker.createContainer.mockResolvedValue({
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockResolvedValue(undefined),
+        remove: vi.fn().mockResolvedValue(undefined),
+        inspect: vi.fn().mockResolvedValue({
+          State: { Health: { Status: 'healthy' }, Running: true },
+        }),
+      });
+
+      await orchestrator.removeNode('mill');
+
+      // Mill should have been stopped
+      expect(stoppedContainers).toContain('townhouse-mill');
+
+      // Connector should be recreated with only town in peers
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-connector',
+          Env: expect.arrayContaining([
+            expect.stringMatching(/CONNECTOR_PEERS.*town/),
+          ]),
+        })
+      );
+
+      // Verify mill is NOT in the new peers
+      const createCall = mockDocker.docker.createContainer.mock.calls.find(
+        (call: any[]) => call[0].name === 'townhouse-connector'
+      );
+      const envArr = createCall?.[0]?.Env as string[];
+      const peersEnv = envArr?.find((e: string) =>
+        e.startsWith('CONNECTOR_PEERS=')
+      );
+      expect(peersEnv).not.toContain('mill');
+    });
+  });
+
+  // ── T-016: Connector env vars include all active nodes as peers after up() ──
+
+  describe('up() — connector env vars include CONNECTOR_PEERS (T-016)', () => {
+    it('passes CONNECTOR_PEERS with all active nodes to connector container', async () => {
+      const config = configWithNodes(['town', 'mill']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['town', 'mill']);
+
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-connector',
+          Env: expect.arrayContaining([
+            expect.stringMatching(/^CONNECTOR_PEERS=.*town.*mill/),
+            expect.stringMatching(/^CONNECTOR_ILP_ADDRESS=g\.townhouse$/),
+          ]),
+        })
+      );
+    });
+  });
+
   // ── Full up() sequence ──
 
   describe('up() — full startup sequence (AC #1, #3, #4, #6, #7)', () => {

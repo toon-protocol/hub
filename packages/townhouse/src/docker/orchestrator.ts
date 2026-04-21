@@ -9,10 +9,9 @@
 import { EventEmitter } from 'node:events';
 import type Docker from 'dockerode';
 import type { TownhouseConfig } from '../config/schema.js';
+import { ConnectorConfigGenerator } from '../connector/config-generator.js';
+import { CONTAINER_PREFIX } from '../constants.js';
 import type { NodeType, HealthCheckOptions } from './types.js';
-
-/** Container name prefix — must match cli.ts CONTAINER_PREFIX */
-const CONTAINER_PREFIX = 'townhouse-';
 
 /** Docker bridge network name */
 const NETWORK_NAME = 'townhouse-net';
@@ -58,11 +57,14 @@ function normalizeImageTag(image: string): string {
 export class DockerOrchestrator extends EventEmitter {
   private readonly docker: Docker;
   private readonly config: TownhouseConfig;
+  private readonly configGenerator: ConnectorConfigGenerator;
+  private activeNodes: NodeType[] = [];
 
   constructor(docker: Docker, config: TownhouseConfig) {
     super();
     this.docker = docker;
     this.config = config;
+    this.configGenerator = new ConnectorConfigGenerator(config);
   }
 
   /**
@@ -73,6 +75,7 @@ export class DockerOrchestrator extends EventEmitter {
    * 4. Start enabled node containers in parallel
    */
   async up(profiles: NodeType[]): Promise<void> {
+    this.activeNodes = [...profiles];
     await this.ensureNetwork();
     await this.pullImages(profiles);
     await this.startConnector();
@@ -80,6 +83,59 @@ export class DockerOrchestrator extends EventEmitter {
 
     // Start all node containers in parallel
     await Promise.all(profiles.map((type) => this.startNode(type)));
+  }
+
+  /**
+   * Regenerate connector config and restart the connector container
+   * with updated environment variables (peer list).
+   *
+   * Sequence: emit connectorRestarting -> stop -> remove -> create -> start -> health -> emit connectorRestarted
+   */
+  async regenerateConnectorConfig(activeNodes: NodeType[]): Promise<void> {
+    this.activeNodes = [...activeNodes];
+
+    this.emit('connectorRestarting', { reason: 'peer list updated' });
+
+    // Stop and remove existing connector
+    const connectorName = `${CONTAINER_PREFIX}connector`;
+    try {
+      const container = this.docker.getContainer(connectorName);
+      await container.stop({ t: 5 });
+      await container.remove();
+    } catch {
+      // Container may not exist — proceed with creation
+    }
+
+    // Start new connector with updated config
+    await this.startConnector();
+    await this.waitForHealth(connectorName);
+
+    this.emit('connectorRestarted', { peers: activeNodes });
+  }
+
+  /**
+   * Hot-add a node after initial startup.
+   * Starts the node container, then restarts the connector with updated peer list.
+   */
+  async addNode(type: NodeType): Promise<void> {
+    if (!this.activeNodes.includes(type)) {
+      this.activeNodes.push(type);
+    }
+
+    await this.startNode(type);
+    await this.regenerateConnectorConfig(this.activeNodes);
+  }
+
+  /**
+   * Hot-remove a node.
+   * Stops the node container, then restarts the connector with updated peer list.
+   */
+  async removeNode(type: NodeType): Promise<void> {
+    this.activeNodes = this.activeNodes.filter((n) => n !== type);
+
+    const containerName = `${CONTAINER_PREFIX}${type}`;
+    await this.stopAndRemove(containerName);
+    await this.regenerateConnectorConfig(this.activeNodes);
   }
 
   /**
@@ -304,7 +360,7 @@ export class DockerOrchestrator extends EventEmitter {
         NetworkMode: NETWORK_NAME,
         PortBindings: {
           [`${this.config.connector.adminPort}/tcp`]: [
-            { HostPort: String(this.config.connector.adminPort) },
+            { HostIp: '127.0.0.1', HostPort: String(this.config.connector.adminPort) },
           ],
         },
       },
@@ -423,21 +479,11 @@ export class DockerOrchestrator extends EventEmitter {
 
   /**
    * Build environment variables for the connector container.
+   * Delegates to ConnectorConfigGenerator for consistent config generation.
    */
   private buildConnectorEnv(): string[] {
-    const env: string[] = [
-      `CONNECTOR_ADMIN_PORT=${this.config.connector.adminPort}`,
-      `TRANSPORT_MODE=${this.config.transport.mode}`,
-    ];
-
-    if (
-      this.config.transport.mode === 'ator' &&
-      this.config.transport.socksProxy
-    ) {
-      env.push(`SOCKS_PROXY=${this.config.transport.socksProxy}`);
-    }
-
-    return env;
+    const runtimeConfig = this.configGenerator.generate(this.activeNodes);
+    return this.configGenerator.toEnvArray(runtimeConfig);
   }
 
   /**

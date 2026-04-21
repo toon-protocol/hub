@@ -320,6 +320,158 @@ describe('CLI', () => {
     });
   });
 
+  // ── Story 21.3: metrics command ──
+
+  describe('metrics command (Story 21.3)', () => {
+    it('help text documents the metrics command', async () => {
+      await expect(main(['--help'])).rejects.toThrow(CliHelpRequested);
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(output).toContain('metrics');
+    });
+
+    it('metrics command calls connector admin API', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+
+      // Mock global fetch for admin client
+      const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/metrics')) {
+          return {
+            ok: true,
+            json: async () => ({
+              packetsForwarded: 100,
+              packetsRejected: 5,
+              bytesSent: 2000,
+            }),
+          };
+        }
+        if (url.includes('/peers')) {
+          return {
+            ok: true,
+            json: async () => [
+              { id: 'town', connected: true, packetsForwarded: 80 },
+            ],
+          };
+        }
+        return { ok: true, json: async () => ({}) };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['metrics', '-c', configPath]);
+
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('Packets forwarded');
+        expect(output).toContain('100');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('metrics command shows error when connector not running', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValue(new Error('fetch failed: ECONNREFUSED'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['metrics', '-c', configPath]);
+
+        const output = consoleErrorSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('Failed to fetch connector metrics');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // ── Story 21.3: enhanced status with connector metrics (Task 4.2, AC #4) ──
+
+  describe('status command — enhanced with connector metrics (Story 21.3)', () => {
+    it('shows connector metrics when admin API is reachable', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+
+      const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/metrics')) {
+          return {
+            ok: true,
+            json: async () => ({
+              packetsForwarded: 250,
+              packetsRejected: 3,
+              bytesSent: 8000,
+            }),
+          };
+        }
+        if (url.includes('/peers')) {
+          return {
+            ok: true,
+            json: async () => [
+              { id: 'town', connected: true, packetsForwarded: 200 },
+              { id: 'mill', connected: false, packetsForwarded: 50 },
+            ],
+          };
+        }
+        return { ok: true, json: async () => ({}) };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['status', '-c', configPath]);
+
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('Connector Metrics');
+        expect(output).toContain('Packets forwarded');
+        expect(output).toContain('250');
+        expect(output).toContain('Active peers');
+        expect(output).toContain('1/2');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('gracefully degrades when connector admin API is unreachable', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValue(new Error('fetch failed: ECONNREFUSED'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['status', '-c', configPath]);
+
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        // Should still show node status
+        expect(output).toContain('Node Status');
+        // Should show metrics unavailable, not throw
+        expect(output).toContain('unavailable');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('up/down with missing config', () => {
     it('up throws when config file does not exist', async () => {
       await expect(

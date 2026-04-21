@@ -29,3 +29,12 @@ export type {
   OrchestratorEvents,
   HealthCheckOptions,
 } from './docker/index.js';
+
+export { ConnectorConfigGenerator, ConnectorAdminClient } from './connector/index.js';
+export type {
+  ConnectorRuntimeConfig,
+  PeerEntry,
+  HealthResponse,
+  MetricsResponse,
+  PeerStatus,
+} from './connector/index.js';
