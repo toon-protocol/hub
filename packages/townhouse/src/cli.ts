@@ -26,6 +26,13 @@ import type { TownhouseConfig } from './config/schema.js';
 import { DockerOrchestrator } from './docker/index.js';
 import type { NodeType } from './docker/types.js';
 import { ConnectorAdminClient } from './connector/index.js';
+import {
+  WalletManager,
+  encryptWallet,
+  decryptWallet,
+  saveWallet,
+  loadWallet,
+} from './wallet/index.js';
 
 /**
  * Error thrown when `main()` is invoked with `--help`. Callers (tests) can
@@ -42,23 +49,29 @@ export class CliHelpRequested extends Error {
 const HELP_TEXT = `townhouse — TOON node orchestrator
 
 Usage:
-  townhouse init [--force] [--config-dir <dir>]  Initialize config
-  townhouse up [--town] [--mill] [--dvm] [-c <path>]  Start nodes
+  townhouse init [--force] [--config-dir <dir>] [--password <pw>]  Initialize config + wallet
+  townhouse up [--town] [--mill] [--dvm] [-c <path>] [--password <pw>]  Start nodes
   townhouse down [-c <path>]                     Stop all nodes
   townhouse status [-c <path>]                   Show node status
   townhouse metrics [-c <path>]                  Show connector metrics
+  townhouse wallet show [-c <path>] [--password <pw>]  Show derived addresses
   townhouse --help                               Show this help
 
 Flags:
-  --town   Start Town (Nostr relay) node
-  --mill   Start Mill (swap) node
-  --dvm    Start DVM (compute) node
+  --town       Start Town (Nostr relay) node
+  --mill       Start Mill (swap) node
+  --dvm        Start DVM (compute) node
+  --password   Wallet password (non-interactive mode)
   If no flags given, starts all enabled nodes from config.`;
 
 const DEFAULT_CONFIG_DIR = join(homedir(), '.townhouse');
 const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, 'config.yaml');
 
-function handleInit(force: boolean, configDir?: string): void {
+async function handleInit(
+  force: boolean,
+  configDir?: string,
+  password?: string
+): Promise<void> {
   const dir = resolve(configDir ?? DEFAULT_CONFIG_DIR);
   const configPath = join(dir, 'config.yaml');
 
@@ -81,6 +94,111 @@ function handleInit(force: boolean, configDir?: string): void {
   });
 
   console.log(`Config created at ${configPath}`);
+
+  // Generate wallet — use config dir for wallet path (overrides default home dir path)
+  const walletPath = join(dir, 'wallet.enc');
+  if (existsSync(walletPath) && !force) {
+    console.log(
+      `Wallet already exists at ${walletPath}. Skipping wallet generation.`
+    );
+    return;
+  }
+
+  const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
+  if (!walletPassword) {
+    console.error(
+      'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const walletManager = new WalletManager({ encryptedPath: walletPath });
+  const { mnemonic } = walletManager.generate();
+
+  // Display mnemonic ONCE for backup — this is the only place it ever appears
+  console.log('');
+  console.log('=== IMPORTANT: Back up your seed phrase ===');
+  console.log('');
+  console.log(`  ${mnemonic}`);
+  console.log('');
+  console.log('This is the ONLY time your seed phrase will be shown.');
+  console.log('Store it safely. You will need it to recover your node keys.');
+  console.log('============================================');
+  console.log('');
+
+  // Encrypt and save — mnemonic reference is not stored beyond this block
+  const encrypted = encryptWallet(mnemonic, walletPassword);
+  await saveWallet(walletPath, encrypted);
+  console.log(`Wallet saved to ${walletPath}`);
+
+  // Display derived addresses
+  console.log('');
+  console.log('Derived Node Addresses:');
+  console.log('-----------------------');
+  const allKeys = walletManager.getAllKeys();
+  for (const info of allKeys) {
+    console.log(`  ${info.nodeType.padEnd(6)} Nostr: ${info.nostrPubkey}`);
+    console.log(`  ${''.padEnd(6)} EVM:   ${info.evmAddress}`);
+  }
+
+  // Zero key material
+  walletManager.lock();
+}
+
+async function handleWalletShow(
+  config: TownhouseConfig,
+  password?: string
+): Promise<void> {
+  const walletPath = config.wallet.encrypted_path;
+  const result = await loadWallet(walletPath);
+
+  if (!result) {
+    console.error('No wallet found. Run `townhouse init` first.');
+    process.exitCode = 1;
+    return;
+  }
+
+  if (result.permissionsWarning) {
+    console.error(result.permissionsWarning);
+  }
+
+  const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
+  if (!walletPassword) {
+    console.error(
+      'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const walletManager = new WalletManager({ encryptedPath: walletPath });
+  try {
+    // Decrypt mnemonic in minimal scope — fromMnemonic derives keys then
+    // the mnemonic string becomes unreachable (eligible for GC)
+    walletManager.fromMnemonic(decryptWallet(result.wallet, walletPassword));
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to decrypt wallet: ${msg}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(
+    'Node Type  | Nostr Pubkey                                                     | EVM Address                                | Derivation Path'
+  );
+  console.log(
+    '-----------|------------------------------------------------------------------|--------------------------------------------|--------------------------'
+  );
+  const allKeys = walletManager.getAllKeys();
+  for (const info of allKeys) {
+    console.log(
+      `${info.nodeType.padEnd(10)} | ${info.nostrPubkey} | ${info.evmAddress} | ${info.nostrDerivationPath}`
+    );
+  }
+
+  // Zero key material immediately after display
+  walletManager.lock();
 }
 
 async function handleStatus(
@@ -277,6 +395,7 @@ export async function main(
       town: { type: 'boolean' },
       mill: { type: 'boolean' },
       dvm: { type: 'boolean' },
+      password: { type: 'string' },
     },
     strict: false,
     allowPositionals: true,
@@ -296,10 +415,25 @@ export async function main(
 
   switch (command) {
     case 'init': {
-      handleInit(
+      await handleInit(
         values.force === true,
-        values['config-dir'] as string | undefined
+        values['config-dir'] as string | undefined,
+        values.password as string | undefined
       );
+      break;
+    }
+    case 'wallet': {
+      const subCommand = positionals[1];
+      if (subCommand === 'show') {
+        const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
+        const config = loadConfig(configPath);
+        await handleWalletShow(config, values.password as string | undefined);
+      } else {
+        console.error(
+          'Usage: townhouse wallet show [-c <path>] [--password <pw>]'
+        );
+        process.exitCode = 1;
+      }
       break;
     }
     case 'status': {

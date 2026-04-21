@@ -116,10 +116,14 @@ describe('DockerOrchestrator — Connector Integration (Story 21.3)', () => {
         (c: any[]) => c[0].name === 'townhouse-connector'
       );
       const envArray: string[] = connectorCall![0].Env;
-      const peersEnv = envArray.find((e: string) => e.startsWith('CONNECTOR_PEERS='));
+      const peersEnv = envArray.find((e: string) =>
+        e.startsWith('CONNECTOR_PEERS=')
+      );
       const peers = JSON.parse(peersEnv!.replace('CONNECTOR_PEERS=', ''));
       expect(peers).toHaveLength(2);
-      expect(peers.map((p: any) => p.id)).toEqual(expect.arrayContaining(['town', 'mill']));
+      expect(peers.map((p: any) => p.id)).toEqual(
+        expect.arrayContaining(['town', 'mill'])
+      );
     });
 
     it('passes CONNECTOR_ILP_ADDRESS env var to connector', async () => {
@@ -180,7 +184,9 @@ describe('DockerOrchestrator — Connector Integration (Story 21.3)', () => {
       const container = {
         start: vi.fn().mockImplementation(async () => callOrder.push('start')),
         stop: vi.fn().mockImplementation(async () => callOrder.push('stop')),
-        remove: vi.fn().mockImplementation(async () => callOrder.push('remove')),
+        remove: vi
+          .fn()
+          .mockImplementation(async () => callOrder.push('remove')),
         inspect: vi.fn().mockResolvedValue({
           State: { Health: { Status: 'healthy' }, Running: true },
         }),
@@ -215,7 +221,9 @@ describe('DockerOrchestrator — Connector Integration (Story 21.3)', () => {
         .filter((c: any[]) => c[0].name === 'townhouse-connector')
         .pop();
       const envArray: string[] = lastConnectorCall![0].Env;
-      const peersEnv = envArray.find((e: string) => e.startsWith('CONNECTOR_PEERS='));
+      const peersEnv = envArray.find((e: string) =>
+        e.startsWith('CONNECTOR_PEERS=')
+      );
       const peers = JSON.parse(peersEnv!.replace('CONNECTOR_PEERS=', ''));
       expect(peers).toHaveLength(2);
     });
@@ -290,7 +298,7 @@ describe('DockerOrchestrator — Connector Integration (Story 21.3)', () => {
 
     it('includes the new node in the regenerated connector peer list', async () => {
       mockDocker.docker.createContainer.mockImplementation(
-        async (opts: { name: string }) => ({
+        async (_opts: { name: string }) => ({
           start: vi.fn().mockResolvedValue(undefined),
           stop: vi.fn().mockResolvedValue(undefined),
           remove: vi.fn().mockResolvedValue(undefined),
@@ -322,7 +330,9 @@ describe('DockerOrchestrator — Connector Integration (Story 21.3)', () => {
         .filter((c: any[]) => c[0].name === 'townhouse-connector')
         .pop();
       const envArray: string[] = lastConnectorCall![0].Env;
-      const peersEnv = envArray.find((e: string) => e.startsWith('CONNECTOR_PEERS='));
+      const peersEnv = envArray.find((e: string) =>
+        e.startsWith('CONNECTOR_PEERS=')
+      );
       const peers = JSON.parse(peersEnv!.replace('CONNECTOR_PEERS=', ''));
       expect(peers.map((p: any) => p.id)).toContain('mill');
     });
@@ -377,7 +387,7 @@ describe('DockerOrchestrator — Connector Integration (Story 21.3)', () => {
       }));
 
       mockDocker.docker.createContainer.mockImplementation(
-        async (opts: { name: string }) => ({
+        async (_opts: { name: string }) => ({
           start: vi.fn().mockResolvedValue(undefined),
           stop: vi.fn().mockResolvedValue(undefined),
           remove: vi.fn().mockResolvedValue(undefined),
@@ -401,7 +411,9 @@ describe('DockerOrchestrator — Connector Integration (Story 21.3)', () => {
         .filter((c: any[]) => c[0].name === 'townhouse-connector')
         .pop();
       const envArray: string[] = lastConnectorCall![0].Env;
-      const peersEnv = envArray.find((e: string) => e.startsWith('CONNECTOR_PEERS='));
+      const peersEnv = envArray.find((e: string) =>
+        e.startsWith('CONNECTOR_PEERS=')
+      );
       const peers = JSON.parse(peersEnv!.replace('CONNECTOR_PEERS=', ''));
       expect(peers).toHaveLength(1);
       expect(peers[0].id).toBe('town');
@@ -505,7 +517,9 @@ describe('DockerOrchestrator — Connector Integration (Story 21.3)', () => {
       await orchestrator.regenerateConnectorConfig(['town']);
 
       expect(events).toContain('restarted');
-      expect(events.indexOf('restarting')).toBeLessThan(events.indexOf('restarted'));
+      expect(events.indexOf('restarting')).toBeLessThan(
+        events.indexOf('restarted')
+      );
     });
   });
 });

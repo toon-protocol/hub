@@ -241,7 +241,9 @@ describe('ConnectorConfigGenerator', () => {
       expect(envArray).toContain('CONNECTOR_ADMIN_PORT=9401');
       expect(envArray).toContain('CONNECTOR_ILP_ADDRESS=g.townhouse');
       expect(envArray).toContain('TRANSPORT_MODE=direct');
-      expect(envArray.some((e: string) => e.startsWith('CONNECTOR_PEERS='))).toBe(true);
+      expect(
+        envArray.some((e: string) => e.startsWith('CONNECTOR_PEERS='))
+      ).toBe(true);
     });
 
     it('returns string[] compatible with dockerode Env option', () => {

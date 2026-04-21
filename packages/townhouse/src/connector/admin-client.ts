@@ -106,9 +106,7 @@ export class ConnectorAdminClient {
           );
         }
         const msg = error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `Connector admin API connection refused: ${msg}`
-        );
+        throw new Error(`Connector admin API connection refused: ${msg}`);
       }
 
       if (!response.ok) {

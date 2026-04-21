@@ -37,7 +37,10 @@ describe('ConnectorAdminClient', () => {
 
       expect(health.status).toBe('healthy');
       expect(health.uptime).toBe(120);
-      expect(fetchMock).toHaveBeenCalledWith('http://localhost:9401/health', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:9401/health',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     it('throws when connector is not running (connection refused)', async () => {
@@ -88,7 +91,10 @@ describe('ConnectorAdminClient', () => {
       expect(metrics.packetsForwarded).toBe(1500);
       expect(metrics.packetsRejected).toBe(12);
       expect(metrics.bytesSent).toBe(45000);
-      expect(fetchMock).toHaveBeenCalledWith('http://localhost:9401/metrics', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:9401/metrics',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     it('throws when connector is not running', async () => {
@@ -124,7 +130,10 @@ describe('ConnectorAdminClient', () => {
         connected: true,
         packetsForwarded: 700,
       });
-      expect(fetchMock).toHaveBeenCalledWith('http://localhost:9401/peers', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:9401/peers',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     it('returns empty array when no peers are connected', async () => {
@@ -158,7 +167,10 @@ describe('ConnectorAdminClient', () => {
       const client = new ConnectorAdminClient('http://localhost:9401');
       await client.getHealth();
 
-      expect(fetchMock).toHaveBeenCalledWith('http://localhost:9401/health', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:9401/health',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
 
     it('strips trailing slash from base URL', async () => {
@@ -171,7 +183,10 @@ describe('ConnectorAdminClient', () => {
       await client.getHealth();
 
       // Should not produce double-slash URL
-      expect(fetchMock).toHaveBeenCalledWith('http://localhost:9401/health', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:9401/health',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     });
   });
 });

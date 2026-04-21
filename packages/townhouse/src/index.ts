@@ -30,7 +30,10 @@ export type {
   HealthCheckOptions,
 } from './docker/index.js';
 
-export { ConnectorConfigGenerator, ConnectorAdminClient } from './connector/index.js';
+export {
+  ConnectorConfigGenerator,
+  ConnectorAdminClient,
+} from './connector/index.js';
 export type {
   ConnectorRuntimeConfig,
   PeerEntry,
@@ -38,3 +41,13 @@ export type {
   MetricsResponse,
   PeerStatus,
 } from './connector/index.js';
+
+export { WalletManager } from './wallet/index.js';
+export type {
+  WalletManagerConfig,
+  WalletState,
+  NodeKeys,
+  DerivedNodeKeys,
+  NodeKeyInfo,
+  EncryptedWallet,
+} from './wallet/index.js';

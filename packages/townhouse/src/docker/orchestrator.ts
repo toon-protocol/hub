@@ -12,6 +12,7 @@ import type { TownhouseConfig } from '../config/schema.js';
 import { ConnectorConfigGenerator } from '../connector/config-generator.js';
 import { CONTAINER_PREFIX } from '../constants.js';
 import type { NodeType, HealthCheckOptions } from './types.js';
+import type { WalletManager } from '../wallet/index.js';
 
 /** Docker bridge network name */
 const NETWORK_NAME = 'townhouse-net';
@@ -58,13 +59,19 @@ export class DockerOrchestrator extends EventEmitter {
   private readonly docker: Docker;
   private readonly config: TownhouseConfig;
   private readonly configGenerator: ConnectorConfigGenerator;
+  private readonly walletManager: WalletManager | undefined;
   private activeNodes: NodeType[] = [];
 
-  constructor(docker: Docker, config: TownhouseConfig) {
+  constructor(
+    docker: Docker,
+    config: TownhouseConfig,
+    walletManager?: WalletManager
+  ) {
     super();
     this.docker = docker;
     this.config = config;
     this.configGenerator = new ConnectorConfigGenerator(config);
+    this.walletManager = walletManager;
   }
 
   /**
@@ -360,7 +367,10 @@ export class DockerOrchestrator extends EventEmitter {
         NetworkMode: NETWORK_NAME,
         PortBindings: {
           [`${this.config.connector.adminPort}/tcp`]: [
-            { HostIp: '127.0.0.1', HostPort: String(this.config.connector.adminPort) },
+            {
+              HostIp: '127.0.0.1',
+              HostPort: String(this.config.connector.adminPort),
+            },
           ],
         },
       },
@@ -488,6 +498,7 @@ export class DockerOrchestrator extends EventEmitter {
 
   /**
    * Build environment variables for a node container.
+   * If a WalletManager is provided, injects per-node identity keys.
    */
   private buildNodeEnv(type: NodeType): string[] {
     // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket -- Docker-internal container-to-container URL, TLS unnecessary
@@ -515,6 +526,20 @@ export class DockerOrchestrator extends EventEmitter {
           env.push(`FEE_PER_JOB=${feePerJob}`);
         }
         break;
+      }
+    }
+
+    // Inject wallet-derived identity keys if available
+    if (this.walletManager) {
+      try {
+        const keys = this.walletManager.getNodeKeys(type);
+        env.push(`NODE_NOSTR_PUBKEY=${keys.nostrPubkey}`);
+        env.push(`NODE_EVM_ADDRESS=${keys.evmAddress}`);
+        // Secret key as hex for the container to use for event signing
+        const secretHex = Buffer.from(keys.nostrSecretKey).toString('hex');
+        env.push(`NODE_NOSTR_SECRET_KEY=${secretHex}`);
+      } catch {
+        // Wallet not initialized — skip key injection (backward compatible)
       }
     }
 

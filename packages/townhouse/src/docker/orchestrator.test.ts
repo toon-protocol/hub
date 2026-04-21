@@ -1149,4 +1149,145 @@ describe('DockerOrchestrator', () => {
       );
     });
   });
+
+  // ── Story 21.4: Wallet key injection into node containers (AC #3, #4, Task 5) ──
+
+  describe('WalletManager integration (Story 21.4, AC #3, #4)', () => {
+    it('injects NODE_NOSTR_PUBKEY, NODE_EVM_ADDRESS, NODE_NOSTR_SECRET_KEY when wallet provided', async () => {
+      const { WalletManager } = await import('../wallet/manager.js');
+
+      const walletManager = new WalletManager({
+        encryptedPath: '/tmp/test.enc',
+      });
+      walletManager.fromMnemonic(
+        'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+      );
+
+      const config = configWithNodes(['town']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config,
+        walletManager
+      );
+      await orchestrator.up(['town']);
+
+      // Town container should have wallet-derived keys injected
+      const townKeys = walletManager.getNodeKeys('town');
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-town',
+          Env: expect.arrayContaining([
+            `NODE_NOSTR_PUBKEY=${townKeys.nostrPubkey}`,
+            `NODE_EVM_ADDRESS=${townKeys.evmAddress}`,
+            expect.stringMatching(/^NODE_NOSTR_SECRET_KEY=[0-9a-f]{64}$/),
+          ]),
+        })
+      );
+    });
+
+    it('injects different keys for different node types', async () => {
+      const { WalletManager } = await import('../wallet/manager.js');
+
+      const walletManager = new WalletManager({
+        encryptedPath: '/tmp/test.enc',
+      });
+      walletManager.fromMnemonic(
+        'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+      );
+
+      const config = configWithNodes(['town', 'mill']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config,
+        walletManager
+      );
+      await orchestrator.up(['town', 'mill']);
+
+      const townKeys = walletManager.getNodeKeys('town');
+      const millKeys = walletManager.getNodeKeys('mill');
+
+      // Town container gets town keys
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-town',
+          Env: expect.arrayContaining([
+            `NODE_NOSTR_PUBKEY=${townKeys.nostrPubkey}`,
+            `NODE_EVM_ADDRESS=${townKeys.evmAddress}`,
+          ]),
+        })
+      );
+
+      // Mill container gets mill keys (different from town)
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-mill',
+          Env: expect.arrayContaining([
+            `NODE_NOSTR_PUBKEY=${millKeys.nostrPubkey}`,
+            `NODE_EVM_ADDRESS=${millKeys.evmAddress}`,
+          ]),
+        })
+      );
+
+      // Verify keys are actually different
+      expect(townKeys.nostrPubkey).not.toBe(millKeys.nostrPubkey);
+      expect(townKeys.evmAddress).not.toBe(millKeys.evmAddress);
+    });
+
+    it('does NOT inject wallet keys when no WalletManager provided (backward compatible)', async () => {
+      const config = configWithNodes(['town']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+        // No walletManager argument
+      );
+      await orchestrator.up(['town']);
+
+      // Town container should NOT have wallet env vars
+      const createCalls = mockDocker.docker.createContainer.mock.calls;
+      const townCall = createCalls.find(
+        (call: any[]) => call[0].name === 'townhouse-town'
+      );
+      expect(townCall).toBeDefined();
+      const townEnv = townCall![0].Env as string[];
+      expect(
+        townEnv.some((e: string) => e.startsWith('NODE_NOSTR_PUBKEY='))
+      ).toBe(false);
+      expect(
+        townEnv.some((e: string) => e.startsWith('NODE_EVM_ADDRESS='))
+      ).toBe(false);
+      expect(
+        townEnv.some((e: string) => e.startsWith('NODE_NOSTR_SECRET_KEY='))
+      ).toBe(false);
+    });
+
+    it('continues without key injection if wallet is locked (not initialized)', async () => {
+      const { WalletManager } = await import('../wallet/manager.js');
+
+      const walletManager = new WalletManager({
+        encryptedPath: '/tmp/test.enc',
+      });
+      // Do NOT call fromMnemonic — wallet is not initialized
+
+      const config = configWithNodes(['town']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config,
+        walletManager
+      );
+
+      // Should not throw — graceful fallback
+      await expect(orchestrator.up(['town'])).resolves.toBeUndefined();
+
+      // Town container should NOT have wallet env vars (getNodeKeys throws, caught silently)
+      const createCalls = mockDocker.docker.createContainer.mock.calls;
+      const townCall = createCalls.find(
+        (call: any[]) => call[0].name === 'townhouse-town'
+      );
+      expect(townCall).toBeDefined();
+      const townEnv = townCall![0].Env as string[];
+      expect(
+        townEnv.some((e: string) => e.startsWith('NODE_NOSTR_PUBKEY='))
+      ).toBe(false);
+    });
+  });
 });
