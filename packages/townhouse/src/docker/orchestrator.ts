@@ -188,11 +188,21 @@ export class DockerOrchestrator extends EventEmitter {
   /**
    * Return status for all townhouse containers.
    */
-  async status(): Promise<{ name: string; state: string; health?: string }[]> {
+  async status(): Promise<{
+    name: string;
+    state: string;
+    health?: string;
+    startedAt?: string;
+  }[]> {
     const containers = await this.docker.listContainers({ all: true });
     const allTypes = ['connector', 'town', 'mill', 'dvm'] as const;
 
-    const results: { name: string; state: string; health?: string }[] = [];
+    const results: {
+      name: string;
+      state: string;
+      health?: string;
+      startedAt?: string;
+    }[] = [];
     for (const type of allTypes) {
       const containerName = `${CONTAINER_PREFIX}${type}`;
       const info = containers.find((c) =>
@@ -204,18 +214,21 @@ export class DockerOrchestrator extends EventEmitter {
       }
 
       let health: string | undefined;
+      let startedAt: string | undefined;
       try {
         const container = this.docker.getContainer(containerName);
         const detail = await container.inspect();
         health = detail.State?.Health?.Status ?? undefined;
+        startedAt = detail.State?.StartedAt ?? undefined;
       } catch {
-        // Inspect may fail if container is being removed — skip health
+        // Inspect may fail if container is being removed — skip health and startedAt
       }
 
       results.push({
         name: type,
         state: info.State ?? 'stopped',
         ...(health !== undefined ? { health } : {}),
+        ...(startedAt !== undefined ? { startedAt } : {}),
       });
     }
     return results;

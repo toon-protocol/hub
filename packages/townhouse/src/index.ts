@@ -18,6 +18,7 @@ export type {
 export {
   getDefaultConfig,
   loadConfig,
+  saveConfig,
   validateConfig,
   ConfigValidationError,
 } from './config/index.js';
@@ -51,3 +52,6 @@ export type {
   NodeKeyInfo,
   EncryptedWallet,
 } from './wallet/index.js';
+
+export { createApiServer } from './api/index.js';
+export type { ApiServer, ApiDeps } from './api/index.js';

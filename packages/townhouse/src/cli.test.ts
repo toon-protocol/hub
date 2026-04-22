@@ -78,7 +78,8 @@ function makeTempDir(): string {
 
 /** Standard config YAML with specific nodes enabled */
 function makeConfig(
-  enabled: { town?: boolean; mill?: boolean; dvm?: boolean } = {}
+  enabled: { town?: boolean; mill?: boolean; dvm?: boolean } = {},
+  walletPath = '/tmp/wallet.enc'
 ): string {
   return `
 nodes:
@@ -92,7 +93,7 @@ nodes:
     enabled: ${enabled.dvm ?? false}
     feePerJob: 5000
 wallet:
-  encrypted_path: /tmp/wallet.enc
+  encrypted_path: ${walletPath}
 connector:
   image: ghcr.io/toon-protocol/connector:latest
   adminPort: 9401
@@ -235,6 +236,53 @@ describe('CLI', () => {
         expect(output).toContain('town');
         expect(output).toContain('started successfully');
       } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // Story 21.8 Task 8.3 — `up --dry-run` wires the API factory without
+    // starting containers or binding a listening socket. Asserts that the
+    // API deps are constructed with the expected configPath, host/port, and
+    // connector-admin base URL.
+    it('up --dry-run wires API factory without starting containers or listening', async () => {
+      const { WalletManager, encryptWallet, saveWallet } =
+        await import('./wallet/index.js');
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+      const walletPath = join(dir, 'wallet.enc');
+
+      // Seed a wallet so dry-run exercises the full API wiring path.
+      const wm = new WalletManager({ encryptedPath: walletPath });
+      const { mnemonic } = wm.generate();
+      await saveWallet(walletPath, encryptWallet(mnemonic, 'test-pw'));
+      wm.lock();
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = 'test-pw';
+
+      try {
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true }, walletPath),
+          'utf-8'
+        );
+
+        await main(['up', '--town', '--dry-run', '-c', configPath]);
+
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+
+        // Assert dry-run skipped container startup.
+        expect(output).toContain('[dry-run] Skipped orchestrator.up()');
+
+        // Assert API factory was invoked with the expected deps.
+        expect(output).toMatch(
+          /\[dry-run\] API factory invoked: configPath=.+ host=127\.0\.0\.1 port=9400 connectorAdmin=http:\/\/127\.0\.0\.1:\d+ wallet=WalletManager/
+        );
+
+        // Assert no "listening on" banner (server was not bound).
+        expect(output).not.toContain('[Townhouse API] listening on');
+      } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });

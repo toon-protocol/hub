@@ -26,6 +26,8 @@ import type { TownhouseConfig } from './config/schema.js';
 import { DockerOrchestrator } from './docker/index.js';
 import type { NodeType } from './docker/types.js';
 import { ConnectorAdminClient } from './connector/index.js';
+import { createApiServer } from './api/server.js';
+import type { ApiServer } from './api/index.js';
 import {
   WalletManager,
   encryptWallet,
@@ -296,9 +298,12 @@ function resolveProfiles(
 }
 
 async function handleUp(
+  configPath: string,
   config: TownhouseConfig,
   profiles: NodeType[],
-  docker: Docker
+  docker: Docker,
+  password?: string,
+  dryRun = false
 ): Promise<void> {
   if (profiles.length === 0) {
     console.log(
@@ -307,7 +312,43 @@ async function handleUp(
     return;
   }
 
-  const orchestrator = new DockerOrchestrator(docker, config);
+  // Initialize wallet (Round-2 Decision D1:c).
+  // The API's GET /wallet depends on an unlocked wallet. If a wallet file
+  // exists on disk it MUST be unlockable (fail-fast on bad password). If no
+  // wallet file exists, we log a warning and skip API startup entirely so
+  // orchestration-only callers (CI, tooling, smoke tests) still work.
+  const walletPath = config.wallet.encrypted_path;
+  let walletManager: WalletManager | undefined;
+  let skipApi = false;
+  if (!existsSync(walletPath)) {
+    console.warn(
+      `[Townhouse] No wallet found at ${walletPath}; API server will not start. Run \`townhouse init\` and restart to enable the API.`
+    );
+    skipApi = true;
+  } else {
+    const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
+    if (!walletPassword) {
+      throw new Error(
+        'Wallet password required to start the API. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
+      );
+    }
+    const loaded = await loadWallet(walletPath);
+    if (!loaded) {
+      throw new Error(`Wallet at ${walletPath} could not be read.`);
+    }
+    if (loaded.permissionsWarning) {
+      console.error(loaded.permissionsWarning);
+    }
+    walletManager = new WalletManager({ encryptedPath: walletPath });
+    try {
+      walletManager.fromMnemonic(decryptWallet(loaded.wallet, walletPassword));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to decrypt wallet: ${msg}`);
+    }
+  }
+
+  const orchestrator = new DockerOrchestrator(docker, config, walletManager);
 
   // Wire up progress reporting
   orchestrator.on(
@@ -324,9 +365,23 @@ async function handleUp(
     }
   );
 
+  // API server reference for graceful shutdown
+  let apiServer: ApiServer | undefined;
+
   // Register SIGINT handler for graceful shutdown
   const sigintHandler = async () => {
     console.log('\nReceived SIGINT, shutting down gracefully...');
+
+    // Close API server first
+    if (apiServer) {
+      try {
+        await apiServer.close();
+      } catch {
+        // Best-effort
+      }
+    }
+
+    // Then stop containers
     try {
       await orchestrator.down();
     } catch {
@@ -336,10 +391,80 @@ async function handleUp(
   };
   process.on('SIGINT', sigintHandler);
 
+  // For SIGTERM
+  const sigtermHandler = async () => {
+    console.log('\nReceived SIGTERM, shutting down gracefully...');
+
+    if (apiServer) {
+      try {
+        await apiServer.close();
+      } catch {
+        // Best-effort
+      }
+    }
+
+    try {
+      await orchestrator.down();
+    } catch {
+      // Best-effort cleanup
+    }
+    process.exit(0);
+  };
+  process.on('SIGTERM', sigtermHandler);
+
+  // Track if the server started successfully (handlers stay registered if true)
+  let serverStarted = false;
+
   try {
     console.log(`Starting nodes: ${profiles.join(', ')}...`);
-    await orchestrator.up(profiles);
-    console.log('All nodes started successfully.');
+    if (!dryRun) {
+      await orchestrator.up(profiles);
+      console.log('All nodes started successfully.');
+    } else {
+      console.log('[dry-run] Skipped orchestrator.up()');
+    }
+
+    // Start API server after nodes are up (skipped when no wallet file exists)
+    if (!skipApi && walletManager) {
+      const connectorAdmin = new ConnectorAdminClient(
+        `http://127.0.0.1:${config.connector.adminPort}`
+      );
+
+      const apiDeps = {
+        configPath,
+        config,
+        orchestrator,
+        wallet: walletManager,
+        connectorAdmin,
+      };
+
+      apiServer = await createApiServer(apiDeps);
+
+      const { host, port } = config.api;
+      if (!dryRun) {
+        await apiServer.app.listen({
+          host: host ?? '127.0.0.1',
+          port: port ?? 9400,
+        });
+        serverStarted = true;
+
+        console.log(
+          `\n[Townhouse API] listening on http://${host ?? '127.0.0.1'}:${port ?? 9400}`
+        );
+        console.log(
+          '  GET /nodes, GET /nodes/:type, PATCH /nodes/:type/config, GET /wallet, WS /metrics'
+        );
+      } else {
+        // Log a structured summary for the dry-run smoke test (Task 8.3).
+        console.log(
+          `[dry-run] API factory invoked: configPath=${configPath} host=${host ?? '127.0.0.1'} port=${port ?? 9400} connectorAdmin=http://127.0.0.1:${config.connector.adminPort} wallet=WalletManager`
+        );
+        await apiServer.close();
+        apiServer = undefined;
+      }
+    } else if (dryRun) {
+      console.log('[dry-run] API startup skipped (no wallet).');
+    }
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     if (
@@ -354,8 +479,12 @@ async function handleUp(
     }
     throw error;
   } finally {
-    // Remove SIGINT handler to prevent listener leak after handleUp completes
-    process.removeListener('SIGINT', sigintHandler);
+    // Only remove signal handlers if server never started
+    // If server is running, handlers enable graceful shutdown on SIGTERM/SIGINT
+    if (!serverStarted) {
+      process.removeListener('SIGINT', sigintHandler);
+      process.removeListener('SIGTERM', sigtermHandler);
+    }
   }
 }
 
@@ -396,6 +525,7 @@ export async function main(
       mill: { type: 'boolean' },
       dvm: { type: 'boolean' },
       password: { type: 'string' },
+      'dry-run': { type: 'boolean' },
     },
     strict: false,
     allowPositionals: true,
@@ -448,7 +578,14 @@ export async function main(
       const config = loadConfig(configPath);
       const docker = dockerInstance ?? new Docker();
       const profiles = resolveProfiles(values, config);
-      await handleUp(config, profiles, docker);
+      await handleUp(
+        configPath,
+        config,
+        profiles,
+        docker,
+        values.password as string | undefined,
+        values['dry-run'] === true
+      );
       break;
     }
     case 'down': {

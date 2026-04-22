@@ -1,9 +1,9 @@
 /**
- * Config file loader — reads YAML, applies env var overrides, validates.
+ * Config file loader — reads YAML, validates, writes.
  */
 
-import { readFileSync } from 'node:fs';
-import { parse } from 'yaml';
+import { readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { parse, stringify } from 'yaml';
 import { validateConfig } from './validator.js';
 import { getDefaultConfig } from './defaults.js';
 import type { TownhouseConfig } from './schema.js';
@@ -135,4 +135,23 @@ function deepMerge(
     }
   }
   return result;
+}
+
+/**
+ * Save a config to a YAML file atomically.
+ * Writes to a temp file first, then renames to the target (atomic on POSIX).
+ */
+export function saveConfig(configPath: string, config: TownhouseConfig): void {
+  // Validate before saving
+  const validated = validateConfig(config);
+
+  // Serialize to YAML
+  const yaml = stringify(validated);
+
+  // Write to temp file first
+  const tmpPath = configPath + '.tmp';
+  writeFileSync(tmpPath, yaml, 'utf-8');
+
+  // Atomic rename
+  renameSync(tmpPath, configPath);
 }

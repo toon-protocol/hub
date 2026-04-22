@@ -125,6 +125,13 @@ export class WalletManager {
   }
 
   /**
+   * List keys for all node types (alias for getAllKeys for API compatibility).
+   */
+  listKeys(): NodeKeyInfo[] {
+    return this.getAllKeys();
+  }
+
+  /**
    * Zero all in-memory key material. After calling lock(),
    * getNodeKeys() and getAllKeys() will throw.
    */
