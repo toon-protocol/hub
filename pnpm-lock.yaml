@@ -92,8 +92,8 @@ importers:
         specifier: workspace:*
         version: link:../packages/bls
       '@toon-protocol/connector':
-        specifier: ^2.3.0
-        version: 2.3.0(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.3.2
+        version: 3.3.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../packages/core
@@ -175,8 +175,8 @@ importers:
   examples/sdk-example:
     dependencies:
       '@toon-protocol/connector':
-        specifier: ^2.2.0
-        version: 2.2.0(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.3.2
+        version: 3.3.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -206,8 +206,8 @@ importers:
   examples/town-example:
     dependencies:
       '@toon-protocol/connector':
-        specifier: ^2.2.0
-        version: 2.2.0(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.3.2
+        version: 3.3.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -437,8 +437,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.1
       '@toon-protocol/connector':
-        specifier: ^2.3.0
-        version: 2.3.0(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.3.2
+        version: 3.3.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../core
@@ -678,8 +678,8 @@ importers:
         version: 2.23.1(typescript@5.9.3)
     devDependencies:
       '@toon-protocol/connector':
-        specifier: ^2.3.0
-        version: 2.3.0(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.3.2
+        version: 3.3.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/relay':
         specifier: workspace:*
         version: link:../relay
@@ -711,8 +711,8 @@ importers:
         specifier: ^1.0.0
         version: 1.19.9(hono@4.12.7)
       '@toon-protocol/connector':
-        specifier: ^2.3.0
-        version: 2.3.0(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.3.2
+        version: 3.3.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../core
@@ -4540,7 +4540,6 @@ packages:
     resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
     engines: {node: '>=8.0.0'}
     requiresBuild: true
-    optional: true
 
   /@paulmillr/qr@0.2.1:
     resolution: {integrity: sha512-IHnV6A+zxU7XwmKFinmYjUcwlyK9+xkG3/s9KcQhI9BjQKycrJ1JRO+FbNYPwZiPKW3je/DR0k7w8/gLa5eaxQ==}
@@ -8643,8 +8642,8 @@ packages:
   /@toon-format/toon@1.4.0:
     resolution: {integrity: sha512-bjdhhIPjnX2oVk+pKy/nD3bwuESDLX/5fwW0TxwpV7Q4PVNkiRSv1S0sPeuy9TI4PfAlulow1HShdmMTnYvoLg==}
 
-  /@toon-protocol/connector@2.2.0(@types/node@20.19.32)(typescript@5.9.3):
-    resolution: {integrity: sha512-2jMQnrlB1bVvtmws6a9mqLYcUH6TDSsVZ72cuAm0McimIycG4f/bBHkd01Qx48KurUCFaC5nUib24AqbCPV/sA==}
+  /@toon-protocol/connector@3.3.2(@types/node@20.19.32)(typescript@5.9.3):
+    resolution: {integrity: sha512-bNkOdYtkjnuj4MGYKZjYDktU/AkN0x9wygByv7D0IJ+GbCQ7RAzg0pdQiUn3slNa0I/3N82vQtNqAetAU9lmsw==}
     engines: {node: '>=22.11.0'}
     hasBin: true
     peerDependencies:
@@ -8670,64 +8669,7 @@ packages:
       js-yaml: 4.1.1
       netmask: 2.0.2
       pino: 8.21.0
-      tslib: 2.8.1
-      ws: 8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
-      zod: 3.25.76
-    optionalDependencies:
-      '@ai-sdk/anthropic': 1.2.12(zod@3.25.76)
-      '@ai-sdk/openai': 1.3.24(zod@3.25.76)
-      '@aws-sdk/client-kms': 3.1032.0
-      '@azure/identity': 4.13.1
-      '@azure/keyvault-keys': 4.10.0
-      '@google-cloud/kms': 3.8.0
-      '@libsql/client': 0.14.0
-      ai: 4.3.19(zod@3.25.76)
-      bip39: 3.1.0
-      commander: 12.1.0
-      inquirer: 9.3.8(@types/node@20.19.32)
-      nostr-tools: 2.23.1(typescript@5.9.3)
-      qrcode: 1.5.4
-      sharp: 0.33.5
-    transitivePeerDependencies:
-      - '@azure/core-client'
-      - '@types/node'
-      - aws-crt
-      - bufferutil
-      - encoding
-      - fastestsmallesttextencoderdecoder
-      - react
-      - supports-color
-      - typescript
-      - utf-8-validate
-    dev: false
-
-  /@toon-protocol/connector@2.3.0(@types/node@20.19.32)(typescript@5.9.3):
-    resolution: {integrity: sha512-93RcLQJAQ9aw3NjqBHoywHgGnfcytyXA/46/jBR0O+E2rZ88XH+wFP39ywi61AWGv++oEvS4MC1y5AwVmYjWPg==}
-    engines: {node: '>=22.11.0'}
-    hasBin: true
-    peerDependencies:
-      o1js: ^2.2.0
-      tigerbeetle-node: 0.16.68
-    peerDependenciesMeta:
-      o1js:
-        optional: true
-      tigerbeetle-node:
-        optional: true
-    dependencies:
-      '@noble/ciphers': 1.3.0
-      '@noble/curves': 1.9.7
-      '@noble/hashes': 1.8.0
-      '@solana-program/token': 0.6.0(@solana/kit@3.0.3)
-      '@solana/kit': 3.0.3(typescript@5.9.3)(ws@8.19.0)
-      '@toon-protocol/mina-zkapp': link:packages/mina-zkapp
-      '@toon-protocol/shared': 1.2.0(patch_hash=6zqy2jkcrig54aoewdy5gcjfdq)
-      better-sqlite3: 11.10.0
-      cors: 2.8.6
-      ethers: 6.16.0
-      express: 5.2.1
-      js-yaml: 4.1.1
-      netmask: 2.0.2
-      pino: 8.21.0
+      prom-client: 15.1.3
       socks-proxy-agent: 8.0.5
       tslib: 2.8.1
       ws: 8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
@@ -10503,6 +10445,9 @@ packages:
     resolution: {integrity: sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==}
     dependencies:
       file-uri-to-path: 1.0.0
+
+  /bintrees@1.0.2:
+    resolution: {integrity: sha512-VOMgTMwjAaUG580SXn3LacVgjurrbMme7ZZNYGSSV7mmtY6QQRh0Eg3pwIcntQ77DErK1L0NxkbetjcoXzVwKw==}
 
   /bip39@3.1.0:
     resolution: {integrity: sha512-c9kiwdk45Do5GL0vJMe7tS95VjCii65mYAH7DfWl3uW8AVzXKQVUm64i3hzVybBDMp9r7j9iNxR85+ul8MdN/A==}
@@ -15653,6 +15598,13 @@ packages:
     resolution: {integrity: sha512-cdGef/drWFoydD1JsMzuFf8100nZl+GT+yacc2bEced5f9Rjk4z+WtFUTBu9PhOi9j/jfmBPu0mMEY4wIdAF8A==}
     engines: {node: '>= 0.6.0'}
 
+  /prom-client@15.1.3:
+    resolution: {integrity: sha512-6ZiOBfCywsD4k1BN9IX0uZhF+tJkV8q8llP64G5Hajs4JOeVLPCwpPVcpXy3BwYiUGgyJzsJJQeOIv7+hDSq8g==}
+    engines: {node: ^16 || ^18 || >=20}
+    dependencies:
+      '@opentelemetry/api': 1.9.0
+      tdigest: 0.1.2
+
   /promise-limit@2.7.0:
     resolution: {integrity: sha512-7nJ6v5lnJsXwGprnGXga4wx6d1POjvi5Qmf1ivTRxTjH4Z/9Czja/UCMLVmB9N93GeWOU93XaFaEt6jbuoagNw==}
     requiresBuild: true
@@ -17004,6 +16956,11 @@ packages:
       fs-constants: 1.0.0
       inherits: 2.0.4
       readable-stream: 3.6.2
+
+  /tdigest@0.1.2:
+    resolution: {integrity: sha512-+G0LLgjjo9BZX2MfdvPfH+MKLCrxlXSYec5DaPYP1fe6Iyhf0/fSmJ0bFiZ1F8BT6cGXl2LpltQptzjXKWEkKA==}
+    dependencies:
+      bintrees: 1.0.2
 
   /test-exclude@6.0.0:
     resolution: {integrity: sha512-cAGWPIyOHU6zlmg88jwm7VRyXnMN7iV68OGAbYDk/Mh/xC/pzVPlQtY6ngoIH/5/tciuhGfvESU8GrHrcxD56w==}

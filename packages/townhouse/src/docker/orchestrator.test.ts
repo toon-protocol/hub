@@ -444,7 +444,7 @@ describe('DockerOrchestrator', () => {
       // Should pull normalized connector image + town image
       // normalizeImageTag ensures explicit :latest tag when already present
       expect(mockDocker.docker.pull).toHaveBeenCalledWith(
-        'ghcr.io/toon-protocol/connector:latest'
+        'ghcr.io/toon-protocol/connector:3.3.0'
       );
       expect(mockDocker.docker.pull).toHaveBeenCalledWith('toon:town');
       expect(mockDocker.docker.pull).toHaveBeenCalledTimes(2);
@@ -494,7 +494,7 @@ describe('DockerOrchestrator', () => {
 
     it('skips pull if image already exists locally', async () => {
       mockDocker.docker.listImages.mockResolvedValue([
-        { RepoTags: ['ghcr.io/toon-protocol/connector:latest'] },
+        { RepoTags: ['ghcr.io/toon-protocol/connector:3.3.0'] },
         { RepoTags: ['toon:town'] },
       ]);
 

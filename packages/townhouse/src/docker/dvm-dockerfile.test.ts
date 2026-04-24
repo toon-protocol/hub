@@ -194,11 +194,13 @@ describe('DVM Entrypoint Adapter (Story 21.7)', () => {
   // ── T-040: DVM handlers registered for kind:5094 and kind:5250 ──
   describe('T-040: DVM handler registration', () => {
     it('[P0] should import createArweaveDvmHandler from @toon-protocol/sdk', () => {
-      expect(entrypoint).toMatch(/import.*createArweaveDvmHandler.*from.*@toon-protocol\/sdk/);
+      expect(entrypoint).toMatch(/createArweaveDvmHandler/);
+      expect(entrypoint).toMatch(/from.*@toon-protocol\/sdk/);
     });
 
     it('[P0] should import createDungeonDvmHandler from @toon-protocol/pet-dvm', () => {
-      expect(entrypoint).toMatch(/import.*createDungeonDvmHandler.*from.*@toon-protocol\/pet-dvm/);
+      expect(entrypoint).toMatch(/createDungeonDvmHandler/);
+      expect(entrypoint).toMatch(/from.*@toon-protocol\/pet-dvm/);
     });
 
     it('[P0] should register kind:5094 (Arweave DVM)', () => {

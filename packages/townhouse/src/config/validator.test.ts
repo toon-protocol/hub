@@ -23,7 +23,7 @@ describe('validateConfig', () => {
     expect(config.logging.level).toBe('info');
     expect(config.transport.mode).toBe('direct');
     expect(config.connector.image).toBe(
-      'ghcr.io/toon-protocol/connector:latest'
+      'ghcr.io/toon-protocol/connector:3.3.0'
     );
   });
 

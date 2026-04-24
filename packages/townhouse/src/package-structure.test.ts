@@ -103,7 +103,7 @@ describe('docker-compose-townhouse.yml (AC #2)', () => {
 
   it('connector service uses ghcr.io/toon-protocol/connector image (AC #3)', () => {
     const connector = composeYaml['services']['connector'];
-    expect(connector['image']).toBe('ghcr.io/toon-protocol/connector:latest');
+    expect(connector['image']).toBe('ghcr.io/toon-protocol/connector:3.3.0');
   });
 
   it('connector has container_name townhouse-connector', () => {

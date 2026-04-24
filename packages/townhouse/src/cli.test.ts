@@ -95,7 +95,7 @@ nodes:
 wallet:
   encrypted_path: ${walletPath}
 connector:
-  image: ghcr.io/toon-protocol/connector:latest
+  image: ghcr.io/toon-protocol/connector:3.3.0
   adminPort: 9401
 transport:
   mode: direct
@@ -346,7 +346,7 @@ describe('CLI', () => {
         expect(config.nodes.mill.enabled).toBe(false);
         expect(config.nodes.dvm.enabled).toBe(false);
         expect(config.connector.image).toBe(
-          'ghcr.io/toon-protocol/connector:latest'
+          'ghcr.io/toon-protocol/connector:3.3.0'
         );
         expect(config.api.port).toBe(9400);
         expect(config.api.host).toBe('127.0.0.1');

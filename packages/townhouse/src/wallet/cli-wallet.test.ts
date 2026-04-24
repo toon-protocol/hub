@@ -263,7 +263,7 @@ nodes:
 wallet:
   encrypted_path: ${join(dir, 'wallet.enc')}
 connector:
-  image: ghcr.io/toon-protocol/connector:latest
+  image: ghcr.io/toon-protocol/connector:3.3.0
   adminPort: 9401
 transport:
   mode: direct
@@ -335,7 +335,7 @@ nodes:
 wallet:
   encrypted_path: ${join(dir, 'wallet.enc')}
 connector:
-  image: ghcr.io/toon-protocol/connector:latest
+  image: ghcr.io/toon-protocol/connector:3.3.0
   adminPort: 9401
 transport:
   mode: direct
@@ -394,7 +394,7 @@ nodes:
 wallet:
   encrypted_path: ${join(dir, 'nonexistent-wallet.enc')}
 connector:
-  image: ghcr.io/toon-protocol/connector:latest
+  image: ghcr.io/toon-protocol/connector:3.3.0
   adminPort: 9401
 transport:
   mode: direct
@@ -468,7 +468,7 @@ nodes:
 wallet:
   encrypted_path: ${join(dir, 'wallet.enc')}
 connector:
-  image: ghcr.io/toon-protocol/connector:latest
+  image: ghcr.io/toon-protocol/connector:3.3.0
   adminPort: 9401
 transport:
   mode: direct
@@ -542,7 +542,7 @@ nodes:
 wallet:
   encrypted_path: ${join(dir, 'wallet.enc')}
 connector:
-  image: ghcr.io/toon-protocol/connector:latest
+  image: ghcr.io/toon-protocol/connector:3.3.0
   adminPort: 9401
 transport:
   mode: direct

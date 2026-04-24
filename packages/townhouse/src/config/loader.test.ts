@@ -27,7 +27,7 @@ nodes:
 wallet:
   encrypted_path: /tmp/wallet.enc
 connector:
-  image: ghcr.io/toon-protocol/connector:latest
+  image: ghcr.io/toon-protocol/connector:3.3.0
   adminPort: 9401
 transport:
   mode: direct
@@ -236,7 +236,7 @@ nodes:
 wallet:
   encrypted_path: /tmp/wallet.enc
 connector:
-  image: ghcr.io/toon-protocol/connector:latest
+  image: ghcr.io/toon-protocol/connector:3.3.0
   adminPort: 9401
 transport:
   mode: direct
