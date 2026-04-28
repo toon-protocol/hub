@@ -24,6 +24,7 @@ Thumbs.db
 .env.publish
 .env.oyster
 .env.oyster.runtime
+.env.sdk-e2e
 
 # Test
 coverage/
