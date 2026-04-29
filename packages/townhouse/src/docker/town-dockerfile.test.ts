@@ -69,7 +69,9 @@ describe('Town Node Dockerfile (Story 21.5)', () => {
       // Second FROM (runtime stage) must also be node:20-alpine
       const fromStatements = dockerfile.match(/^FROM .+$/gm) ?? [];
       expect(fromStatements.length).toBeGreaterThanOrEqual(2);
-      expect(fromStatements[fromStatements.length - 1]).toMatch(/node:20-alpine/);
+      expect(fromStatements[fromStatements.length - 1]).toMatch(
+        /node:20-alpine/
+      );
     });
 
     it('[P0] should install pnpm 8.15.0 in builder stage', () => {
@@ -98,7 +100,8 @@ describe('Town Node Dockerfile (Story 21.5)', () => {
 
     it('[P1] should install libstdc++ for native module support', () => {
       // Runtime stage should have libstdc++
-      const runtimeSection = dockerfile.split(/^FROM node:20-alpine\s*$/m).pop() ?? '';
+      const runtimeSection =
+        dockerfile.split(/^FROM node:20-alpine\s*$/m).pop() ?? '';
       expect(runtimeSection).toMatch(/apk add.*libstdc\+\+/);
     });
 

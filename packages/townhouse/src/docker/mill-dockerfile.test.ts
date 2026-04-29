@@ -66,7 +66,9 @@ describe('Mill Node Dockerfile (Story 21.6)', () => {
     it('[P0] should have minimal runtime stage with node:20-alpine', () => {
       const fromStatements = dockerfile.match(/^FROM .+$/gm) ?? [];
       expect(fromStatements.length).toBeGreaterThanOrEqual(2);
-      expect(fromStatements[fromStatements.length - 1]).toMatch(/node:20-alpine/);
+      expect(fromStatements[fromStatements.length - 1]).toMatch(
+        /node:20-alpine/
+      );
     });
 
     it('[P0] should install pnpm 8.15.0 in builder stage', () => {
@@ -103,7 +105,8 @@ describe('Mill Node Dockerfile (Story 21.6)', () => {
     });
 
     it('[P1] should install libstdc++ for native module support', () => {
-      const runtimeSection = dockerfile.split(/^FROM node:20-alpine\s*$/m).pop() ?? '';
+      const runtimeSection =
+        dockerfile.split(/^FROM node:20-alpine\s*$/m).pop() ?? '';
       expect(runtimeSection).toMatch(/apk add.*libstdc\+\+/);
     });
 
@@ -156,7 +159,9 @@ describe('Mill Entrypoint Adapter (Story 21.6)', () => {
   // ── T-038: Container accepts connector peering via BTP port 3000 ──
   describe('T-038: Connector BTP wiring', () => {
     it('[P0] should import startMill from @toon-protocol/mill', () => {
-      expect(entrypoint).toMatch(/import.*startMill.*from.*@toon-protocol\/mill/);
+      expect(entrypoint).toMatch(
+        /import.*startMill.*from.*@toon-protocol\/mill/
+      );
     });
 
     it('[P0] should force btpServerPort = 3000', () => {
@@ -189,7 +194,9 @@ describe('Mill Entrypoint Adapter (Story 21.6)', () => {
     });
 
     it('[P0] should throw error if neither config source is provided', () => {
-      expect(entrypoint).toMatch(/MILL_CONFIG_JSON.*or.*MILL_CONFIG_PATH.*must be provided/);
+      expect(entrypoint).toMatch(
+        /MILL_CONFIG_JSON.*or.*MILL_CONFIG_PATH.*must be provided/
+      );
     });
   });
 

@@ -142,7 +142,9 @@ describe('Wallet Storage', () => {
 
       expect(result).not.toBeNull();
       expect(result!.permissionsWarning).toBeDefined();
-      expect(result!.permissionsWarning).toMatch(/permissions.*644.*should be 600/);
+      expect(result!.permissionsWarning).toMatch(
+        /permissions.*644.*should be 600/
+      );
     });
   });
 });

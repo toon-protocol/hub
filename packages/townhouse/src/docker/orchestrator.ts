@@ -188,12 +188,14 @@ export class DockerOrchestrator extends EventEmitter {
   /**
    * Return status for all townhouse containers.
    */
-  async status(): Promise<{
-    name: string;
-    state: string;
-    health?: string;
-    startedAt?: string;
-  }[]> {
+  async status(): Promise<
+    {
+      name: string;
+      state: string;
+      health?: string;
+      startedAt?: string;
+    }[]
+  > {
     const containers = await this.docker.listContainers({ all: true });
     const allTypes = ['connector', 'town', 'mill', 'dvm'] as const;
 

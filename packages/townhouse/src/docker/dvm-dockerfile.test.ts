@@ -66,7 +66,9 @@ describe('DVM Node Dockerfile (Story 21.7)', () => {
     it('[P0] should have minimal runtime stage with node:20-alpine', () => {
       const fromStatements = dockerfile.match(/^FROM .+$/gm) ?? [];
       expect(fromStatements.length).toBeGreaterThanOrEqual(2);
-      expect(fromStatements[fromStatements.length - 1]).toMatch(/node:20-alpine/);
+      expect(fromStatements[fromStatements.length - 1]).toMatch(
+        /node:20-alpine/
+      );
     });
 
     it('[P0] should install pnpm 8.15.0 in builder stage', () => {
@@ -109,7 +111,8 @@ describe('DVM Node Dockerfile (Story 21.7)', () => {
     });
 
     it('[P1] should install libstdc++ for native module support', () => {
-      const runtimeSection = dockerfile.split(/^FROM node:20-alpine\s*$/m).pop() ?? '';
+      const runtimeSection =
+        dockerfile.split(/^FROM node:20-alpine\s*$/m).pop() ?? '';
       expect(runtimeSection).toMatch(/apk add.*libstdc\+\+/);
     });
 
@@ -170,7 +173,9 @@ describe('DVM Entrypoint Adapter (Story 21.7)', () => {
   // ── T-038: Container accepts connector URL via CONNECTOR_URL (standalone HTTP mode) ──
   describe('T-038: Connector HTTP wiring (standalone mode)', () => {
     it('[P0] should import createNode from @toon-protocol/sdk', () => {
-      expect(entrypoint).toMatch(/import.*createNode.*from.*@toon-protocol\/sdk/);
+      expect(entrypoint).toMatch(
+        /import.*createNode.*from.*@toon-protocol\/sdk/
+      );
     });
 
     it('[P0] should map CONNECTOR_URL to connectorUrl in createNode()', () => {
@@ -291,7 +296,9 @@ describe('Compose stack integration (Story 21.7, AC #2 + #7)', () => {
     it('[P0] connector CONNECTOR_PEERS should include dvm with httpUrl', () => {
       const connectorSection = extractConnectorSection();
       expect(connectorSection).toMatch(/"id"\s*:\s*"dvm"/);
-      expect(connectorSection).toMatch(/"httpUrl"\s*:\s*"http:\/\/townhouse-dvm:3300"/);
+      expect(connectorSection).toMatch(
+        /"httpUrl"\s*:\s*"http:\/\/townhouse-dvm:3300"/
+      );
     });
 
     it('[P1] connector CONNECTOR_PEERS should have relation child', () => {
