@@ -102,7 +102,9 @@ describe('Mill Node Dockerfile (Story 21.6)', () => {
   // they never appear on the produced image. They must live in the runtime
   // stage (after the second `FROM node:20-alpine`).
   describe('LABEL placement (Story 21.6.1, Finding #11)', () => {
-    const builderFromIdx = dockerfile.search(/^FROM node:20-alpine AS builder/m);
+    const builderFromIdx = dockerfile.search(
+      /^FROM node:20-alpine AS builder/m
+    );
     const runtimeFromIdx = dockerfile.search(/^FROM node:20-alpine\s*$/m);
     const beforeBuilder = dockerfile.slice(0, builderFromIdx);
     const runtimeSection = dockerfile.slice(runtimeFromIdx);
