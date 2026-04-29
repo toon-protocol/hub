@@ -1,0 +1,67 @@
+{
+  "name": "@toon-protocol/townhouse",
+  "version": "0.1.0",
+  "description": "TOON Townhouse — host-native orchestrator + dashboard for Docker-containerized TOON nodes",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "townhouse": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "toon",
+    "nostr",
+    "ilp",
+    "townhouse",
+    "orchestrator",
+    "docker"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/toon-protocol/town.git",
+    "directory": "packages/townhouse"
+  },
+  "author": "ALLiDoizCode",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.0",
+    "@fastify/websocket": "^11.0.0",
+    "@noble/curves": "^1.8.0",
+    "@noble/hashes": "^1.7.0",
+    "@scure/bip32": "^2.0.0",
+    "@scure/bip39": "^2.0.0",
+    "fastify": "^5.0.0",
+    "dockerode": "^4.0.0",
+    "nostr-tools": "^2.23.1",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.0",
+    "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  }
+}
