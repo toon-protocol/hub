@@ -25,6 +25,7 @@ Thumbs.db
 .env.oyster
 .env.oyster.runtime
 .env.sdk-e2e
+.env.townhouse-dev
 
 # Test
 coverage/
