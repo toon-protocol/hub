@@ -12,6 +12,16 @@ export const CONTAINER_PREFIX = 'townhouse-';
 export const NODE_BTP_PORT = 3000;
 
 /**
+ * Default connector Docker image tag — single source of truth for the workspace.
+ *
+ * To bump: update this constant, run `pnpm --filter @toon-protocol/townhouse test contract-canary`,
+ * then `pnpm --filter @toon-protocol/townhouse test:canary`. See packages/sdk/CONNECTOR_MIGRATION.md
+ * for the full checklist and breaking-changes history.
+ */
+export const DEFAULT_CONNECTOR_IMAGE =
+  'ghcr.io/toon-protocol/connector:3.3.3';
+
+/**
  * HD wallet account indices per node type (Story 21.4, D21-008).
  * BIP-44 paths: m/44'/{coin}'/ACCOUNT'/0/0
  */

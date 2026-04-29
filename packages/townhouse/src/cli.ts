@@ -229,7 +229,7 @@ async function handleStatus(
     console.log('');
     console.log('Connector Metrics:');
     console.log('------------------');
-    console.log(`  Packets forwarded: ${metrics.packetsForwarded}`);
+    console.log(`  Packets forwarded: ${metrics.aggregate.packetsForwarded}`);
     console.log(`  Active peers:      ${activePeers}/${peers.length}`);
   } catch {
     console.log('');
@@ -246,11 +246,15 @@ async function handleMetrics(config: TownhouseConfig): Promise<void> {
     const metrics = await adminClient.getMetrics();
     const peers = await adminClient.getPeers();
 
+    // Per-peer packet counters live on /admin/metrics.json (peers[]),
+    // not /admin/peers — index by peerId so we can show counts inline.
+    const peerMetrics = new Map(metrics.peers.map((p) => [p.peerId, p]));
+
     console.log('Connector Metrics:');
     console.log('------------------');
-    console.log(`  Packets forwarded: ${metrics.packetsForwarded}`);
-    console.log(`  Packets rejected:  ${metrics.packetsRejected}`);
-    console.log(`  Bytes sent:        ${metrics.bytesSent}`);
+    console.log(`  Packets forwarded: ${metrics.aggregate.packetsForwarded}`);
+    console.log(`  Packets rejected:  ${metrics.aggregate.packetsRejected}`);
+    console.log(`  Bytes sent:        ${metrics.aggregate.bytesSent}`);
     console.log('');
     console.log('Peers:');
     console.log('------');
@@ -259,9 +263,8 @@ async function handleMetrics(config: TownhouseConfig): Promise<void> {
     } else {
       for (const peer of peers) {
         const status = peer.connected ? 'connected' : 'disconnected';
-        console.log(
-          `  ${peer.id.padEnd(12)} ${status}  (${peer.packetsForwarded} packets)`
-        );
+        const packets = peerMetrics.get(peer.id)?.packetsForwarded ?? 0;
+        console.log(`  ${peer.id.padEnd(12)} ${status}  (${packets} packets)`);
       }
     }
   } catch (error: unknown) {

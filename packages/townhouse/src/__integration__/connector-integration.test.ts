@@ -97,9 +97,9 @@ describe.skipIf(!shouldRun)('Connector Integration (requires Docker)', () => {
 
     it('connector admin API returns metrics', async () => {
       const metrics = await adminClient.getMetrics();
-      expect(metrics.packetsForwarded).toBeGreaterThanOrEqual(0);
-      expect(metrics.packetsRejected).toBeGreaterThanOrEqual(0);
-      expect(metrics.bytesSent).toBeGreaterThanOrEqual(0);
+      expect(metrics.aggregate.packetsForwarded).toBeGreaterThanOrEqual(0);
+      expect(metrics.aggregate.packetsRejected).toBeGreaterThanOrEqual(0);
+      expect(metrics.aggregate.bytesSent).toBeGreaterThanOrEqual(0);
     }, 10000);
   });
 

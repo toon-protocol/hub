@@ -43,25 +43,78 @@ export interface ConnectorRuntimeConfig {
 }
 
 // ── Admin API response types ──
+//
+// These mirror the connector's served shapes verbatim — see
+// @toon-protocol/connector packages/connector/src/http/types.ts (HealthStatus)
+// and packages/connector/src/http/admin-api.ts (AdminMetricsJsonResponse,
+// /admin/peers handler). Drift here means dashboards break silently; the
+// stub canary in `connector/contract-canary.test.ts` ratchets these shapes,
+// and the running-image canary in `__integration__/connector-image-contract.test.ts`
+// asserts the real connector still serves them.
 
-/** Response from GET /health */
+/**
+ * Response from GET /health on the connector's healthCheckPort.
+ * Mirrors `HealthStatus` from `@toon-protocol/connector`.
+ */
 export interface HealthResponse {
-  status: 'healthy' | 'unhealthy';
+  status: 'healthy' | 'unhealthy' | 'starting' | 'degraded';
   uptime: number;
+  peersConnected: number;
+  totalPeers: number;
+  timestamp: string;
+  nodeId?: string;
+  version?: string;
 }
 
-/** Response from GET /metrics */
-export interface MetricsResponse {
+/**
+ * Per-peer ILP counter snapshot from GET /admin/metrics.json.
+ * Mirrors `AdminMetricsJsonPeer` from `@toon-protocol/connector`.
+ */
+export interface MetricsPeerEntry {
+  peerId: string;
+  connected: boolean;
   packetsForwarded: number;
   packetsRejected: number;
   bytesSent: number;
+  lastPacketAt: string | null;
 }
 
-/** Peer status from GET /peers */
+/**
+ * Response from GET /admin/metrics.json on the connector's adminApi port.
+ * Mirrors `AdminMetricsJsonResponse` from `@toon-protocol/connector`.
+ */
+export interface MetricsResponse {
+  uptimeSeconds: number;
+  aggregate: {
+    packetsForwarded: number;
+    packetsRejected: number;
+    bytesSent: number;
+  };
+  peers: MetricsPeerEntry[];
+  timestamp: string;
+}
+
+/**
+ * Peer entry from GET /admin/peers on the connector's adminApi port.
+ * Mirrors the response of the connector's `router.get('/peers', …)` handler.
+ * Note: per-peer packet counters live on /admin/metrics.json, not here.
+ */
 export interface PeerStatus {
   id: string;
   connected: boolean;
-  packetsForwarded: number;
+  ilpAddresses: string[];
+  routeCount: number;
+}
+
+/**
+ * Wrapper response from GET /admin/peers.
+ * Mirrors the connector's `router.get('/peers')` JSON envelope.
+ */
+export interface PeersResponse {
+  nodeId: string;
+  peerCount: number;
+  connectedCount: number;
+  peers: PeerStatus[];
 }
 
 /** Node types that can be registered as peers */

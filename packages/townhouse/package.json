@@ -22,7 +22,9 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:canary": "vitest run --config vitest.integration.config.ts src/__integration__/connector-image-contract.test.ts"
   },
   "keywords": [
     "toon",

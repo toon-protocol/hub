@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DockerOrchestrator } from './orchestrator.js';
 import type { TownhouseConfig } from '../config/schema.js';
 import { getDefaultConfig } from '../config/defaults.js';
+import { DEFAULT_CONNECTOR_IMAGE } from '../constants.js';
 
 /**
  * Build a TownhouseConfig with selected nodes enabled.
@@ -444,7 +445,7 @@ describe('DockerOrchestrator', () => {
       // Should pull normalized connector image + town image
       // normalizeImageTag ensures explicit :latest tag when already present
       expect(mockDocker.docker.pull).toHaveBeenCalledWith(
-        'ghcr.io/toon-protocol/connector:3.3.0'
+        DEFAULT_CONNECTOR_IMAGE
       );
       expect(mockDocker.docker.pull).toHaveBeenCalledWith('toon:town');
       expect(mockDocker.docker.pull).toHaveBeenCalledTimes(2);
@@ -494,7 +495,7 @@ describe('DockerOrchestrator', () => {
 
     it('skips pull if image already exists locally', async () => {
       mockDocker.docker.listImages.mockResolvedValue([
-        { RepoTags: ['ghcr.io/toon-protocol/connector:3.3.0'] },
+        { RepoTags: [DEFAULT_CONNECTOR_IMAGE] },
         { RepoTags: ['toon:town'] },
       ]);
 

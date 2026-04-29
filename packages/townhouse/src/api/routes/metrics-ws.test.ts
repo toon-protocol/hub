@@ -39,7 +39,16 @@ class StubConnectorAdmin {
     if (this.failNext) {
       throw new Error('connector down');
     }
-    return { packetsForwarded: 42, packetsRejected: 1, bytesSent: 9000 };
+    return {
+      uptimeSeconds: 60,
+      aggregate: {
+        packetsForwarded: 42,
+        packetsRejected: 1,
+        bytesSent: 9000,
+      },
+      peers: [],
+      timestamp: new Date().toISOString(),
+    };
   }
 }
 

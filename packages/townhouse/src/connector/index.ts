@@ -9,5 +9,7 @@ export type {
   PeerEntry,
   HealthResponse,
   MetricsResponse,
+  MetricsPeerEntry,
   PeerStatus,
+  PeersResponse,
 } from './types.js';

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { validateConfig, ConfigValidationError } from './validator.js';
 import { getDefaultConfig } from './defaults.js';
+import { DEFAULT_CONNECTOR_IMAGE } from '../constants.js';
 
 /** Helper: produce a valid raw config object (matches default shape). */
 function validRaw(): Record<string, unknown> {
@@ -22,9 +23,7 @@ describe('validateConfig', () => {
     expect(config.api.host).toBe('127.0.0.1');
     expect(config.logging.level).toBe('info');
     expect(config.transport.mode).toBe('direct');
-    expect(config.connector.image).toBe(
-      'ghcr.io/toon-protocol/connector:3.3.0'
-    );
+    expect(config.connector.image).toBe(DEFAULT_CONNECTOR_IMAGE);
   });
 
   it('accepts config with optional node fee fields', () => {

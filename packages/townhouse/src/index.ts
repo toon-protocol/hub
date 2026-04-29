@@ -40,7 +40,9 @@ export type {
   PeerEntry,
   HealthResponse,
   MetricsResponse,
+  MetricsPeerEntry,
   PeerStatus,
+  PeersResponse,
 } from './connector/index.js';
 
 export { WalletManager } from './wallet/index.js';

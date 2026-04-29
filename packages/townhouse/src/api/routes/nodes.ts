@@ -130,16 +130,20 @@ export function registerNodeRoutes(app: FastifyInstance, deps: ApiDeps): void {
         : 'not-created';
       const uptimeSeconds = computeUptimeSeconds(statusEntry?.startedAt, state);
 
-      // Get metrics from connector admin (degraded state on failure)
-      // Narrowed MetricsPayload per connector-team agreement 2026-04-21
+      // Get metrics from connector admin (degraded state on failure).
+      // ConnectorAdminClient.getMetrics() returns the connector's
+      // /admin/metrics.json shape verbatim — aggregate counters live under
+      // `aggregate`, per-peer entries under `peers`. Narrowed MetricsPayload
+      // here surfaces the aggregate rollup; per-peer breakdowns are available
+      // to consumers that need them via metricsRes.peers.
       let metrics: MetricsPayload | null = null;
       try {
         const metricsRes = await deps.connectorAdmin.getMetrics();
         if (metricsRes) {
           metrics = {
-            packetsForwarded: metricsRes.packetsForwarded,
-            packetsRejected: metricsRes.packetsRejected,
-            bytesSent: metricsRes.bytesSent,
+            packetsForwarded: metricsRes.aggregate.packetsForwarded,
+            packetsRejected: metricsRes.aggregate.packetsRejected,
+            bytesSent: metricsRes.aggregate.bytesSent,
             attribution: 'aggregate',
             available: true,
           };

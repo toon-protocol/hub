@@ -68,9 +68,14 @@ class MockWalletManager {
 class MockConnectorAdminClient {
   async getMetrics() {
     return {
-      packetsForwarded: 100,
-      packetsRejected: 10,
-      bytesSent: 5000,
+      uptimeSeconds: 60,
+      aggregate: {
+        packetsForwarded: 100,
+        packetsRejected: 10,
+        bytesSent: 5000,
+      },
+      peers: [],
+      timestamp: new Date().toISOString(),
     };
   }
 }

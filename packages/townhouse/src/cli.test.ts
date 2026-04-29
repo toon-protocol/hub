@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { main, CliHelpRequested } from './cli.js';
+import { DEFAULT_CONNECTOR_IMAGE } from './constants.js';
 
 /**
  * Mock dockerode for all CLI tests.
@@ -95,7 +96,7 @@ nodes:
 wallet:
   encrypted_path: ${walletPath}
 connector:
-  image: ghcr.io/toon-protocol/connector:3.3.0
+  image: ghcr.io/toon-protocol/connector:3.3.3
   adminPort: 9401
 transport:
   mode: direct
@@ -345,9 +346,7 @@ describe('CLI', () => {
         expect(config.nodes.town.enabled).toBe(false);
         expect(config.nodes.mill.enabled).toBe(false);
         expect(config.nodes.dvm.enabled).toBe(false);
-        expect(config.connector.image).toBe(
-          'ghcr.io/toon-protocol/connector:3.3.0'
-        );
+        expect(config.connector.image).toBe(DEFAULT_CONNECTOR_IMAGE);
         expect(config.api.port).toBe(9400);
         expect(config.api.host).toBe('127.0.0.1');
         expect(config.transport.mode).toBe('direct');
@@ -381,24 +380,48 @@ describe('CLI', () => {
       const dir = makeTempDir();
       const configPath = join(dir, 'config.yaml');
 
-      // Mock global fetch for admin client
+      // Mock global fetch for admin client (paths mirror connector source-of-truth)
       const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/metrics')) {
+        if (url.includes('/admin/metrics.json')) {
           return {
             ok: true,
             json: async () => ({
-              packetsForwarded: 100,
-              packetsRejected: 5,
-              bytesSent: 2000,
+              uptimeSeconds: 60,
+              aggregate: {
+                packetsForwarded: 100,
+                packetsRejected: 5,
+                bytesSent: 2000,
+              },
+              peers: [
+                {
+                  peerId: 'town',
+                  connected: true,
+                  packetsForwarded: 80,
+                  packetsRejected: 1,
+                  bytesSent: 1500,
+                  lastPacketAt: '2026-04-29T00:00:00.000Z',
+                },
+              ],
+              timestamp: '2026-04-29T00:00:00.000Z',
             }),
           };
         }
-        if (url.includes('/peers')) {
+        if (url.includes('/admin/peers')) {
           return {
             ok: true,
-            json: async () => [
-              { id: 'town', connected: true, packetsForwarded: 80 },
-            ],
+            json: async () => ({
+              nodeId: 'townhouse-canary',
+              peerCount: 1,
+              connectedCount: 1,
+              peers: [
+                {
+                  id: 'town',
+                  connected: true,
+                  ilpAddresses: ['g.toon.town'],
+                  routeCount: 1,
+                },
+              ],
+            }),
           };
         }
         return { ok: true, json: async () => ({}) };
@@ -452,23 +475,60 @@ describe('CLI', () => {
       const configPath = join(dir, 'config.yaml');
 
       const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/metrics')) {
+        if (url.includes('/admin/metrics.json')) {
           return {
             ok: true,
             json: async () => ({
-              packetsForwarded: 250,
-              packetsRejected: 3,
-              bytesSent: 8000,
+              uptimeSeconds: 60,
+              aggregate: {
+                packetsForwarded: 250,
+                packetsRejected: 3,
+                bytesSent: 8000,
+              },
+              peers: [
+                {
+                  peerId: 'town',
+                  connected: true,
+                  packetsForwarded: 200,
+                  packetsRejected: 1,
+                  bytesSent: 5000,
+                  lastPacketAt: '2026-04-29T00:00:00.000Z',
+                },
+                {
+                  peerId: 'mill',
+                  connected: false,
+                  packetsForwarded: 50,
+                  packetsRejected: 2,
+                  bytesSent: 3000,
+                  lastPacketAt: null,
+                },
+              ],
+              timestamp: '2026-04-29T00:00:00.000Z',
             }),
           };
         }
-        if (url.includes('/peers')) {
+        if (url.includes('/admin/peers')) {
           return {
             ok: true,
-            json: async () => [
-              { id: 'town', connected: true, packetsForwarded: 200 },
-              { id: 'mill', connected: false, packetsForwarded: 50 },
-            ],
+            json: async () => ({
+              nodeId: 'townhouse-canary',
+              peerCount: 2,
+              connectedCount: 1,
+              peers: [
+                {
+                  id: 'town',
+                  connected: true,
+                  ilpAddresses: ['g.toon.town'],
+                  routeCount: 1,
+                },
+                {
+                  id: 'mill',
+                  connected: false,
+                  ilpAddresses: ['g.toon.mill'],
+                  routeCount: 1,
+                },
+              ],
+            }),
           };
         }
         return { ok: true, json: async () => ({}) };

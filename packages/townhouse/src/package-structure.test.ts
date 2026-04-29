@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
+import { DEFAULT_CONNECTOR_IMAGE } from './constants.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgPath = join(__dirname, '..', 'package.json');
@@ -103,7 +104,7 @@ describe('docker-compose-townhouse.yml (AC #2)', () => {
 
   it('connector service uses ghcr.io/toon-protocol/connector image (AC #3)', () => {
     const connector = composeYaml['services']['connector'];
-    expect(connector['image']).toBe('ghcr.io/toon-protocol/connector:3.3.0');
+    expect(connector['image']).toBe(DEFAULT_CONNECTOR_IMAGE);
   });
 
   it('connector has container_name townhouse-connector', () => {

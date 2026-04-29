@@ -57,12 +57,12 @@ export function registerMetricsWsRoutes(
       try {
         const metricsRes = await deps.connectorAdmin.getMetrics();
         if (metricsRes) {
-          // Narrowed MetricsPayload per connector-team agreement (2026-04-21)
-          // /metrics returns Prometheus text (C-21.8-a) or 404 until C-21.8-b lands
+          // ConnectorAdminClient.getMetrics() returns the connector's
+          // /admin/metrics.json shape; aggregate counters live under `aggregate`.
           const payload = {
-            packetsForwarded: metricsRes.packetsForwarded,
-            packetsRejected: metricsRes.packetsRejected,
-            bytesSent: metricsRes.bytesSent,
+            packetsForwarded: metricsRes.aggregate.packetsForwarded,
+            packetsRejected: metricsRes.aggregate.packetsRejected,
+            bytesSent: metricsRes.aggregate.bytesSent,
             attribution: 'aggregate' as const,
             available: true,
           };
