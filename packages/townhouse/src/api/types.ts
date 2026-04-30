@@ -7,6 +7,7 @@ import type { DockerOrchestrator } from '../docker/orchestrator.js';
 import type { WalletManager } from '../wallet/index.js';
 import type { ConnectorAdminClient } from '../connector/index.js';
 import type { TownhouseConfig } from '../config/schema.js';
+import type { MillHealthResponse } from '@toon-protocol/mill';
 
 /** Node types supported by Townhouse */
 export type NodeType = 'town' | 'mill' | 'dvm';
@@ -141,6 +142,56 @@ export interface TimeseriesBucket {
 /** Response shape for GET /nodes/:type/packets/timeseries */
 export interface PacketTimeseriesPayload {
   buckets: TimeseriesBucket[];
+}
+
+/** Re-export for consumers that need the full Mill health shape */
+export type { MillHealthResponse };
+
+/** Minimal common health shape; superset emitted by Town containers. */
+export interface TownHealthPayload {
+  status: 'ok' | 'starting' | 'stopping' | 'stopped' | 'error';
+  version?: string;
+  uptimeSec?: number;
+  nodePubkey?: string;
+}
+
+/** Minimal common health shape; superset emitted by DVM containers. */
+export interface DvmHealthPayload {
+  status: 'ok' | 'starting' | 'stopping' | 'stopped' | 'error';
+  version?: string;
+  uptimeSec?: number;
+  nodePubkey?: string;
+}
+
+/** Union of all node health response shapes. */
+export type NodeHealthPayload =
+  | MillHealthResponse
+  | TownHealthPayload
+  | DvmHealthPayload;
+
+/** Per-pair swap activity bucket */
+export interface SwapByPairEntry {
+  pair: string;
+  count: number;
+  volume: string;
+}
+
+/** Response shape for GET /nodes/mill/swaps/recent */
+export interface MillSwapsRecentPayload {
+  count: number;
+  volume: string;
+  byPair: SwapByPairEntry[];
+}
+
+/** Per-chain deposit address entry */
+export interface DepositAddressEntry {
+  family: 'evm' | 'solana' | 'mina';
+  address: string;
+}
+
+/** Response shape for GET /nodes/:type/deposit-addresses */
+export interface DepositAddressesPayload {
+  chains: DepositAddressEntry[];
 }
 
 /** API server returned by createApiServer */

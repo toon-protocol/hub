@@ -1,6 +1,13 @@
 /**
  * Node routes: GET /nodes, GET /nodes/:type, GET /nodes/:type/packets/timeseries,
- * GET /nodes/:type/bandwidth
+ * GET /nodes/:type/bandwidth,
+ * GET /nodes/:nodeId/health, GET /nodes/:nodeId/swaps/recent,
+ * GET /nodes/:nodeId/deposit-addresses.
+ *
+ * `:type` routes are scoped per node kind ('town' | 'mill' | 'dvm').
+ * `:nodeId` routes are scoped per running instance and accept either a
+ * container name (e.g. 'dev-mill-01') or a type-level placeholder
+ * ('mill' when no instance has started yet).
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -11,9 +18,20 @@ import type {
   BandwidthPayload,
   PacketTimeseriesPayload,
   TimeseriesBucket,
+  NodeHealthPayload,
+  MillSwapsRecentPayload,
+  DepositAddressesPayload,
 } from '../types.js';
 import type { NodeType, NodeState } from '../types.js';
 import { CONTAINER_PREFIX } from '../../constants.js';
+
+/** Cache entry for health proxy responses */
+interface HealthCacheEntry {
+  payload: NodeHealthPayload;
+  cachedAt: number;
+}
+
+const HEALTH_CACHE_TTL_MS = 2_000;
 
 /** Map raw Docker container state to the API's NodeState enum. */
 function mapDockerState(raw: string | undefined): NodeState {
@@ -82,6 +100,7 @@ function computeUptimeSeconds(
  * Register node routes.
  */
 export function registerNodeRoutes(app: FastifyInstance, deps: ApiDeps): void {
+  const healthCache = new Map<string, HealthCacheEntry>();
   // GET /nodes - list all node types (multi-instance aware)
   app.get('/nodes', async (_request, _reply) => {
     const status = await deps.orchestrator.status();
@@ -299,6 +318,214 @@ export function registerNodeRoutes(app: FastifyInstance, deps: ApiDeps): void {
         bytesOut: stats.bytesOut,
         sampleAt: stats.sampleAt,
       };
+      return payload;
+    }
+  );
+
+  // ── per-instance node resolution helper ───────────────────────────────────
+
+  async function resolveNodeId(nodeId: string): Promise<
+    { type: NodeType; instanceName: string } | null
+  > {
+    const status = await deps.orchestrator.status();
+    const instance = status.find((s) => s.name === nodeId);
+    if (instance) {
+      return { type: instance.type as NodeType, instanceName: instance.name };
+    }
+    if (nodeId === 'town' || nodeId === 'mill' || nodeId === 'dvm') {
+      return { type: nodeId, instanceName: nodeId };
+    }
+    return null;
+  }
+
+  // ── GET /nodes/:nodeId/health ──────────────────────────────────────────────
+
+  app.get<{ Params: { nodeId: string } }>(
+    '/nodes/:nodeId/health',
+    async (request, reply) => {
+      const { nodeId } = request.params;
+
+      // Skip the type-level routes that share the prefix.
+      if (nodeId === 'packets' || nodeId === 'bandwidth') {
+        return reply.status(404).send({ error: 'unknown_node', nodeId });
+      }
+
+      const resolved = await resolveNodeId(nodeId);
+      if (!resolved) {
+        return reply.status(404).send({ error: 'unknown_node', nodeId });
+      }
+
+      const cacheKey = resolved.instanceName;
+      const cached = healthCache.get(cacheKey);
+      if (cached && Date.now() - cached.cachedAt < HEALTH_CACHE_TTL_MS) {
+        return cached.payload;
+      }
+
+      try {
+        const endpoint = await deps.orchestrator.getNodeHealthEndpoint(
+          resolved.instanceName,
+          resolved.type
+        );
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3_000);
+        let res: Response;
+        try {
+          // nosemgrep: javascript.lang.security.detect-insecure-http -- Docker-internal, TLS unnecessary
+          res = await fetch(`${endpoint}/health`, { signal: controller.signal });
+        } finally {
+          clearTimeout(timeout);
+        }
+        if (!res.ok) {
+          return reply.status(503).send({ error: 'node_unreachable' });
+        }
+        const payload = await res.json() as NodeHealthPayload;
+        healthCache.set(cacheKey, { payload, cachedAt: Date.now() });
+        return payload;
+      } catch {
+        return reply.status(503).send({ error: 'node_unreachable' });
+      }
+    }
+  );
+
+  // ── GET /nodes/:nodeId/swaps/recent ───────────────────────────────────────
+
+  app.get<{
+    Params: { nodeId: string };
+    Querystring: { windowSec?: string };
+  }>(
+    '/nodes/:nodeId/swaps/recent',
+    async (request, reply) => {
+      const { nodeId } = request.params;
+
+      const resolved = await resolveNodeId(nodeId);
+      if (!resolved) {
+        return reply.status(404).send({ error: 'unknown_node', nodeId });
+      }
+      if (resolved.type !== 'mill') {
+        return reply.status(404).send({
+          error: 'swaps_only_for_mill',
+          message: 'swaps/recent is only available for mill instances',
+        });
+      }
+
+      const rawWindowSec = request.query.windowSec;
+      // Reject scientific notation and non-decimal strings before parseInt
+      // silently truncates them ('1e10' → 1).
+      if (rawWindowSec !== undefined && !/^\d+$/.test(rawWindowSec)) {
+        return reply.status(400).send({
+          error: 'invalid_window_sec',
+          message: 'windowSec must be a non-negative integer (1–3600)',
+        });
+      }
+      const windowSec = rawWindowSec !== undefined
+        ? parseInt(rawWindowSec, 10)
+        : 300;
+      if (isNaN(windowSec) || windowSec < 1 || windowSec > 3600) {
+        return reply.status(400).send({
+          error: 'invalid_window_sec',
+          message: 'windowSec must be 1–3600',
+        });
+      }
+
+      // Resolve this instance's ILP address from connector peers.
+      // If the peer is not registered yet, return an empty result rather than
+      // an unfiltered packet log (which would include packets from every peer).
+      let ilpAddress: string | undefined;
+      try {
+        const peers = await deps.connectorAdmin.getPeers();
+        const peer = peers.find((p) => p.id === resolved.instanceName);
+        ilpAddress = peer?.ilpAddresses[0];
+      } catch {
+        // Connector unavailable — handled in the next try block.
+      }
+
+      if (!ilpAddress) {
+        const empty: MillSwapsRecentPayload = { count: 0, volume: '0', byPair: [] };
+        return empty;
+      }
+
+      try {
+        const packets = await deps.connectorAdmin.getPacketLog({
+          ilpAddress,
+          since: Date.now() - windowSec * 1_000,
+          limit: 10_000,
+        });
+
+        const byPairMap = new Map<string, { count: number; volume: bigint }>();
+        let totalVolume = 0n;
+
+        for (const entry of packets) {
+          totalVolume += BigInt(entry.amount ?? 0);
+          const pairKey = `${entry.ilpAddressFrom ?? '?'}→${entry.ilpAddressTo ?? '?'}`;
+          const existing = byPairMap.get(pairKey) ?? { count: 0, volume: 0n };
+          byPairMap.set(pairKey, {
+            count: existing.count + 1,
+            volume: existing.volume + BigInt(entry.amount ?? 0),
+          });
+        }
+
+        const byPair = Array.from(byPairMap.entries()).map(([pair, data]) => ({
+          pair,
+          count: data.count,
+          volume: data.volume.toString(),
+        }));
+
+        const payload: MillSwapsRecentPayload = {
+          count: packets.length,
+          volume: totalVolume.toString(),
+          byPair,
+        };
+        return payload;
+      } catch (error: unknown) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code === 'ConnectorEndpointNotFound') {
+          return reply.status(503).send({
+            error: 'connector_endpoint_not_found',
+            message: 'Connector image does not expose GET /packets. See CONNECTOR_MIGRATION.md.',
+          });
+        }
+        return reply.status(503).send({ error: 'connector_unavailable' });
+      }
+    }
+  );
+
+  // ── GET /nodes/:nodeId/deposit-addresses ──────────────────────────────────
+
+  app.get<{ Params: { nodeId: string } }>(
+    '/nodes/:nodeId/deposit-addresses',
+    async (request, reply) => {
+      const { nodeId } = request.params;
+
+      const resolved = await resolveNodeId(nodeId);
+      if (!resolved) {
+        return reply.status(404).send({ error: 'unknown_node', nodeId });
+      }
+
+      let keys;
+      try {
+        keys = deps.wallet.getNodeKeys(resolved.type);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (/not initialized/i.test(msg)) {
+          return reply.status(503).send({ error: 'wallet_not_initialized' });
+        }
+        return reply.status(500).send({ error: 'wallet_error', message: msg });
+      }
+
+      const chains: DepositAddressesPayload['chains'] = [
+        { family: 'evm', address: keys.evmAddress },
+      ];
+
+      if (resolved.type === 'mill') {
+        if (keys.solanaAddress) {
+          chains.push({ family: 'solana', address: keys.solanaAddress });
+        }
+        if (keys.minaAddress) {
+          chains.push({ family: 'mina', address: keys.minaAddress });
+        }
+      }
+
+      const payload: DepositAddressesPayload = { chains };
       return payload;
     }
   );

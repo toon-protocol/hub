@@ -138,8 +138,8 @@ export function registerMetricsWsRoutes(
                   if (eventId) {
                     seenEventIds.add(eventId);
                     if (seenEventIds.size > MAX_SEEN_IDS) {
-                      const [oldest] = seenEventIds;
-                      seenEventIds.delete(oldest);
+                      const oldest = seenEventIds.values().next().value;
+                      if (oldest !== undefined) seenEventIds.delete(oldest);
                     }
                   }
                   // Advance sinceTs so the next poll only fetches newer events.

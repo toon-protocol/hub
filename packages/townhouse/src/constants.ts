@@ -28,3 +28,8 @@ export const DEFAULT_CONNECTOR_IMAGE =
 export const ACCOUNT_INDEX_TOWN = 0;
 export const ACCOUNT_INDEX_MILL = 1;
 export const ACCOUNT_INDEX_DVM = 2;
+
+/** BLS health port exposed by each node container type (internal Docker port). */
+export const TOWN_HEALTH_PORT = 3100;
+export const MILL_HEALTH_PORT = 3200;
+export const DVM_HEALTH_PORT = 3400;

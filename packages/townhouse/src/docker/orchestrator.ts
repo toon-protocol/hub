@@ -10,7 +10,12 @@ import { EventEmitter } from 'node:events';
 import type Docker from 'dockerode';
 import type { TownhouseConfig } from '../config/schema.js';
 import { ConnectorConfigGenerator } from '../connector/config-generator.js';
-import { CONTAINER_PREFIX } from '../constants.js';
+import {
+  CONTAINER_PREFIX,
+  TOWN_HEALTH_PORT,
+  MILL_HEALTH_PORT,
+  DVM_HEALTH_PORT,
+} from '../constants.js';
 import type { NodeType, HealthCheckOptions, BandwidthStats } from './types.js';
 import type { WalletManager } from '../wallet/index.js';
 
@@ -232,6 +237,39 @@ export class DockerOrchestrator extends EventEmitter {
     // Docker-internal fallback (server running inside Docker network)
     // nosemgrep: javascript.lang.security.detect-insecure-websocket -- Docker-internal, TLS unnecessary
     return `ws://${containerName}:${TOWN_RELAY_PORT}`;
+  }
+
+  /**
+   * Resolve the BLS health HTTP URL for a node instance.
+   *
+   * Inspects the container's port bindings to find the host-bound port for the
+   * node's health endpoint. Falls back to Docker-internal URL when running
+   * inside the Docker network or when bindings are absent.
+   *
+   * @param nodeId - The `NodeInfo.id` value (e.g. 'mill', 'dev-mill-01')
+   * @param type - Node type (determines which internal port to use)
+   */
+  async getNodeHealthEndpoint(nodeId: string, type: 'town' | 'mill' | 'dvm'): Promise<string> {
+    const port =
+      type === 'town' ? TOWN_HEALTH_PORT :
+      type === 'mill' ? MILL_HEALTH_PORT :
+      DVM_HEALTH_PORT;
+    const containerName = `${CONTAINER_PREFIX}${nodeId}`;
+    try {
+      const container = this.docker.getContainer(containerName);
+      const info = await container.inspect();
+      const portBindings = info.HostConfig?.PortBindings as
+        | Record<string, Array<{ HostIp?: string; HostPort?: string }> | null>
+        | undefined;
+      const binding = portBindings?.[`${port}/tcp`]?.[0];
+      if (binding?.HostPort) {
+        const host = binding.HostIp && binding.HostIp !== '0.0.0.0' ? binding.HostIp : '127.0.0.1';
+        return `http://${host}:${binding.HostPort}`;
+      }
+    } catch {
+      // Container not found or inspect failed — fall through to Docker-internal fallback
+    }
+    return `http://${containerName}:${port}`;
   }
 
   /**

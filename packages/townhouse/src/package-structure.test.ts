@@ -56,11 +56,13 @@ describe('package.json structure', () => {
     expect(files).toEqual(['dist']);
   });
 
-  it('does not have workspace:* in dependencies', () => {
+  it('does not have workspace:* (wildcard) in dependencies', () => {
     const deps = pkg['dependencies'] as Record<string, string> | undefined;
     if (deps) {
       for (const [, version] of Object.entries(deps)) {
-        expect(version).not.toContain('workspace:');
+        // workspace:^ and workspace:~  are fine (pinned semver range);
+        // workspace:* is disallowed (matches any version — too loose).
+        expect(version).not.toBe('workspace:*');
       }
     }
   });

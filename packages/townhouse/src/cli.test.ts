@@ -254,7 +254,7 @@ describe('CLI', () => {
 
       // Seed a wallet so dry-run exercises the full API wiring path.
       const wm = new WalletManager({ encryptedPath: walletPath });
-      const { mnemonic } = wm.generate();
+      const { mnemonic } = await wm.generate();
       await saveWallet(walletPath, encryptWallet(mnemonic, 'test-pw'));
       wm.lock();
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = 'test-pw';

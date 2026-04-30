@@ -11,6 +11,10 @@ import { StatusDot } from '@/components/primitives/StatusDot';
 import { StateShell } from '@/components/primitives/StateShell';
 import { TypeChip } from '@/components/primitives/TypeChip';
 import { MetricBlock } from '@/components/primitives/MetricBlock';
+import { LiquidityBar } from '@/components/primitives/LiquidityBar';
+import { ChainIcon } from '@/components/primitives/ChainIcon';
+import { TokenIcon } from '@/components/primitives/TokenIcon';
+import { PairChip } from '@/components/primitives/PairChip';
 
 describe('a11y baseline — WCAG 2.1 AA', () => {
   it('Shell — default', async () => {
@@ -146,6 +150,59 @@ describe('a11y baseline — WCAG 2.1 AA', () => {
 
   it('MetricBlock — compact', async () => {
     const { container } = render(<MetricBlock value={3} label="Active nodes" variant="compact" />);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('LiquidityBar — static', async () => {
+    const { container } = render(
+      <LiquidityBar allocated={30n} inActiveSwaps={20n} available={50n} total={100n} chainLabel="evm:base" assetCode="USDC" />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('LiquidityBar — pulsing', async () => {
+    const { container } = render(
+      <LiquidityBar allocated={30n} inActiveSwaps={20n} available={50n} total={100n} chainLabel="evm:base" assetCode="USDC" pulse={true} />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('ChainIcon — evm', async () => {
+    const { container } = render(<ChainIcon chain="evm" aria-label="Ethereum" />);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('ChainIcon — solana', async () => {
+    const { container } = render(<ChainIcon chain="solana" aria-label="Solana" />);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('ChainIcon — mina', async () => {
+    const { container } = render(<ChainIcon chain="mina" aria-label="Mina" />);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('TokenIcon — USDC', async () => {
+    const { container } = render(<TokenIcon token="USDC" aria-label="USD Coin" />);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('TokenIcon — ETH', async () => {
+    const { container } = render(<TokenIcon token="ETH" aria-label="Ether" />);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('PairChip — evm↔solana', async () => {
+    const { container } = render(
+      <PairChip from={{ asset: 'USDC', chain: 'evm:base:31337' }} to={{ asset: 'USDC', chain: 'solana:devnet' }} />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('PairChip — with rate', async () => {
+    const { container } = render(
+      <PairChip from={{ asset: 'USDC', chain: 'evm:base:31337' }} to={{ asset: 'USDC', chain: 'solana:devnet' }} rate="1.0" />
+    );
     expect(await axe(container)).toHaveNoViolations();
   });
 });

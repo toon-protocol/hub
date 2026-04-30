@@ -783,6 +783,9 @@ importers:
       '@toon-format/toon':
         specifier: ^1.4.0
         version: 1.4.0
+      '@toon-protocol/mill':
+        specifier: workspace:^
+        version: link:../mill
       dockerode:
         specifier: ^4.0.0
         version: 4.0.10

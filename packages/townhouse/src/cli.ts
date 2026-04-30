@@ -116,7 +116,7 @@ async function handleInit(
   }
 
   const walletManager = new WalletManager({ encryptedPath: walletPath });
-  const { mnemonic } = walletManager.generate();
+  const { mnemonic } = await walletManager.generate();
 
   // Display mnemonic ONCE for backup — this is the only place it ever appears
   console.log('');
@@ -178,7 +178,7 @@ async function handleWalletShow(
   try {
     // Decrypt mnemonic in minimal scope — fromMnemonic derives keys then
     // the mnemonic string becomes unreachable (eligible for GC)
-    walletManager.fromMnemonic(decryptWallet(result.wallet, walletPassword));
+    await walletManager.fromMnemonic(decryptWallet(result.wallet, walletPassword));
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`Failed to decrypt wallet: ${msg}`);
@@ -344,7 +344,7 @@ async function handleUp(
     }
     walletManager = new WalletManager({ encryptedPath: walletPath });
     try {
-      walletManager.fromMnemonic(decryptWallet(loaded.wallet, walletPassword));
+      await walletManager.fromMnemonic(decryptWallet(loaded.wallet, walletPassword));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`Failed to decrypt wallet: ${msg}`);

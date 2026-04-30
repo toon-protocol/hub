@@ -21,6 +21,7 @@ const NODE_LABELS: Record<NodeType, string> = {
 /** Management view routes per node type — extended as views ship. */
 const VIEW_LINKS: Partial<Record<NodeType, string>> = {
   town: '/town',
+  mill: '/mill',
 };
 
 interface NodeCardProps {

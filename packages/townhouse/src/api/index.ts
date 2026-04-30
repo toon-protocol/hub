@@ -23,6 +23,13 @@ export type {
   BandwidthPayload,
   PacketTimeseriesPayload,
   TimeseriesBucket,
+  NodeHealthPayload,
+  TownHealthPayload,
+  DvmHealthPayload,
+  MillSwapsRecentPayload,
+  DepositAddressesPayload,
+  DepositAddressEntry,
+  SwapByPairEntry,
 } from './types.js';
 
 export {

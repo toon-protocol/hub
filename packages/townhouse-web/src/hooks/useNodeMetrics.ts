@@ -64,7 +64,8 @@ export function useNodeMetrics(options: UseNodeMetricsOptions): UseNodeMetricsRe
           const detail = await detailRes.json() as NodeDetail;
           // packetsForwarded used as a proxy until a dedicated connectedClients field lands
           connectedClients = detail.metrics?.packetsForwarded ?? null;
-          currentFee = detail.config?.feePerEvent ?? null;
+          // Mill uses feeBasisPoints; Town uses feePerEvent
+          currentFee = detail.config?.feeBasisPoints ?? detail.config?.feePerEvent ?? null;
         }
 
         let bandwidth: BandwidthPayload | null = null;

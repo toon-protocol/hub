@@ -1,6 +1,7 @@
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { Home } from './views/Home';
 import { TownView } from './views/Town';
+import { MillView } from './views/Mill';
 import { NotFound } from './views/NotFound';
 
 const router = createBrowserRouter([
@@ -11,6 +12,10 @@ const router = createBrowserRouter([
   {
     path: '/town',
     element: <TownView />,
+  },
+  {
+    path: '/mill',
+    element: <MillView />,
   },
   {
     path: '*',

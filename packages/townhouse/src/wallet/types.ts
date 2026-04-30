@@ -27,6 +27,10 @@ export interface NodeKeys {
   nostrDerivationPath: string;
   /** BIP-44 derivation path used for EVM key */
   evmDerivationPath: string;
+  /** Base58-encoded Solana public key — mill only, omitted for town/dvm */
+  solanaAddress?: string;
+  /** Mina public key hex — mill only, omitted for town/dvm */
+  minaAddress?: string;
 }
 
 /** Map of node type to its derived keys */
@@ -48,6 +52,10 @@ export interface NodeKeyInfo {
   nostrDerivationPath: string;
   /** EVM derivation path */
   evmDerivationPath: string;
+  /** Base58-encoded Solana public key — mill only, omitted for town/dvm */
+  solanaAddress?: string;
+  /** Mina public key hex — mill only, omitted for town/dvm */
+  minaAddress?: string;
 }
 
 /** Persisted wallet state (in memory after decryption) */

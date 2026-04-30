@@ -75,6 +75,13 @@ export type {
   BandwidthPayload,
   PacketTimeseriesPayload,
   TimeseriesBucket,
+  NodeHealthPayload,
+  TownHealthPayload,
+  DvmHealthPayload,
+  MillSwapsRecentPayload,
+  DepositAddressesPayload,
+  DepositAddressEntry,
+  SwapByPairEntry,
 } from './api/index.js';
 export type { BandwidthStats } from './docker/index.js';
 export type { PacketLogEntry, PacketLogFilter } from './connector/types.js';
