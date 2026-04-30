@@ -391,6 +391,33 @@ describe('Compose stack integration (Story 21.7, AC #2 + #7)', () => {
   });
 });
 
+describe('DVM entrypoint Hono BLS server (Story 21.12)', () => {
+  it('[P0] entrypoint imports Hono from hono', () => {
+    expect(entrypoint).toMatch(/import.*Hono.*from ['"]hono['"]/);
+  });
+
+  it('[P0] entrypoint imports serve from @hono/node-server', () => {
+    expect(entrypoint).toMatch(/import.*serve.*from ['"]@hono\/node-server['"]/);
+  });
+
+  it('[P0] entrypoint registers GET /health route on blsApp', () => {
+    expect(entrypoint).toMatch(/blsApp\.get\(['"]\/health['"]/);
+  });
+
+  it('[P0] entrypoint calls serve() with blsPort', () => {
+    expect(entrypoint).toMatch(/serve\(\s*\{[^}]*blsPort/s);
+  });
+
+  it('[P0] SIGTERM shutdown closes blsServer before node.stop()', () => {
+    expect(entrypoint).toMatch(/blsServer/);
+    expect(entrypoint).toMatch(/node\.stop\(\)/);
+  });
+
+  it('[P0] entrypoint wraps handlers with counter.wrap()', () => {
+    expect(entrypoint).toMatch(/counter\.wrap\(/);
+  });
+});
+
 describe('Orchestrator buildNodeEnv integration (Story 21.7)', () => {
   describe('buildNodeEnv dvm output matches entrypoint expectations', () => {
     it('[P0] compose dvm service should have CONNECTOR_URL env var', () => {

@@ -783,6 +783,50 @@ describe('DockerOrchestrator', () => {
       );
     });
 
+    it('emits KIND_PRICING_<kind> env vars when kindPricing is set', async () => {
+      const config = configWithNodes(['dvm']);
+      config.nodes.dvm.kindPricing = { '5094': 5, '5250': 10000 };
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['dvm']);
+
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-dvm',
+          Env: expect.arrayContaining([
+            'KIND_PRICING_5094=5',
+            'KIND_PRICING_5250=10000',
+            'CONNECTOR_URL=ws://townhouse-connector:3000',
+          ]),
+        })
+      );
+    });
+
+    it('emits both FEE_PER_JOB and KIND_PRICING_<kind> when both are set', async () => {
+      const config = configWithNodes(['dvm']);
+      config.nodes.dvm.feePerJob = 1000;
+      config.nodes.dvm.kindPricing = { '5094': 5 };
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['dvm']);
+
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-dvm',
+          Env: expect.arrayContaining([
+            'FEE_PER_JOB=1000',
+            'KIND_PRICING_5094=5',
+          ]),
+        })
+      );
+    });
+
     it('includes SOCKS_PROXY env when transport mode is ator', async () => {
       const config = configWithNodes(['town']);
       config.transport.mode = 'ator';

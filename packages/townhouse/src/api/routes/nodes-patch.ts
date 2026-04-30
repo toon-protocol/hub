@@ -15,6 +15,7 @@ interface ConfigPatchBody {
   feePerEvent?: number;
   feeBasisPoints?: number;
   feePerJob?: number;
+  kindPricing?: Record<string, number>;
   enabled?: boolean;
 }
 
@@ -31,6 +32,19 @@ const patchBodySchema: FastifySchema = {
       feePerEvent: { type: 'number', minimum: 0, maximum: 9007199254740991 },
       feeBasisPoints: { type: 'number', minimum: 0, maximum: 9007199254740991 },
       feePerJob: { type: 'number', minimum: 0, maximum: 9007199254740991 },
+      kindPricing: {
+        type: 'object',
+        // Restrict keys to numeric strings (positive integers) to prevent
+        // prototype pollution and env-var-injection attacks via arbitrary
+        // keys (e.g. '__proto__', '5094\nFOO=bar') that flow into
+        // KIND_PRICING_<key> orchestrator env vars.
+        propertyNames: { pattern: '^[0-9]+$' },
+        additionalProperties: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 9007199254740991,
+        },
+      },
       enabled: { type: 'boolean' },
     },
   },
@@ -58,6 +72,14 @@ export function registerConfigPatchRoutes(
         });
       }
 
+      // kindPricing is only valid for dvm
+      if (body.kindPricing !== undefined && type !== 'dvm') {
+        return reply.status(400).send({
+          error: 'invalid_field',
+          message: `kindPricing not supported for type=${type}`,
+        });
+      }
+
       // Check mutex
       if (isMutating) {
         return reply.status(409).send({
@@ -78,7 +100,17 @@ export function registerConfigPatchRoutes(
           });
         }
 
-        // Deep merge the body into current config
+        // Deep merge the body into current config. kindPricing merges
+        // per-key so a partial PATCH (e.g. `{ kindPricing: { '5094': 7 } }`)
+        // does not clobber other already-set kinds in the persisted config.
+        const existingKindPricing =
+          (nodeConfig as { kindPricing?: Record<string, number> })
+            .kindPricing ?? undefined;
+        const mergedKindPricing =
+          body.kindPricing !== undefined
+            ? { ...(existingKindPricing ?? {}), ...body.kindPricing }
+            : existingKindPricing;
+
         const mergedConfig = {
           ...currentConfig,
           nodes: {
@@ -86,6 +118,9 @@ export function registerConfigPatchRoutes(
             [type]: {
               ...nodeConfig,
               ...body,
+              ...(mergedKindPricing !== undefined
+                ? { kindPricing: mergedKindPricing }
+                : {}),
             },
           },
         };
@@ -130,7 +165,8 @@ export function registerConfigPatchRoutes(
         if (
           body.feePerEvent !== undefined ||
           body.feeBasisPoints !== undefined ||
-          body.feePerJob !== undefined
+          body.feePerJob !== undefined ||
+          body.kindPricing !== undefined
         ) {
           // Fee fields changed - regenerate connector config
           const activeTypes = Object.entries(mergedConfig.nodes)
@@ -146,13 +182,14 @@ export function registerConfigPatchRoutes(
           feePerEvent?: number;
           feeBasisPoints?: number;
           feePerJob?: number;
+          kindPricing?: Record<string, number>;
         };
         if (nodeType === 'town') {
           return { enabled: u.enabled, feePerEvent: u.feePerEvent };
         } else if (nodeType === 'mill') {
           return { enabled: u.enabled, feeBasisPoints: u.feeBasisPoints };
         } else {
-          return { enabled: u.enabled, feePerJob: u.feePerJob };
+          return { enabled: u.enabled, feePerJob: u.feePerJob, kindPricing: u.kindPricing };
         }
       } finally {
         isMutating = false;

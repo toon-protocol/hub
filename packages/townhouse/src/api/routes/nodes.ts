@@ -20,8 +20,10 @@ import type {
   TimeseriesBucket,
   NodeHealthPayload,
   MillSwapsRecentPayload,
+  JobsRecentPayload,
   DepositAddressesPayload,
 } from '../types.js';
+import type { DvmHealthResponse } from '@toon-protocol/sdk';
 import type { NodeType, NodeState } from '../types.js';
 import { CONTAINER_PREFIX } from '../../constants.js';
 
@@ -32,6 +34,18 @@ interface HealthCacheEntry {
 }
 
 const HEALTH_CACHE_TTL_MS = 2_000;
+
+/**
+ * Feature-detect the event `kind` from a connector packet log entry. The
+ * connector contract's `PacketLogEntry` does not yet expose a `kind` field
+ * (see `@toon-protocol/sdk` CONNECTOR_MIGRATION.md "Townhouse-Side
+ * Contract"); when absent, packets group under bucket 0 ("unattributed")
+ * so operators can see the shortfall instead of silent data loss.
+ */
+export function extractKindFromPacketEntry(entry: unknown): number {
+  const kind = (entry as { kind?: unknown } | null)?.kind;
+  return typeof kind === 'number' && Number.isFinite(kind) ? kind : 0;
+}
 
 /** Map raw Docker container state to the API's NodeState enum. */
 function mapDockerState(raw: string | undefined): NodeState {
@@ -474,6 +488,169 @@ export function registerNodeRoutes(app: FastifyInstance, deps: ApiDeps): void {
           count: packets.length,
           volume: totalVolume.toString(),
           byPair,
+        };
+        return payload;
+      } catch (error: unknown) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code === 'ConnectorEndpointNotFound') {
+          return reply.status(503).send({
+            error: 'connector_endpoint_not_found',
+            message: 'Connector image does not expose GET /packets. See CONNECTOR_MIGRATION.md.',
+          });
+        }
+        return reply.status(503).send({ error: 'connector_unavailable' });
+      }
+    }
+  );
+
+  // ── GET /nodes/:nodeId/jobs/recent ────────────────────────────────────────
+  // Returns DVM job throughput for the requested window (default 300 s).
+  // byKind is sourced from the DVM container's health endpoint (counter-shim,
+  // the canonical source since the connector PacketLogEntry has no kind field).
+  // volume is sourced from the connector packet log (amount sum).
+
+  app.get<{
+    Params: { nodeId: string };
+    Querystring: { windowSec?: string };
+  }>(
+    '/nodes/:nodeId/jobs/recent',
+    async (request, reply) => {
+      const { nodeId } = request.params;
+
+      const resolved = await resolveNodeId(nodeId);
+      if (!resolved) {
+        return reply.status(404).send({ error: 'unknown_node', nodeId });
+      }
+      if (resolved.type !== 'dvm') {
+        return reply.status(404).send({
+          error: 'jobs_only_for_dvm',
+          message: 'jobs/recent is only available for dvm instances',
+        });
+      }
+
+      const rawWindowSec = request.query.windowSec;
+      if (rawWindowSec !== undefined && !/^\d+$/.test(rawWindowSec)) {
+        return reply.status(400).send({
+          error: 'invalid_window_sec',
+          message: 'windowSec must be a non-negative integer (1–300)',
+        });
+      }
+      const requestedWindowSec = rawWindowSec !== undefined
+        ? parseInt(rawWindowSec, 10)
+        : 300;
+      // The DVM in-memory counter is fixed at a 5-minute (300 s) window,
+      // so the byKind/byStatus/total fields can only honestly report the
+      // last 300 s. Reject windows outside [1, 300] rather than silently
+      // mixing windows across response fields.
+      if (requestedWindowSec < 1 || requestedWindowSec > 300) {
+        return reply.status(400).send({
+          error: 'invalid_window_sec',
+          message: 'windowSec must be 1–300 (DVM counter window is fixed at 5 min)',
+        });
+      }
+      const windowSec = requestedWindowSec;
+
+      // Resolve ILP address from connector peers
+      let ilpAddress: string | undefined;
+      let connectorDown = false;
+      try {
+        const peers = await deps.connectorAdmin.getPeers();
+        const peer = peers.find((p) => p.id === resolved.instanceName);
+        ilpAddress = peer?.ilpAddresses[0];
+      } catch {
+        connectorDown = true;
+      }
+
+      if (connectorDown) {
+        return reply.status(503).send({ error: 'connector_unavailable' });
+      }
+
+      // Fetch DVM health for byKind and byStatus (the canonical counter source)
+      let dvmHealth: DvmHealthResponse | null = null;
+      try {
+        const cached = healthCache.get(resolved.instanceName);
+        if (cached && Date.now() - cached.cachedAt < HEALTH_CACHE_TTL_MS) {
+          dvmHealth = cached.payload as DvmHealthResponse;
+        } else {
+          const endpoint = await deps.orchestrator.getNodeHealthEndpoint(resolved.instanceName, 'dvm');
+          // 3 s timeout mirrors the parallel /nodes/:nodeId/health route.
+          // A hung DVM container otherwise blocks Fastify indefinitely.
+          const healthController = new AbortController();
+          const healthTimeout = setTimeout(() => healthController.abort(), 3_000);
+          let healthRes: Response;
+          try {
+            // nosemgrep: javascript.lang.security.detect-insecure-http -- Docker-internal, TLS unnecessary
+            healthRes = await fetch(`${endpoint}/health`, {
+              signal: healthController.signal,
+            });
+          } finally {
+            clearTimeout(healthTimeout);
+          }
+          if (healthRes.ok) {
+            dvmHealth = await healthRes.json() as DvmHealthResponse;
+            healthCache.set(resolved.instanceName, { payload: dvmHealth, cachedAt: Date.now() });
+          }
+        }
+      } catch {
+        // Health fetch failed — degrade gracefully
+      }
+
+      const byStatus = dvmHealth?.jobsRecent?.byStatus ?? {
+        processing: 0, success: 0, error: 0, partial: 0,
+      };
+
+      // Build byKind from DVM health counter (canonical) — group into JobsByKindEntry
+      const byKindFromHealth = dvmHealth?.jobsRecent?.byKind ?? [];
+      const byKindMap = new Map<number, { count: number; volume: bigint }>();
+      for (const entry of byKindFromHealth) {
+        byKindMap.set(entry.kind, { count: entry.count, volume: 0n });
+      }
+
+      if (!ilpAddress) {
+        // ILP address unknown — return zero-volume result with health-sourced counters
+        const payload: JobsRecentPayload = {
+          count: dvmHealth?.jobsRecent?.total ?? 0,
+          volume: '0',
+          byKind: Array.from(byKindMap.entries()).map(([kind, d]) => ({
+            kind, count: d.count, volume: '0',
+          })),
+          byStatus,
+        };
+        return payload;
+      }
+
+      try {
+        const packets = await deps.connectorAdmin.getPacketLog({
+          ilpAddress,
+          since: Date.now() - windowSec * 1_000,
+          limit: 10_000,
+        });
+
+        let totalVolume = 0n;
+        for (const entry of packets) {
+          totalVolume += BigInt(entry.amount ?? 0);
+          // kind field: feature-detect — if absent, group under bucket 0 (unattributed)
+          const kind = extractKindFromPacketEntry(entry);
+          const existing = byKindMap.get(kind) ?? { count: 0, volume: 0n };
+          // Only increment count from packet log if no DVM health data available;
+          // prefer DVM counter for count, use packet log for volume only.
+          byKindMap.set(kind, {
+            count: byKindFromHealth.length > 0 ? existing.count : existing.count + 1,
+            volume: existing.volume + BigInt(entry.amount ?? 0),
+          });
+        }
+
+        const byKind = Array.from(byKindMap.entries()).map(([kind, d]) => ({
+          kind,
+          count: d.count,
+          volume: d.volume.toString(),
+        }));
+
+        const payload: JobsRecentPayload = {
+          count: dvmHealth?.jobsRecent?.total ?? packets.length,
+          volume: totalVolume.toString(),
+          byKind,
+          byStatus,
         };
         return payload;
       } catch (error: unknown) {

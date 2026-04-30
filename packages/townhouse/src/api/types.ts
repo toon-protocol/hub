@@ -8,6 +8,7 @@ import type { WalletManager } from '../wallet/index.js';
 import type { ConnectorAdminClient } from '../connector/index.js';
 import type { TownhouseConfig } from '../config/schema.js';
 import type { MillHealthResponse } from '@toon-protocol/mill';
+import type { DvmHealthResponse } from '@toon-protocol/sdk';
 
 /** Node types supported by Townhouse */
 export type NodeType = 'town' | 'mill' | 'dvm';
@@ -35,6 +36,7 @@ export interface NodeDetail extends NodeInfo {
     feePerEvent?: number;
     feeBasisPoints?: number;
     feePerJob?: number;
+    kindPricing?: Record<string, number>;
     enabled: boolean;
   };
   metrics: MetricsPayload | null;
@@ -147,16 +149,11 @@ export interface PacketTimeseriesPayload {
 /** Re-export for consumers that need the full Mill health shape */
 export type { MillHealthResponse };
 
+/** Re-export DvmHealthResponse so consumers don't need a direct SDK import */
+export type { DvmHealthResponse };
+
 /** Minimal common health shape; superset emitted by Town containers. */
 export interface TownHealthPayload {
-  status: 'ok' | 'starting' | 'stopping' | 'stopped' | 'error';
-  version?: string;
-  uptimeSec?: number;
-  nodePubkey?: string;
-}
-
-/** Minimal common health shape; superset emitted by DVM containers. */
-export interface DvmHealthPayload {
   status: 'ok' | 'starting' | 'stopping' | 'stopped' | 'error';
   version?: string;
   uptimeSec?: number;
@@ -167,7 +164,27 @@ export interface DvmHealthPayload {
 export type NodeHealthPayload =
   | MillHealthResponse
   | TownHealthPayload
-  | DvmHealthPayload;
+  | DvmHealthResponse;
+
+/** Per-kind job activity bucket for GET /nodes/:nodeId/jobs/recent */
+export interface JobsByKindEntry {
+  kind: number;
+  count: number;
+  volume: string;
+}
+
+/** Response shape for GET /nodes/:nodeId/jobs/recent */
+export interface JobsRecentPayload {
+  count: number;
+  volume: string;
+  byKind: JobsByKindEntry[];
+  byStatus: {
+    processing: number;
+    success: number;
+    error: number;
+    partial: number;
+  };
+}
 
 /** Per-pair swap activity bucket */
 export interface SwapByPairEntry {

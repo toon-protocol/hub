@@ -1,0 +1,51 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`BreakdownPill > snapshot — default three-segment pill 1`] = `
+<div
+  aria-label="Revenue: 1.23 USDC, Storage cost: —, Net: 1.23 USDC"
+  class="shadow-border inline-flex items-center gap-2 rounded-full px-3 py-1"
+>
+  <span
+    class="font-geist-sans text-xs text-ink/70"
+  >
+    Revenue
+  </span>
+  <code
+    class="font-geist-mono text-xs text-green-600/80"
+  >
+    1.23 USDC
+  </code>
+  <span
+    aria-hidden="true"
+    class="font-geist-mono text-xs text-ink/40"
+  >
+    ·
+  </span>
+  <span
+    class="font-geist-sans text-xs text-ink/70"
+  >
+    Storage cost
+  </span>
+  <code
+    class="font-geist-mono text-xs text-ink"
+  >
+    —
+  </code>
+  <span
+    aria-hidden="true"
+    class="font-geist-mono text-xs text-ink/40"
+  >
+    ·
+  </span>
+  <span
+    class="font-geist-sans text-xs text-ink/70"
+  >
+    Net
+  </span>
+  <code
+    class="font-geist-mono text-xs text-green-600/80"
+  >
+    1.23 USDC
+  </code>
+</div>
+`;

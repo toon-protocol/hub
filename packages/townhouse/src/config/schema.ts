@@ -23,6 +23,8 @@ export interface DvmNodeConfig {
   enabled: boolean;
   /** DVM job fee in millisatoshis */
   feePerJob?: number;
+  /** Per-kind pricing in millisatoshis (key = stringified kind number) */
+  kindPricing?: Record<string, number>;
   /** Docker image override */
   image?: string;
 }

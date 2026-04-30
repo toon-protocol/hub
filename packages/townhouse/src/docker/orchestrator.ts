@@ -702,6 +702,12 @@ export class DockerOrchestrator extends EventEmitter {
         if (feePerJob !== undefined) {
           env.push(`FEE_PER_JOB=${feePerJob}`);
         }
+        const kindPricing = this.config.nodes.dvm.kindPricing;
+        if (kindPricing) {
+          for (const [kind, value] of Object.entries(kindPricing)) {
+            env.push(`KIND_PRICING_${kind}=${value}`);
+          }
+        }
         break;
       }
     }

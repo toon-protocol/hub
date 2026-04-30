@@ -22,6 +22,7 @@ const NODE_LABELS: Record<NodeType, string> = {
 const VIEW_LINKS: Partial<Record<NodeType, string>> = {
   town: '/town',
   mill: '/mill',
+  dvm: '/dvm',
 };
 
 interface NodeCardProps {

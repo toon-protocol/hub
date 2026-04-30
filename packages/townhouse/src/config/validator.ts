@@ -66,6 +66,30 @@ function validateNodeConfig(
   if (raw['feePerJob'] !== undefined) {
     assertNumber(raw['feePerJob'], `${path}.feePerJob`);
   }
+  if (raw['kindPricing'] !== undefined) {
+    assertObject(raw['kindPricing'], `${path}.kindPricing`);
+    for (const [k, v] of Object.entries(raw['kindPricing'] as Record<string, unknown>)) {
+      // Keys must be positive-integer strings — prevents prototype-key
+      // pollution (`__proto__`, `constructor`) and env-var key injection
+      // (newlines / spaces) when the orchestrator emits KIND_PRICING_<k>.
+      if (!/^[0-9]+$/.test(k)) {
+        throw new ConfigValidationError(
+          `${path}.kindPricing has invalid key "${k}" — must be a positive-integer string`
+        );
+      }
+      assertNumber(v, `${path}.kindPricing.${k}`);
+      if (!Number.isInteger(v as number) || (v as number) < 0) {
+        throw new ConfigValidationError(
+          `${path}.kindPricing.${k} must be a non-negative integer`
+        );
+      }
+      if ((v as number) > Number.MAX_SAFE_INTEGER) {
+        throw new ConfigValidationError(
+          `${path}.kindPricing.${k} exceeds Number.MAX_SAFE_INTEGER`
+        );
+      }
+    }
+  }
   if (raw['image'] !== undefined) {
     assertString(raw['image'], `${path}.image`);
   }
@@ -141,7 +165,7 @@ export function validateConfig(raw: unknown): TownhouseConfig {
       },
       dvm: {
         enabled: dvm['enabled'] as boolean,
-        ...pickOptional(dvm, ['feePerJob', 'image']),
+        ...pickOptional(dvm, ['feePerJob', 'kindPricing', 'image']),
       },
     },
     wallet: { encrypted_path: wallet['encrypted_path'] as string },

@@ -9,23 +9,14 @@ import { Button, buttonVariants } from '@/components/primitives/Button';
 import { Input } from '@/components/primitives/Input';
 import { LiquidityBar } from '@/components/primitives/LiquidityBar';
 import { PairChip } from '@/components/primitives/PairChip';
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  type ChartConfig,
-} from '@/charts';
 import { useNodeMetrics } from '@/hooks/useNodeMetrics';
 import { usePacketTimeseries } from '@/hooks/usePacketTimeseries';
 import { useNodeHealth } from '@/hooks/useNodeHealth';
 import { useMillSwapsRecent, type SwapByPairEntry } from '@/hooks/useMillSwapsRecent';
-import { useDepositAddresses } from '@/hooks/useDepositAddresses';
 import { chainFamilyOf } from '@/lib/chain';
+import { formatVolume } from '@/lib/format-volume';
+import { ThroughputChart } from '@/components/charts/ThroughputChart';
+import { AddFunds } from '@/components/AddFunds';
 import type { NodeInfo } from '@toon-protocol/townhouse';
 import { colors } from '@/theme/tokens';
 
@@ -46,31 +37,9 @@ interface MillHealthShape {
   chains?: Array<'evm' | 'mina' | 'solana'>;
 }
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const CHART_CONFIG: ChartConfig = {
-  count: {
-    label: 'Swaps/hr',
-    color: colors.type.mill,
-  },
-};
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatVolume(volume: string, assetScale: number): string {
-  try {
-    const raw = BigInt(volume);
-    // Stay in bigint domain for the divisor — `10 ** assetScale` as Number
-    // loses precision once assetScale ≥ 16 (e.g. ETH at 18).
-    const divisor = 10n ** BigInt(assetScale);
-    const whole = raw / divisor;
-    const frac = raw % divisor;
-    const fracStr = frac.toString().padStart(assetScale, '0').replace(/0+$/, '');
-    return fracStr ? `${whole}.${fracStr}` : whole.toString();
-  } catch {
-    return volume;
-  }
-}
+// formatVolume extracted to @/lib/format-volume (shared with DVM view)
 
 interface ChainResolution {
   family: 'evm' | 'mina' | 'solana';
@@ -138,81 +107,6 @@ function sumByPairVolume(byPair: SwapByPairEntry[] | undefined): bigint {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-
-interface VolumeChartProps {
-  status: 'loading' | 'ready' | 'error' | 'unavailable';
-  buckets: Array<{ ts: number; count: number }>;
-  count: number;
-  averageVolume: number | null;
-  feeBasisPoints: number | null;
-}
-
-function VolumeChart({ buckets, status, count, averageVolume, feeBasisPoints }: VolumeChartProps) {
-  if (status === 'loading') {
-    return (
-      <div className="flex h-24 items-center justify-center" role="status" aria-label="Loading chart">
-        <svg className="h-5 w-5 animate-spin text-ink/30" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray="31.4 31.4" />
-        </svg>
-      </div>
-    );
-  }
-
-  if (status === 'unavailable') {
-    return (
-      <p className="py-2 text-xs text-ink/40">
-        Volume chart requires connector v3.4+ (endpoint not yet available).
-      </p>
-    );
-  }
-
-  if (status === 'error') {
-    return <p className="py-2 text-xs text-ink/40">Could not load chart data.</p>;
-  }
-
-  const chartData = buckets.map((b) => ({
-    ts: new Date(b.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    count: b.count,
-  }));
-
-  // AC-15: earnings ≈ count × averageVolume × feeBasisPoints / 10000.
-  // Render `—` when N is too small for the estimate to be stable.
-  const STABLE_THRESHOLD = 3;
-  const earningsEst =
-    feeBasisPoints !== null &&
-    averageVolume !== null &&
-    count >= STABLE_THRESHOLD &&
-    buckets.length > 0
-      ? `Approx earnings at current fee: ~${(
-          (count * averageVolume * feeBasisPoints) / 10000
-        ).toFixed(4)}`
-      : count > 0 && feeBasisPoints !== null
-        ? 'Approx earnings at current fee: —'
-        : null;
-
-  return (
-    <div>
-      <ChartContainer config={CHART_CONFIG} className="h-24">
-        <LineChart data={chartData} margin={{ top: 4, right: 4, bottom: 4, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
-          <XAxis dataKey="ts" tick={{ fontSize: 10 }} />
-          <YAxis tick={{ fontSize: 10 }} width={28} />
-          <ChartTooltip content={<ChartTooltipContent />} />
-          <Line
-            type="monotone"
-            dataKey="count"
-            stroke={colors.type.mill}
-            strokeWidth={1.5}
-            dot={false}
-          />
-        </LineChart>
-      </ChartContainer>
-      {earningsEst && (
-        <p className="font-geist-mono mt-1 text-xs text-ink/50">{earningsEst}</p>
-      )}
-    </div>
-  );
-}
 
 interface MillFeeSliderProps {
   nodeId: string;
@@ -302,62 +196,6 @@ function MillFeeSlider({
         </p>
       )}
     </div>
-  );
-}
-
-interface AddFundsProps {
-  nodeId: string;
-}
-
-function AddFunds({ nodeId }: AddFundsProps) {
-  const { chains, status } = useDepositAddresses({ nodeId });
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-
-  const handleCopy = async (address: string, index: number) => {
-    try {
-      await navigator.clipboard.writeText(address);
-      setCopiedIndex(index);
-      setTimeout(() => setCopiedIndex(null), 1500);
-    } catch {
-      setCopiedIndex(-1);
-      setTimeout(() => setCopiedIndex(null), 1500);
-    }
-  };
-
-  return (
-    <details>
-      <summary className="font-geist-sans cursor-pointer text-sm text-ink/70 hover:text-ink">
-        Add Funds
-      </summary>
-      <div className="mt-2 flex flex-col gap-1.5">
-        {status === 'loading' && (
-          <p className="text-xs text-ink/40">Loading deposit addresses…</p>
-        )}
-        {status === 'error' && (
-          <p className="text-xs text-ink/40">Could not load deposit addresses.</p>
-        )}
-        {status === 'ready' &&
-          chains.map((entry, i) => {
-            const family = entry.family;
-            return (
-              <div key={family} className="flex items-center gap-2">
-                <span className="font-geist-mono text-xs text-ink/50 w-12">{family}</span>
-                <code className="font-geist-mono min-w-0 flex-1 truncate text-xs text-ink">
-                  {entry.address}
-                </code>
-                <button
-                  type="button"
-                  className="font-geist-sans shrink-0 text-xs text-ink/50 hover:text-ink"
-                  onClick={() => void handleCopy(entry.address, i)}
-                  aria-label={`Copy ${family} deposit address`}
-                >
-                  {copiedIndex === i ? 'Copied ✓' : copiedIndex === -1 ? 'Error' : 'Copy'}
-                </button>
-              </div>
-            );
-          })}
-      </div>
-    </details>
   );
 }
 
@@ -524,13 +362,28 @@ function MillCard({ node, isRestarting, onApplyFee }: MillCardProps) {
           {/* Volume chart */}
           <div>
             <p className="font-geist-sans mb-1 text-xs text-ink/50">Swap volume per hour</p>
-            <VolumeChart
-              buckets={buckets}
-              status={chartStatus}
-              count={swapsRecent?.count ?? 0}
-              averageVolume={averageVolume}
-              feeBasisPoints={metrics.currentFee}
-            />
+            {(() => {
+              const cnt = swapsRecent?.count ?? 0;
+              const STABLE_THRESHOLD = 3;
+              const earningsEst =
+                metrics.currentFee !== null &&
+                averageVolume !== null &&
+                cnt >= STABLE_THRESHOLD &&
+                buckets.length > 0
+                  ? `Approx earnings at current fee: ~${((cnt * averageVolume * metrics.currentFee) / 10000).toFixed(4)}`
+                  : cnt > 0 && metrics.currentFee !== null
+                    ? 'Approx earnings at current fee: —'
+                    : null;
+              return (
+                <ThroughputChart
+                  buckets={buckets}
+                  status={chartStatus}
+                  count={cnt}
+                  color={colors.type.mill}
+                  earningsEst={earningsEst}
+                />
+              );
+            })()}
           </div>
 
           {/* Fee slider */}

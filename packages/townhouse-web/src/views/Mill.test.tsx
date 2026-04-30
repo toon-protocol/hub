@@ -5,6 +5,18 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { axe } from '../test-setup';
+import { colors } from '@/theme/tokens';
+// Mock ThroughputChart so we can directly assert the props Mill passes —
+// in particular the `color` prop wired to the mill accent token. Without
+// this, JSDOM + Recharts ResponsiveContainer make the rendered <Line>'s
+// stroke attribute unobservable.
+const throughputChartProps: Array<Record<string, unknown>> = [];
+vi.mock('@/components/charts/ThroughputChart', () => ({
+  ThroughputChart: (props: Record<string, unknown>) => {
+    throughputChartProps.push(props);
+    return null;
+  },
+}));
 import { MillView } from './Mill';
 
 function jsonRes(body: unknown, status = 200): Response {
@@ -90,7 +102,10 @@ function setupFetch(overrides: FetchOverrides = {}) {
   });
 }
 
-beforeEach(() => setupFetch());
+beforeEach(() => {
+  throughputChartProps.length = 0;
+  setupFetch();
+});
 afterEach(() => vi.restoreAllMocks());
 
 function renderMill() {
@@ -190,6 +205,14 @@ describe('MillView', () => {
       await new Promise((r) => setTimeout(r, 50));
     });
     expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('Task 13.2: passes the mill accent color to ThroughputChart', async () => {
+    renderMill();
+    await waitFor(() => expect(screen.getByText('Mill swap instances')).toBeDefined());
+    await waitFor(() => expect(throughputChartProps.length).toBeGreaterThan(0));
+    const lastProps = throughputChartProps[throughputChartProps.length - 1]!;
+    expect(lastProps['color']).toBe(colors.type.mill);
   });
 
   it('AC-20: renders two cards side-by-side for multi-mill dev stack', async () => {

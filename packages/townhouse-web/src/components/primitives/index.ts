@@ -30,3 +30,6 @@ export type { TokenIconProps } from './TokenIcon';
 
 export { PairChip } from './PairChip';
 export type { PairChipProps } from './PairChip';
+
+export { BreakdownPill } from './BreakdownPill';
+export type { BreakdownPillProps, BreakdownSegment } from './BreakdownPill';

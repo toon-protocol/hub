@@ -15,6 +15,7 @@ import { LiquidityBar } from '@/components/primitives/LiquidityBar';
 import { ChainIcon } from '@/components/primitives/ChainIcon';
 import { TokenIcon } from '@/components/primitives/TokenIcon';
 import { PairChip } from '@/components/primitives/PairChip';
+import { BreakdownPill } from '@/components/primitives/BreakdownPill';
 
 describe('a11y baseline — WCAG 2.1 AA', () => {
   it('Shell — default', async () => {
@@ -202,6 +203,39 @@ describe('a11y baseline — WCAG 2.1 AA', () => {
   it('PairChip — with rate', async () => {
     const { container } = render(
       <PairChip from={{ asset: 'USDC', chain: 'evm:base:31337' }} to={{ asset: 'USDC', chain: 'solana:devnet' }} rate="1.0" />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('BreakdownPill — default (positive/neutral/negative tones)', async () => {
+    const { container } = render(
+      <BreakdownPill
+        segments={[
+          { label: 'Revenue', value: '1.23 USDC', tone: 'positive' },
+          { label: 'Storage cost', value: '—', tone: 'neutral' },
+          { label: 'Net', value: '1.23 USDC', tone: 'positive' },
+        ]}
+      />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('BreakdownPill — single segment', async () => {
+    const { container } = render(
+      <BreakdownPill segments={[{ label: 'Revenue', value: '0.00 USDC' }]} />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('BreakdownPill — tone mixed variants', async () => {
+    const { container } = render(
+      <BreakdownPill
+        segments={[
+          { label: 'Good', value: '+5', tone: 'positive' },
+          { label: 'Bad', value: '-3', tone: 'negative' },
+          { label: 'Meh', value: '0', tone: 'neutral' },
+        ]}
+      />
     );
     expect(await axe(container)).toHaveNoViolations();
   });
