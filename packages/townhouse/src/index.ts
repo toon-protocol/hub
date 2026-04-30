@@ -56,4 +56,25 @@ export type {
 } from './wallet/index.js';
 
 export { createApiServer } from './api/index.js';
-export type { ApiServer, ApiDeps } from './api/index.js';
+export type {
+  ApiServer,
+  ApiDeps,
+  NodeState,
+  NodeInfo,
+  NodeDetail,
+  MetricsPayload,
+  WsMessage,
+  WsMetricsMessage,
+  WsNodeStateMessage,
+  WsHeartbeatMessage,
+  WsBatchMessage,
+  WsRelayEventsMessage,
+  WsConnectorRestartingMessage,
+  WsConnectorRestartedMessage,
+  NostrEventPayload,
+  BandwidthPayload,
+  PacketTimeseriesPayload,
+  TimeseriesBucket,
+} from './api/index.js';
+export type { BandwidthStats } from './docker/index.js';
+export type { PacketLogEntry, PacketLogFilter } from './connector/types.js';

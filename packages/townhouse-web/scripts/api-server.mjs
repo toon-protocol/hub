@@ -21,6 +21,16 @@ const connectorAdminUrl =
 
 const config = getDefaultConfig();
 
+// Dev-loop convenience: until the first-run wizard (story 21.14) ships,
+// flip the three node types to enabled so the Home view (story 21.9-lite)
+// has cards to render instead of bouncing into the empty state. The
+// underlying Docker orchestrator still reports the real container state —
+// the dev stack uses different container names (`townhouse-dev-*`) so cards
+// will surface as `down` until 21.14 wires the orchestrator to dev fixtures.
+config.nodes.town = { ...config.nodes.town, enabled: true };
+config.nodes.mill = { ...config.nodes.mill, enabled: true };
+config.nodes.dvm = { ...config.nodes.dvm, enabled: true };
+
 const docker = new Docker();
 const orchestrator = new DockerOrchestrator(docker, config);
 
@@ -29,8 +39,13 @@ const wallet = new WalletManager({ encryptedPath: walletPath });
 
 const connectorAdmin = new ConnectorAdminClient(connectorAdminUrl);
 
+// `configPath` is the YAML config destination consumed by `nodes-patch` route's
+// `saveConfig(deps.configPath, ...)`. Must NOT collide with `walletPath` — that
+// would corrupt the encrypted wallet file on a `PATCH /api/nodes/:type`.
+const configPath = process.env['TOWNHOUSE_CONFIG_PATH'] ?? join(homedir(), '.townhouse', 'townhouse-dev.yaml');
+
 const apiDeps = {
-  configPath: walletPath,
+  configPath,
   config,
   orchestrator,
   wallet,

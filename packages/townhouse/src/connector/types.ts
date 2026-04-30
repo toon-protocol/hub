@@ -117,5 +117,32 @@ export interface PeersResponse {
   peers: PeerStatus[];
 }
 
+/**
+ * Filter params for GET /packets on the connector admin API.
+ *
+ * Townhouse-Side Contract (§getPacketLog) — added in story 21.10.
+ * The connector must expose `GET /packets?ilpAddress=<>&since=<>&limit=<>`.
+ * If the running connector image does not expose this endpoint, the
+ * /nodes/:type/packets/timeseries route returns 503 and the contract canary
+ * will catch the drift. See packages/sdk/CONNECTOR_MIGRATION.md §Townhouse-Side Contract.
+ */
+export interface PacketLogFilter {
+  ilpAddress?: string;
+  since?: number;
+  limit?: number;
+}
+
+/** A single packet log entry returned by GET /packets */
+export interface PacketLogEntry {
+  ts: number;
+  ilpAddressFrom: string;
+  ilpAddressTo: string;
+  amount: string;
+  result: 'fulfill' | 'reject' | 'timeout';
+}
+
+/** Response shape for GET /packets (array of entries) */
+export type PacketLogResponse = PacketLogEntry[];
+
 /** Node types that can be registered as peers */
 export type { NodeType };

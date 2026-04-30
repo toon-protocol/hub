@@ -41,7 +41,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ConnectorAdminClient } from './admin-client.js';
 import { ConnectorConfigGenerator } from './config-generator.js';
 import { getDefaultConfig } from '../config/defaults.js';
-import type { PeerEntry } from './types.js';
+import type { PeerEntry, PacketLogEntry } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -321,6 +321,91 @@ describe('getPeers() shape contract', () => {
     await expect(client.getPeers()).rejects.toThrow(
       /invalid peers response shape/
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getPacketLog() shape + path contract — added story 21.10
+// Connector-Side Contract: GET {adminApi.port}/packets?ilpAddress=<>&since=<>&limit=<>
+// Response: PacketLogEntry[] — { ts, ilpAddressFrom, ilpAddressTo, amount, result }
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PACKET_LOG_BODY: PacketLogEntry[] = [
+  {
+    ts: 1714348800000,
+    ilpAddressFrom: 'g.toon.town',
+    ilpAddressTo: 'g.toon.mill',
+    amount: '1000',
+    result: 'fulfill',
+  },
+];
+
+/** Variant of mockFetchAt that matches by path prefix (ignores query params). */
+function mockFetchAtPath(
+  expectedPathPrefix: string,
+  body: unknown,
+  status = 200
+): { calls: string[] } {
+  const calls: string[] = [];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    calls.push(url);
+    const urlPath = url.split('?')[0] ?? url;
+    if (!urlPath.endsWith(expectedPathPrefix)) {
+      throw new Error(
+        `Canary expected client to request path '${expectedPathPrefix}', got path '${urlPath}'`
+      );
+    }
+    return new Response(JSON.stringify(body), { status });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return { calls };
+}
+
+describe('getPacketLog() shape contract', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('succeeds on documented PacketLogEntry[] shape and requests GET /packets', async () => {
+    const stub = mockFetchAtPath('/packets', PACKET_LOG_BODY);
+    const entries = await client.getPacketLog();
+    expect(Array.isArray(entries)).toBe(true);
+    expect(entries).toHaveLength(1);
+    const entry = entries[0]!;
+    expect(typeof entry.ts).toBe('number');
+    expect(entry.ts).toBe(1714348800000);
+    expect(entry.ilpAddressFrom).toBe('g.toon.town');
+    expect(entry.ilpAddressTo).toBe('g.toon.mill');
+    expect(entry.amount).toBe('1000');
+    expect(entry.result).toBe('fulfill');
+    expect(stub.calls).toHaveLength(1);
+    expect(stub.calls[0]).toMatch(/\/packets/);
+  });
+
+  it('passes ilpAddress, since, limit query params when provided', async () => {
+    const stub = mockFetchAtPath('/packets', []);
+    await client.getPacketLog({ ilpAddress: 'g.toon.town', since: 1000, limit: 50 });
+    const url = stub.calls[0] ?? '';
+    expect(url).toContain('ilpAddress=g.toon.town');
+    expect(url).toContain('since=1000');
+    expect(url).toContain('limit=50');
+  });
+
+  it('returns empty array when connector returns empty packet log', async () => {
+    mockFetchAtPath('/packets', []);
+    const entries = await client.getPacketLog();
+    expect(entries).toEqual([]);
+  });
+
+  it('throws ConnectorEndpointNotFound when connector returns 404', async () => {
+    mockFetchAtPath('/packets', 'Not Found', 404);
+    const err = await client.getPacketLog().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as NodeJS.ErrnoException).code).toBe('ConnectorEndpointNotFound');
+  });
+
+  it('rejects when body is not an array (shape drift indicator)', async () => {
+    mockFetchAtPath('/packets', { entries: [] });
+    await expect(client.getPacketLog()).rejects.toThrow(/expected array/);
   });
 });
 

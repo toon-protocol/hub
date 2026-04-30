@@ -23,6 +23,9 @@ import type {
   MetricsResponse,
   PeerStatus,
   PeersResponse,
+  PacketLogFilter,
+  PacketLogEntry,
+  PacketLogResponse,
 } from './types.js';
 
 /** Default request timeout in milliseconds (5 seconds) */
@@ -126,6 +129,44 @@ export class ConnectorAdminClient {
       throw new Error('Connector admin API: invalid peers response shape');
     }
     return (body as PeersResponse).peers;
+  }
+
+  /**
+   * GET /packets — returns the connector's raw packet log filtered by the
+   * given criteria. Used by the timeseries aggregation route (story 21.10).
+   *
+   * Townhouse-Side Contract: see packages/sdk/CONNECTOR_MIGRATION.md §getPacketLog.
+   * If the connector image does not expose GET /packets, this method throws
+   * with a `ConnectorEndpointNotFound` error code so the route can return 503.
+   *
+   * @throws Error with code='ConnectorEndpointNotFound' when connector returns 404
+   * @throws Error when connector is not running, returns non-200, or shape is invalid
+   */
+  async getPacketLog(filter: PacketLogFilter = {}): Promise<PacketLogEntry[]> {
+    const params = new URLSearchParams();
+    if (filter.ilpAddress !== undefined) params.set('ilpAddress', filter.ilpAddress);
+    if (filter.since !== undefined) params.set('since', String(filter.since));
+    if (filter.limit !== undefined) params.set('limit', String(filter.limit));
+    const path = params.toString() ? `/packets?${params.toString()}` : '/packets';
+
+    let response: Response;
+    try {
+      response = await this.fetch(path);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('404')) {
+        const err = new Error('Connector does not expose GET /packets — endpoint not found');
+        (err as NodeJS.ErrnoException).code = 'ConnectorEndpointNotFound';
+        throw err;
+      }
+      throw error;
+    }
+
+    const body: unknown = await response.json();
+    if (!Array.isArray(body)) {
+      throw new Error('Connector admin API: invalid packet log response shape — expected array');
+    }
+    return body as PacketLogResponse;
   }
 
   // ── Private helpers ──

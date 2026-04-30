@@ -67,3 +67,10 @@ export interface HealthCheckOptions {
   /** Timeout in milliseconds (default: 60000) */
   timeout?: number;
 }
+
+/** Network I/O stats for a container (from dockerode stats stream) */
+export interface BandwidthStats {
+  bytesIn: number;
+  bytesOut: number;
+  sampleAt: number;
+}

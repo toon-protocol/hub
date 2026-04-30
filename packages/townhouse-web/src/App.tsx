@@ -1,10 +1,20 @@
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
-import { Home } from './pages/Home';
+import { Home } from './views/Home';
+import { TownView } from './views/Town';
+import { NotFound } from './views/NotFound';
 
 const router = createBrowserRouter([
   {
     path: '/',
     element: <Home />,
+  },
+  {
+    path: '/town',
+    element: <TownView />,
+  },
+  {
+    path: '*',
+    element: <NotFound />,
   },
 ]);
 

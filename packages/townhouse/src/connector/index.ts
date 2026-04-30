@@ -12,4 +12,7 @@ export type {
   MetricsPeerEntry,
   PeerStatus,
   PeersResponse,
+  PacketLogFilter,
+  PacketLogEntry,
+  PacketLogResponse,
 } from './types.js';

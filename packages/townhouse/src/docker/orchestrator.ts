@@ -11,8 +11,19 @@ import type Docker from 'dockerode';
 import type { TownhouseConfig } from '../config/schema.js';
 import { ConnectorConfigGenerator } from '../connector/config-generator.js';
 import { CONTAINER_PREFIX } from '../constants.js';
-import type { NodeType, HealthCheckOptions } from './types.js';
+import type { NodeType, HealthCheckOptions, BandwidthStats } from './types.js';
 import type { WalletManager } from '../wallet/index.js';
+
+/** Nostr relay WebSocket port on Town containers (fixed by Dockerfile) */
+const TOWN_RELAY_PORT = 7100;
+
+/** Container stats cache TTL in milliseconds */
+const STATS_CACHE_TTL_MS = 5_000;
+
+interface CachedStats {
+  data: BandwidthStats | null;
+  cachedAt: number;
+}
 
 /** Docker bridge network name */
 const NETWORK_NAME = 'townhouse-net';
@@ -61,6 +72,7 @@ export class DockerOrchestrator extends EventEmitter {
   private readonly configGenerator: ConnectorConfigGenerator;
   private readonly walletManager: WalletManager | undefined;
   private activeNodes: NodeType[] = [];
+  private readonly statsCache = new Map<string, CachedStats>();
 
   constructor(
     docker: Docker,
@@ -103,21 +115,27 @@ export class DockerOrchestrator extends EventEmitter {
 
     this.emit('connectorRestarting', { reason: 'peer list updated' });
 
-    // Stop and remove existing connector
+    // Stop and remove existing connector.
+    // Use separate try-catch blocks so a failed stop() (e.g. container in
+    // Created/exited state) still allows remove() to run and clear the name.
     const connectorName = `${CONTAINER_PREFIX}connector`;
+    const existingContainer = this.docker.getContainer(connectorName);
+    try { await existingContainer.stop({ t: 5 }); } catch { /* not running */ }
+    try { await existingContainer.remove(); } catch { /* may not exist */ }
+
+    // Ensure the network exists — regenerate can be called independently of
+    // up() (e.g. fee change), so we cannot assume ensureNetwork() already ran.
+    await this.ensureNetwork();
+
+    // Start new connector with updated config. Always emit connectorRestarted in
+    // a finally block so WS clients clear the restarting state even when the
+    // connector fails to start (prevents isRestarting stuck indefinitely in UI).
     try {
-      const container = this.docker.getContainer(connectorName);
-      await container.stop({ t: 5 });
-      await container.remove();
-    } catch {
-      // Container may not exist — proceed with creation
+      await this.startConnector();
+      await this.waitForHealth(connectorName);
+    } finally {
+      this.emit('connectorRestarted', { peers: activeNodes });
     }
-
-    // Start new connector with updated config
-    await this.startConnector();
-    await this.waitForHealth(connectorName);
-
-    this.emit('connectorRestarted', { peers: activeNodes });
   }
 
   /**
@@ -186,35 +204,133 @@ export class DockerOrchestrator extends EventEmitter {
   }
 
   /**
+   * Resolve the Nostr relay WebSocket URL for a Town node instance.
+   *
+   * Inspects the container's port bindings to get the host-bound port for
+   * the relay WebSocket (7100/tcp). Falls back to the Docker-internal URL
+   * when the server is running inside the Docker network or bindings are absent.
+   *
+   * @param nodeId - The `NodeInfo.id` value (e.g. 'town', 'dev-town-01')
+   */
+  async getNodeRelayEndpoint(nodeId: string): Promise<string> {
+    const containerName = `${CONTAINER_PREFIX}${nodeId}`;
+    try {
+      const container = this.docker.getContainer(containerName);
+      const info = await container.inspect();
+      const portBindings = info.HostConfig?.PortBindings as
+        | Record<string, Array<{ HostIp?: string; HostPort?: string }> | null>
+        | undefined;
+      const binding = portBindings?.[`${TOWN_RELAY_PORT}/tcp`]?.[0];
+      if (binding?.HostPort) {
+        const host = binding.HostIp && binding.HostIp !== '0.0.0.0' ? binding.HostIp : '127.0.0.1';
+        // nosemgrep: javascript.lang.security.detect-insecure-websocket -- operator-controlled host, not user input
+        return `ws://${host}:${binding.HostPort}`;
+      }
+    } catch {
+      // Container not found or inspect failed — fall through to Docker-internal fallback
+    }
+    // Docker-internal fallback (server running inside Docker network)
+    // nosemgrep: javascript.lang.security.detect-insecure-websocket -- Docker-internal, TLS unnecessary
+    return `ws://${containerName}:${TOWN_RELAY_PORT}`;
+  }
+
+  /**
+   * Fetch network I/O stats for a container.
+   * Results are cached for 5 seconds to avoid per-request Docker API overhead.
+   *
+   * @param containerName - Full container name (e.g. 'townhouse-town')
+   * @returns Bandwidth stats or null when container is not running
+   */
+  async getContainerStats(containerName: string): Promise<BandwidthStats | null> {
+    const cached = this.statsCache.get(containerName);
+    if (cached && Date.now() - cached.cachedAt < STATS_CACHE_TTL_MS) {
+      return cached.data;
+    }
+
+    try {
+      const container = this.docker.getContainer(containerName);
+      const stats = await container.stats({ stream: false }) as unknown as Record<string, unknown>;
+
+      const networks = stats['networks'] as
+        | Record<string, { rx_bytes?: number; tx_bytes?: number }>
+        | undefined;
+
+      if (!networks) {
+        const result: BandwidthStats = { bytesIn: 0, bytesOut: 0, sampleAt: Date.now() };
+        this.statsCache.set(containerName, { data: result, cachedAt: Date.now() });
+        return result;
+      }
+
+      let bytesIn = 0;
+      let bytesOut = 0;
+      for (const iface of Object.values(networks)) {
+        bytesIn += iface.rx_bytes ?? 0;
+        bytesOut += iface.tx_bytes ?? 0;
+      }
+
+      const result: BandwidthStats = { bytesIn, bytesOut, sampleAt: Date.now() };
+      this.statsCache.set(containerName, { data: result, cachedAt: Date.now() });
+      return result;
+    } catch {
+      // Container not running or stats unavailable
+      this.statsCache.set(containerName, { data: null, cachedAt: Date.now() });
+      return null;
+    }
+  }
+
+  /**
    * Return status for all townhouse containers.
+   *
+   * Discovers both single-instance (townhouse-<type>) and multi-instance
+   * (townhouse-<prefix>-<type>-<n>) containers. Multi-instance containers
+   * are returned with a `name` matching their instance suffix so callers
+   * can build per-instance NodeInfo entries (e.g. "dev-town-01").
    */
   async status(): Promise<
     {
       name: string;
+      type: 'connector' | 'town' | 'mill' | 'dvm';
       state: string;
       health?: string;
       startedAt?: string;
     }[]
   > {
     const containers = await this.docker.listContainers({ all: true });
-    const allTypes = ['connector', 'town', 'mill', 'dvm'] as const;
+    const nodeTypes = ['town', 'mill', 'dvm'] as const;
+    type NodeType = (typeof nodeTypes)[number];
+    const allTypes = ['connector', ...nodeTypes] as const;
+
+    // Collect all containers that belong to this townhouse instance
+    const matching: {
+      containerName: string;
+      type: (typeof allTypes)[number];
+      info: (typeof containers)[number];
+    }[] = [];
+
+    for (const c of containers) {
+      for (const rawName of c.Names) {
+        const name = rawName.startsWith('/') ? rawName.slice(1) : rawName;
+        if (!name.startsWith(CONTAINER_PREFIX)) continue;
+        const suffix = name.slice(CONTAINER_PREFIX.length); // e.g. "town", "dev-town-01"
+        for (const type of allTypes) {
+          if (suffix === type || suffix.endsWith(`-${type}`) || suffix.includes(`-${type}-`)) {
+            matching.push({ containerName: name, type, info: c });
+            break;
+          }
+        }
+      }
+    }
 
     const results: {
       name: string;
+      type: (typeof allTypes)[number];
       state: string;
       health?: string;
       startedAt?: string;
     }[] = [];
-    for (const type of allTypes) {
-      const containerName = `${CONTAINER_PREFIX}${type}`;
-      const info = containers.find((c) =>
-        c.Names.some((n) => n === `/${containerName}` || n === containerName)
-      );
-      if (!info) {
-        results.push({ name: type, state: 'stopped' });
-        continue;
-      }
 
+    for (const { containerName, type, info } of matching) {
+      const suffix = containerName.slice(CONTAINER_PREFIX.length); // e.g. "town", "dev-town-01"
       let health: string | undefined;
       let startedAt: string | undefined;
       try {
@@ -225,14 +341,22 @@ export class DockerOrchestrator extends EventEmitter {
       } catch {
         // Inspect may fail if container is being removed — skip health and startedAt
       }
-
       results.push({
-        name: type,
+        name: suffix, // "town" for single-instance, "dev-town-01" for multi
+        type,
         state: info.State ?? 'stopped',
         ...(health !== undefined ? { health } : {}),
         ...(startedAt !== undefined ? { startedAt } : {}),
       });
     }
+
+    // Ensure every type has at least one entry (stopped placeholder)
+    for (const type of allTypes) {
+      if (!results.some((r) => r.type === type)) {
+        results.push({ name: type, type, state: 'stopped' });
+      }
+    }
+
     return results;
   }
 

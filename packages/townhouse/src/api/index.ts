@@ -16,6 +16,13 @@ export type {
   WsNodeStateMessage,
   WsHeartbeatMessage,
   WsBatchMessage,
+  WsRelayEventsMessage,
+  WsConnectorRestartingMessage,
+  WsConnectorRestartedMessage,
+  NostrEventPayload,
+  BandwidthPayload,
+  PacketTimeseriesPayload,
+  TimeseriesBucket,
 } from './types.js';
 
 export {

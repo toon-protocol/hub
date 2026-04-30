@@ -21,23 +21,39 @@ export interface MetricBlockProps extends VariantProps<typeof metricBlockVariant
   /** Positive = up, negative = down. NaN/Infinity is treated as "no trend". */
   trend?: number;
   className?: string;
+  /**
+   * Override the auto-generated accessible name. Useful for unavailable-data
+   * states where `"<label>: —"` would read as gibberish ("Events today em-dash"),
+   * e.g. `aria-label="metric unavailable"`.
+   */
+  'aria-label'?: string;
 }
 
 /**
  * MetricBlock — number + label + optional unit + optional trend indicator.
  * tnum applied to digits (tabular numerals). NOT a sparkline.
  */
-export function MetricBlock({ value, label, unit, trend, variant, className }: MetricBlockProps) {
+export function MetricBlock({
+  value,
+  label,
+  unit,
+  trend,
+  variant,
+  className,
+  'aria-label': ariaLabelOverride,
+}: MetricBlockProps) {
   const hasTrend = trend !== undefined && Number.isFinite(trend) && trend !== 0;
   const isPositive = hasTrend && (trend as number) > 0;
   const isNegative = hasTrend && (trend as number) < 0;
 
   const trendText = hasTrend ? `${isPositive ? '+' : ''}${trend}` : '';
-  const accessibleName = [
-    `${label}: ${value}`,
-    unit ? ` ${unit}` : '',
-    hasTrend ? ` (trend ${trendText})` : '',
-  ].join('');
+  const accessibleName =
+    ariaLabelOverride ??
+    [
+      `${label}: ${value}`,
+      unit ? ` ${unit}` : '',
+      hasTrend ? ` (trend ${trendText})` : '',
+    ].join('');
 
   return (
     <div

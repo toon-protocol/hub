@@ -16,6 +16,11 @@ export type NodeState = 'running' | 'stopped' | 'error' | 'not-created';
 
 /** Response shape for GET /nodes */
 export interface NodeInfo {
+  /**
+   * Unique instance identifier — equals `type` for single-instance deployments.
+   * Required in responses from this API; undefined in legacy test fixtures.
+   */
+  id: string;
   type: NodeType;
   enabled: boolean;
   state: NodeState;
@@ -43,6 +48,17 @@ export interface MetricsPayload {
   available: boolean;
 }
 
+/** Nostr event shape forwarded in relayEvents messages */
+export interface NostrEventPayload {
+  id: string;
+  kind: number;
+  pubkey: string;
+  content: string;
+  tags: string[][];
+  sig: string;
+  created_at: number;
+}
+
 /** WebSocket message shapes */
 export interface WsMetricsMessage {
   type: 'metrics';
@@ -67,16 +83,65 @@ export interface WsBatchMessage {
   ts: number;
 }
 
+/** Forwarded Nostr event from a Town relay subscription */
+export interface WsRelayEventsMessage {
+  type: 'relayEvents';
+  nodeId: string;
+  payload: NostrEventPayload;
+  ts: number;
+}
+
+/** Connector restart notifications (emitted around fee-config PATCH) */
+export interface WsConnectorRestartingMessage {
+  type: 'connectorRestarting';
+  ts: number;
+}
+
+export interface WsConnectorRestartedMessage {
+  type: 'connectorRestarted';
+  ts: number;
+}
+
 export interface NodeStatePayload {
   name: string;
   state: string;
+}
+
+/** Server notification when the upstream relay WebSocket for a nodeId disconnects */
+export interface WsRelayEventsStatusMessage {
+  type: 'relayEventsStatus';
+  nodeId: string;
+  connected: boolean;
+  ts: number;
 }
 
 export type WsMessage =
   | WsMetricsMessage
   | WsNodeStateMessage
   | WsHeartbeatMessage
-  | WsBatchMessage;
+  | WsBatchMessage
+  | WsRelayEventsMessage
+  | WsConnectorRestartingMessage
+  | WsConnectorRestartedMessage
+  | WsRelayEventsStatusMessage;
+
+/** Response shape for GET /nodes/:type/bandwidth */
+export interface BandwidthPayload {
+  bytesIn: number;
+  bytesOut: number;
+  sampleAt: number;
+}
+
+/** Packet log time-series bucket */
+export interface TimeseriesBucket {
+  ts: number;
+  count: number;
+}
+
+/** Response shape for GET /nodes/:type/packets/timeseries */
+export interface PacketTimeseriesPayload {
+  buckets: TimeseriesBucket[];
+}
 
 /** API server returned by createApiServer */
 export interface ApiServer {

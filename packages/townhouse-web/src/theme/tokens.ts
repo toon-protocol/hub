@@ -94,3 +94,11 @@ export const breakpoints = {
 
 /** shadow-border utility: replaces CSS border declarations (D21-008 rule) */
 export const shadowBorder = `0 0 0 1px ${colors.shadow}`;
+
+// ── Token aliases ─────────────────────────────────────────────────────────────
+
+/** Workflow-accent tokens — spec-aligned aliases for `colors.type`.
+ *  Use `tokens.accent.town` etc. for spec-specified color references. */
+export const tokens = {
+  accent: colors.type,
+} as const;
