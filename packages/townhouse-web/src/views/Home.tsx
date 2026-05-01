@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Shell } from '@/components/primitives/Shell';
 import { StatusDot } from '@/components/primitives/StatusDot';
 import { TypeChip } from '@/components/primitives/TypeChip';
@@ -10,6 +11,7 @@ import { useNodes } from '@/hooks/useNodes';
 import { useNodeStatusStream } from '@/hooks/useNodeStatusStream';
 import type { StreamConnectionStatus } from '@/hooks/useNodeStatusStream';
 import { mapToStatusDot, formatUptime } from '@/lib/node-status';
+import { useWizardState } from '@/hooks/useWizardState';
 import type { NodeInfo, NodeType, MetricsPayload } from '@toon-protocol/townhouse';
 
 const NODE_LABELS: Record<NodeType, string> = {
@@ -215,8 +217,22 @@ function NodeCardSkeleton() {
 }
 
 export function Home({ transportMode = 'unknown' }: HomeProps = {}) {
+  const navigate = useNavigate();
   const { nodes, metricsByType, status, refetch } = useNodes();
   const { statesByName, connectionStatus, reconnect } = useNodeStatusStream();
+  const { state: wizardState, status: wizardStatus } = useWizardState();
+
+  // AC-12: Auto-redirect to /wizard when setup hasn't been run.
+  // Depend on the boolean derivation, not on the wizardState object — useWizardState
+  // returns a fresh object on every poll, so depending on it would re-fire navigate()
+  // every 2s and amplify any transient flap into a redirect storm.
+  const shouldRedirectToWizard =
+    wizardStatus === 'ready' && wizardState?.config_exists === false;
+  useEffect(() => {
+    if (shouldRedirectToWizard) {
+      navigate('/wizard', { replace: true });
+    }
+  }, [shouldRedirectToWizard, navigate]);
 
   const enabledNodes = nodes.filter((n) => n.enabled);
 
@@ -267,9 +283,7 @@ export function Home({ transportMode = 'unknown' }: HomeProps = {}) {
                 No nodes configured. Run the first-run wizard to enable Town,
                 Mill, or DVM.
               </p>
-              {/* Spec AC-7: link to `/` until the wizard ships in 21.14;
-                  flip back to `/wizard` then. */}
-              <Link to="/" className={buttonVariants({ variant: 'primary' })}>
+              <Link to="/wizard" className={buttonVariants({ variant: 'primary' })}>
                 Run wizard
               </Link>
             </div>

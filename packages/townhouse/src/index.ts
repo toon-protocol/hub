@@ -55,7 +55,7 @@ export type {
   EncryptedWallet,
 } from './wallet/index.js';
 
-export { createApiServer } from './api/index.js';
+export { createApiServer, createWizardApiServer } from './api/index.js';
 export type {
   ApiServer,
   ApiDeps,
@@ -94,6 +94,9 @@ export type {
   RevealRequest,
   RevealResponse,
   TransactionReceiptPayload,
+  WizardStatePayload,
+  WizardInitRequest,
+  WizardProgressMessage,
 } from './api/index.js';
 export type { BandwidthStats } from './docker/index.js';
 export type { PacketLogEntry, PacketLogFilter } from './connector/types.js';

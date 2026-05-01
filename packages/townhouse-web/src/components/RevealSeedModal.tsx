@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/primitives/Button';
 import { Input } from '@/components/primitives/Input';
+import { MnemonicGrid } from '@/components/primitives/MnemonicGrid';
 import { useWalletReveal } from '@/hooks/useWalletReveal';
 
 export interface RevealSeedModalProps {
@@ -130,17 +131,7 @@ export function RevealSeedModal({ open, onClose }: RevealSeedModalProps) {
         ) : (
           /* Step 2: Mnemonic display */
           <div className="flex flex-col gap-4">
-            <ol
-              aria-label="Recovery seed phrase"
-              className="grid grid-cols-4 gap-2"
-            >
-              {words.map((word, i) => (
-                <li key={i} className="flex items-baseline gap-1">
-                  <span className="font-geist-mono text-xs text-ink/40 tabular-nums">{i + 1}.</span>
-                  <span className="font-geist-mono text-sm text-ink">{word}</span>
-                </li>
-              ))}
-            </ol>
+            <MnemonicGrid words={words} />
 
             <div className="flex gap-2">
               <Button variant="secondary" onClick={() => void handleCopyMnemonic()}>

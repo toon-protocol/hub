@@ -5,6 +5,16 @@ import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { main, CliHelpRequested } from './cli.js';
 import { DEFAULT_CONNECTOR_IMAGE } from './constants.js';
+import { WalletManager, encryptWallet, saveWallet } from './wallet/index.js';
+
+const WALLET_TEST_PASSWORD = 'townhouse-test-pw';
+
+/** Create an encrypted wallet at the given path for use in `up` tests. */
+async function seedWallet(walletPath: string, password = WALLET_TEST_PASSWORD): Promise<void> {
+  const wm = new WalletManager({ encryptedPath: walletPath });
+  const { mnemonic } = await wm.generate();
+  await saveWallet(walletPath, encryptWallet(mnemonic, password));
+}
 
 /**
  * Mock dockerode for all CLI tests.
@@ -80,7 +90,8 @@ function makeTempDir(): string {
 /** Standard config YAML with specific nodes enabled */
 function makeConfig(
   enabled: { town?: boolean; mill?: boolean; dvm?: boolean } = {},
-  walletPath = '/tmp/wallet.enc'
+  walletPath = '/tmp/wallet.enc',
+  apiPort = 0
 ): string {
   return `
 nodes:
@@ -101,7 +112,7 @@ connector:
 transport:
   mode: direct
 api:
-  port: 9400
+  port: ${apiPort}
   host: 127.0.0.1
 logging:
   level: info
@@ -224,10 +235,14 @@ describe('CLI', () => {
 
     it('up with enabled nodes starts orchestration', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        writeFileSync(configPath, makeConfig({ town: true }, walletPath), 'utf-8');
 
         await main(['up', '-c', configPath]);
         const output = consoleSpy.mock.calls
@@ -237,6 +252,27 @@ describe('CLI', () => {
         expect(output).toContain('town');
         expect(output).toContain('started successfully');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('up fails fast when wallet is absent (AC-2)', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+
+      try {
+        // Config exists but wallet doesn't — should fail fast
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+
+        await main(['up', '-c', configPath]);
+
+        const errorOutput = consoleErrorSpy.mock.calls.map((c) => String(c[0])).join('\n');
+        expect(errorOutput).toContain('Wallet not found');
+        expect(errorOutput).toContain('townhouse setup');
+        expect(process.exitCode).toBe(1);
+      } finally {
+        process.exitCode = 0;
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -260,9 +296,10 @@ describe('CLI', () => {
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = 'test-pw';
 
       try {
+        // Use port 9400 explicitly so the dry-run log matches the expected pattern
         writeFileSync(
           configPath,
-          makeConfig({ town: true }, walletPath),
+          makeConfig({ town: true }, walletPath, 9400),
           'utf-8'
         );
 
@@ -599,10 +636,14 @@ describe('CLI', () => {
   describe('--town, --mill, --dvm flags (Story 21.2, T-007, T-010)', () => {
     it('parses --town flag and starts town node', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        writeFileSync(configPath, makeConfig({ town: true }, walletPath), 'utf-8');
 
         await main(['up', '--town', '-c', configPath]);
 
@@ -612,16 +653,21 @@ describe('CLI', () => {
         expect(output).toContain('town');
         expect(output).toContain('Starting nodes');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
 
     it('parses --mill flag and starts mill node', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ mill: true }), 'utf-8');
+        writeFileSync(configPath, makeConfig({ mill: true }, walletPath), 'utf-8');
 
         await main(['up', '--mill', '-c', configPath]);
 
@@ -630,16 +676,21 @@ describe('CLI', () => {
           .join('\n');
         expect(output).toContain('mill');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
 
     it('parses --dvm flag and starts dvm node', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ dvm: true }), 'utf-8');
+        writeFileSync(configPath, makeConfig({ dvm: true }, walletPath), 'utf-8');
 
         await main(['up', '--dvm', '-c', configPath]);
 
@@ -648,20 +699,21 @@ describe('CLI', () => {
           .join('\n');
         expect(output).toContain('dvm');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
 
     it('parses combined --town --mill flags', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(
-          configPath,
-          makeConfig({ town: true, mill: true }),
-          'utf-8'
-        );
+        writeFileSync(configPath, makeConfig({ town: true, mill: true }, walletPath), 'utf-8');
 
         await main(['up', '--town', '--mill', '-c', configPath]);
 
@@ -671,20 +723,21 @@ describe('CLI', () => {
         expect(output).toContain('town');
         expect(output).toContain('mill');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
 
     it('defaults to all enabled nodes when no flags provided', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(
-          configPath,
-          makeConfig({ town: true, mill: true }),
-          'utf-8'
-        );
+        writeFileSync(configPath, makeConfig({ town: true, mill: true }, walletPath), 'utf-8');
 
         // No --town/--mill/--dvm flags: should start all enabled (town + mill)
         await main(['up', '-c', configPath]);
@@ -695,6 +748,7 @@ describe('CLI', () => {
         expect(output).toContain('town');
         expect(output).toContain('mill');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -707,10 +761,14 @@ describe('CLI', () => {
       const processOnSpy = vi.spyOn(process, 'on');
 
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        writeFileSync(configPath, makeConfig({ town: true }, walletPath), 'utf-8');
 
         await main(['up', '--town', '-c', configPath]);
 
@@ -720,6 +778,7 @@ describe('CLI', () => {
         );
       } finally {
         processOnSpy.mockRestore();
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -731,10 +790,14 @@ describe('CLI', () => {
         .mockImplementation((() => {}) as never);
 
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        writeFileSync(configPath, makeConfig({ town: true }, walletPath), 'utf-8');
 
         await main(['up', '--town', '-c', configPath]);
 
@@ -754,6 +817,7 @@ describe('CLI', () => {
       } finally {
         processOnSpy.mockRestore();
         processExitSpy.mockRestore();
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -777,16 +841,21 @@ describe('CLI', () => {
         );
 
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        writeFileSync(configPath, makeConfig({ town: true }, walletPath), 'utf-8');
 
         await expect(main(['up', '--town', '-c', configPath])).rejects.toThrow(
           /docker.*not available/i
         );
       } finally {
         DockerOrchestrator.prototype.up = originalUp;
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });

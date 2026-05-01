@@ -33,3 +33,6 @@ export type { PairChipProps } from './PairChip';
 
 export { BreakdownPill } from './BreakdownPill';
 export type { BreakdownPillProps, BreakdownSegment } from './BreakdownPill';
+
+export { MnemonicGrid } from './MnemonicGrid';
+export type { MnemonicGridProps } from './MnemonicGrid';

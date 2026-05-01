@@ -281,6 +281,44 @@ export interface TransactionReceiptPayload {
   txHash: string;
 }
 
+// ── Wizard API types (Story 21.14) ────────────────────────────────────────────
+
+/** Response shape for GET /api/wizard/state */
+export interface WizardStatePayload {
+  config_exists: boolean;
+  wallet_exists: boolean;
+  containers_running: boolean;
+  mode: 'wizard' | 'normal';
+  ts: number;
+}
+
+/** Request body for POST /api/wizard/init.
+ *  `mnemonic` is required in BOTH modes — `mnemonic_mode` is purely a UX hint
+ *  for the SPA, the server is stateless WRT the mnemonic and validates it on
+ *  every init regardless of mode (see story 21.14 Dev Notes). */
+export interface WizardInitRequest {
+  password: string;
+  password_confirm: string;
+  mnemonic_mode: 'generate' | 'import';
+  mnemonic: string;
+  backup_ack: boolean;
+  nodes: {
+    town: { enabled: boolean; feePerEvent?: number };
+    mill: { enabled: boolean; feeBasisPoints?: number };
+    dvm: { enabled: boolean; feePerJob?: number };
+  };
+  transport: { mode: 'direct' | 'ator' };
+}
+
+/** Progress messages streamed over WS /api/wizard/progress */
+export type WizardProgressMessage =
+  | { type: 'pull_progress'; image: string; status: string; progress?: string; ts: number }
+  | { type: 'container_starting'; name: string; ts: number }
+  | { type: 'container_healthy'; name: string; ts: number }
+  | { type: 'container_failed'; name: string; reason: string; ts: number }
+  | { type: 'launch_complete'; ts: number }
+  | { type: 'error'; message: string; ts: number };
+
 // ── API server types ───────────────────────────────────────────────────────────
 
 /** API server returned by createApiServer */

@@ -3,6 +3,7 @@
  */
 
 export { createApiServer } from './server.js';
+export { createWizardApiServer } from './wizard-server.js';
 export type {
   ApiServer,
   ApiDeps,
@@ -42,6 +43,9 @@ export type {
   RevealRequest,
   RevealResponse,
   TransactionReceiptPayload,
+  WizardStatePayload,
+  WizardInitRequest,
+  WizardProgressMessage,
 } from './types.js';
 
 export {

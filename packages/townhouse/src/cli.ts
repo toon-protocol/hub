@@ -27,7 +27,10 @@ import { DockerOrchestrator } from './docker/index.js';
 import type { NodeType } from './docker/types.js';
 import { ConnectorAdminClient } from './connector/index.js';
 import { createApiServer } from './api/server.js';
+import { createWizardApiServer } from './api/wizard-server.js';
 import type { ApiServer } from './api/index.js';
+import { RealBrowserOpener } from './cli/browser-opener.js';
+import type { BrowserOpener } from './cli/browser-opener.js';
 import {
   WalletManager,
   encryptWallet,
@@ -51,7 +54,8 @@ export class CliHelpRequested extends Error {
 const HELP_TEXT = `townhouse — TOON node orchestrator
 
 Usage:
-  townhouse init [--force] [--config-dir <dir>] [--password <pw>]  Initialize config + wallet
+  townhouse setup [--no-browser] [--port <n>] [--config-dir <dir>]  Run the first-run setup wizard
+  townhouse init [--force] [--config-dir <dir>] [--password <pw>]   Initialize config + wallet
   townhouse up [--town] [--mill] [--dvm] [-c <path>] [--password <pw>]  Start nodes
   townhouse down [-c <path>]                     Stop all nodes
   townhouse status [-c <path>]                   Show node status
@@ -64,6 +68,8 @@ Flags:
   --mill       Start Mill (swap) node
   --dvm        Start DVM (compute) node
   --password   Wallet password (non-interactive mode)
+  --no-browser Skip opening the browser automatically (setup command)
+  --port       Override the API port (setup command, default 9400)
   If no flags given, starts all enabled nodes from config.`;
 
 const DEFAULT_CONFIG_DIR = join(homedir(), '.townhouse');
@@ -146,6 +152,85 @@ async function handleInit(
 
   // Zero key material
   walletManager.lock();
+}
+
+async function handleSetup(
+  configDir: string | undefined,
+  port: number,
+  noBrowser: boolean,
+  dockerInstance?: Docker,
+  browserOpener?: BrowserOpener
+): Promise<void> {
+  const dir = resolve(configDir ?? DEFAULT_CONFIG_DIR);
+  const configPath = join(dir, 'config.yaml');
+  const walletPath = join(dir, 'wallet.enc');
+
+  // Short-circuit only when BOTH the config and the wallet exist — a config
+  // without a wallet would land the operator in a circular dead-end (setup
+  // says "already initialized → run `townhouse up`", up then errors that the
+  // wallet is missing). Guide them to clean up and re-run setup instead.
+  if (existsSync(configPath) && existsSync(walletPath)) {
+    console.log('Already initialized — run `townhouse up` to start your nodes');
+    return;
+  }
+  if (existsSync(configPath) && !existsSync(walletPath)) {
+    console.error(
+      `Found ${configPath} but no wallet at ${walletPath}.\n` +
+        `Delete the orphan config and re-run \`townhouse setup\`, or restore the wallet from backup.`
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const docker = dockerInstance ?? new Docker();
+  const opener = browserOpener ?? new RealBrowserOpener();
+
+  const wizardServer = await createWizardApiServer({
+    configDir: dir,
+    configPath,
+    walletPath,
+    port,
+    docker,
+  });
+
+  const url = `http://127.0.0.1:${port}/wizard`;
+
+  try {
+    await wizardServer.app.listen({ host: '127.0.0.1', port });
+  } catch (err: unknown) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === 'EADDRINUSE') {
+      console.error(
+        `Port ${port} is already in use. Pass \`--port <n>\` to choose a different port.`
+      );
+      process.exitCode = 1;
+      try { await wizardServer.close(); } catch { /* best-effort */ }
+      return;
+    }
+    throw err;
+  }
+  console.log(`Wizard ready at ${url}`);
+
+  if (!noBrowser) {
+    await opener.open(url);
+  }
+
+  // Wire signal handlers via process.once so they self-remove after firing
+  // — prevents listener leaks when tests call main(['setup', ...]) repeatedly.
+  // The Fastify server keeps the process alive after handleSetup returns;
+  // signals trigger graceful close.
+  let shuttingDown = false;
+  const shutdown = async (sig: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`\nReceived ${sig}, shutting down...`);
+    try {
+      await wizardServer.close();
+    } catch { /* best-effort */ }
+    process.exit(0);
+  };
+  process.once('SIGINT', () => { void shutdown('SIGINT'); });
+  process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
 }
 
 async function handleWalletShow(
@@ -322,12 +407,12 @@ async function handleUp(
   // orchestration-only callers (CI, tooling, smoke tests) still work.
   const walletPath = config.wallet.encrypted_path;
   let walletManager: WalletManager | undefined;
-  let skipApi = false;
   if (!existsSync(walletPath)) {
-    console.warn(
-      `[Townhouse] No wallet found at ${walletPath}; API server will not start. Run \`townhouse init\` and restart to enable the API.`
+    console.error(
+      `Wallet not found at ${walletPath}. Run \`townhouse setup\` first (or restore your wallet backup).`
     );
-    skipApi = true;
+    process.exitCode = 1;
+    return;
   } else {
     const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
     if (!walletPassword) {
@@ -427,8 +512,8 @@ async function handleUp(
       console.log('[dry-run] Skipped orchestrator.up()');
     }
 
-    // Start API server after nodes are up (skipped when no wallet file exists)
-    if (!skipApi && walletManager) {
+    // Start API server after nodes are up
+    if (walletManager) {
       const connectorAdmin = new ConnectorAdminClient(
         `http://127.0.0.1:${config.connector.adminPort}`
       );
@@ -465,8 +550,6 @@ async function handleUp(
         await apiServer.close();
         apiServer = undefined;
       }
-    } else if (dryRun) {
-      console.log('[dry-run] API startup skipped (no wallet).');
     }
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -515,7 +598,8 @@ async function handleDown(
  */
 export async function main(
   argv: string[],
-  dockerInstance?: Docker
+  dockerInstance?: Docker,
+  browserOpener?: BrowserOpener
 ): Promise<void> {
   const { values, positionals } = parseArgs({
     args: argv,
@@ -529,6 +613,8 @@ export async function main(
       dvm: { type: 'boolean' },
       password: { type: 'string' },
       'dry-run': { type: 'boolean' },
+      'no-browser': { type: 'boolean' },
+      port: { type: 'string' },
     },
     strict: false,
     allowPositionals: true,
@@ -547,6 +633,24 @@ export async function main(
   }
 
   switch (command) {
+    case 'setup': {
+      const portStr = values['port'] as string | undefined;
+      // Reject trailing junk like "9400foo" (parseInt would silently accept).
+      const port = portStr ? Number(portStr) : 9400;
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        console.error('--port must be an integer between 1 and 65535');
+        process.exitCode = 1;
+        break;
+      }
+      await handleSetup(
+        values['config-dir'] as string | undefined,
+        port,
+        values['no-browser'] === true,
+        dockerInstance,
+        browserOpener
+      );
+      break;
+    }
     case 'init': {
       await handleInit(
         values.force === true,

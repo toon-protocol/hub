@@ -5,6 +5,15 @@ import { Home } from './Home';
 import { axe } from '../test-setup';
 import type { NodeInfo, NodeDetail } from '@toon-protocol/townhouse';
 
+// Mock useWizardState to return config_exists: true by default (normal mode)
+vi.mock('@/hooks/useWizardState', () => ({
+  useWizardState: () => ({
+    state: { config_exists: true, wallet_exists: true, containers_running: true, mode: 'normal', ts: Date.now() },
+    status: 'ready',
+    refetch: vi.fn(),
+  }),
+}));
+
 // Hand-rolled WebSocket mock — same pattern as useNodeStatusStream.test.ts
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -112,7 +121,7 @@ describe('Home view', () => {
     expect(screen.queryByLabelText(/^dvm node$/i)).toBeNull();
   });
 
-  it('renders empty state with link to / (wizard route lands in 21.14)', async () => {
+  it('renders empty state with link to /wizard (AC-12)', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonRes([
         { type: 'town', enabled: false, state: 'not-created', uptimeSeconds: null, image: '' },
@@ -123,7 +132,7 @@ describe('Home view', () => {
       expect(screen.getByText(/no nodes configured/i)).toBeInTheDocument();
     });
     const wizardLink = screen.getByRole('link', { name: /run wizard/i });
-    expect(wizardLink.getAttribute('href')).toBe('/');
+    expect(wizardLink.getAttribute('href')).toBe('/wizard');
   });
 
   it('renders error state with retry when /api/nodes fails', async () => {

@@ -17,6 +17,11 @@ export default defineConfig({
         ws: true,
         rewrite: (path) => path.replace(/^\/api\/metrics/, '/metrics'),
       },
+      '/api/wizard/progress': {
+        target: 'http://127.0.0.1:9400',
+        ws: true,
+        rewrite: (path) => path.replace(/^\/api\/wizard\/progress/, '/wizard/progress'),
+      },
       '/api': {
         target: 'http://127.0.0.1:9400',
         rewrite: (path) => path.replace(/^\/api/, ''),

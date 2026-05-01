@@ -316,4 +316,62 @@ describe('a11y baseline — WCAG 2.1 AA', () => {
     );
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  // Wizard surfaces (AC-27)
+  it('MnemonicGrid — 12 words', async () => {
+    const { MnemonicGrid } = await import('@/components/primitives/MnemonicGrid');
+    const words = Array.from({ length: 12 }, (_, i) => `word${i + 1}`);
+    const { container } = render(<MnemonicGrid words={words} />);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('PullProgressList — with messages', async () => {
+    const { PullProgressList } = await import('@/components/PullProgressList');
+    const { container } = render(
+      <PullProgressList messages={[
+        { type: 'pull_progress', image: 'toon:town', status: 'Pulling', progress: '50%', ts: Date.now() },
+        { type: 'container_healthy', name: 'townhouse-connector', ts: Date.now() },
+      ]} />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('WizardStepNodes — step 1', async () => {
+    const { WizardStepNodes } = await import('@/components/wizard/WizardStepNodes');
+    const { container } = render(
+      <WizardStepNodes
+        selection={{ town: false, mill: false, dvm: false }}
+        onChange={() => {}}
+        onContinue={() => {}}
+      />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('WizardStepPrivacy — step 3', async () => {
+    const { WizardStepPrivacy } = await import('@/components/wizard/WizardStepPrivacy');
+    const { container } = render(
+      <WizardStepPrivacy
+        transport="direct"
+        onChange={() => {}}
+        onContinue={() => {}}
+        onBack={() => {}}
+      />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('WizardStepFees — step 4 (all nodes enabled)', async () => {
+    const { WizardStepFees } = await import('@/components/wizard/WizardStepFees');
+    const { container } = render(
+      <WizardStepFees
+        fees={{ townFeePerEvent: 100, millFeeBasisPoints: 30, dvmFeePerJob: 5000 }}
+        nodesEnabled={{ town: true, mill: true, dvm: true }}
+        onChange={() => {}}
+        onContinue={() => {}}
+        onBack={() => {}}
+      />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
 });
