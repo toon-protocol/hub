@@ -8,7 +8,9 @@ export interface WizardError {
 }
 
 export interface UseWizardSubmitResult {
-  submit: (req: WizardInitRequest) => Promise<{ status: 'launching' } | WizardError>;
+  submit: (
+    req: WizardInitRequest
+  ) => Promise<{ status: 'launching' } | WizardError>;
   previewMnemonic: () => Promise<string>;
 }
 
@@ -24,11 +26,18 @@ interface UseWizardSubmitOptions {
  *
  * SECURITY: previewMnemonic result is never cached — caller must store it if needed.
  */
-export function useWizardSubmit(options: UseWizardSubmitOptions = {}): UseWizardSubmitResult {
-  const { initUrl = '/api/wizard/init', previewUrl = '/api/wizard/mnemonic-preview' } = options;
+export function useWizardSubmit(
+  options: UseWizardSubmitOptions = {}
+): UseWizardSubmitResult {
+  const {
+    initUrl = '/api/wizard/init',
+    previewUrl = '/api/wizard/mnemonic-preview',
+  } = options;
 
   return useMemo<UseWizardSubmitResult>(() => {
-    async function submit(req: WizardInitRequest): Promise<{ status: 'launching' } | WizardError> {
+    async function submit(
+      req: WizardInitRequest
+    ): Promise<{ status: 'launching' } | WizardError> {
       let res: Response;
       try {
         res = await fetch(initUrl, {
@@ -37,19 +46,30 @@ export function useWizardSubmit(options: UseWizardSubmitOptions = {}): UseWizard
           body: JSON.stringify(req),
         });
       } catch {
-        return { code: 'network_error', message: 'Network error — is the API running?' };
+        return {
+          code: 'network_error',
+          message: 'Network error — is the API running?',
+        };
       }
 
       let parsed: unknown;
       try {
         parsed = await res.json();
       } catch {
-        return { code: 'parse_error', message: `Unexpected response (${res.status})`, httpStatus: res.status };
+        return {
+          code: 'parse_error',
+          message: `Unexpected response (${res.status})`,
+          httpStatus: res.status,
+        };
       }
 
       if (!res.ok) {
         const err = parsed as { code?: string; message?: string };
-        return { code: err.code ?? 'unknown_error', message: err.message, httpStatus: res.status };
+        return {
+          code: err.code ?? 'unknown_error',
+          message: err.message,
+          httpStatus: res.status,
+        };
       }
 
       return parsed as { status: 'launching' };

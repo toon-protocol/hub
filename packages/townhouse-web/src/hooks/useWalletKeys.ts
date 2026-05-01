@@ -4,7 +4,9 @@ import type { NodeKeyInfo } from '@toon-protocol/townhouse';
 export type UseWalletKeysStatus = 'loading' | 'ready' | 'error';
 
 /** Single fetch of GET /wallet, mirrors useNodes failure handling. */
-export function useWalletKeys(options: { url?: string; timeoutMs?: number } = {}): {
+export function useWalletKeys(
+  options: { url?: string; timeoutMs?: number } = {}
+): {
   keys: NodeKeyInfo[];
   status: UseWalletKeysStatus;
   refetch: () => void;
@@ -31,7 +33,7 @@ export function useWalletKeys(options: { url?: string; timeoutMs?: number } = {}
           setStatus('error');
           return;
         }
-        const payload = await res.json() as { keys: NodeKeyInfo[] };
+        const payload = (await res.json()) as { keys: NodeKeyInfo[] };
         if (cancelled) return;
         setKeys(payload.keys ?? []);
         setStatus('ready');

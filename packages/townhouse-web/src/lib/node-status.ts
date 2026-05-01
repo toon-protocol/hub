@@ -11,7 +11,9 @@ export type StatusDotState = 'ok' | 'degraded' | 'down' | 'unknown';
  * `paused → stopped`) deliberately map to `degraded` so AC-10 verification
  * (`docker pause` flipping the dot) works without an API change.
  */
-export function mapToStatusDot(state: string | NodeState | undefined): StatusDotState {
+export function mapToStatusDot(
+  state: string | NodeState | undefined
+): StatusDotState {
   if (!state) return 'unknown';
   switch (state) {
     case 'running':

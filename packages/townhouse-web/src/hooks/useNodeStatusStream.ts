@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NodeType, WsMessage, WsNodeStateMessage } from '@toon-protocol/townhouse';
+import type {
+  NodeType,
+  WsMessage,
+  WsNodeStateMessage,
+} from '@toon-protocol/townhouse';
 
-export type StreamConnectionStatus = 'connecting' | 'open' | 'degraded' | 'closed';
+export type StreamConnectionStatus =
+  | 'connecting'
+  | 'open'
+  | 'degraded'
+  | 'closed';
 
 export interface UseNodeStatusStreamResult {
   /**
@@ -82,7 +90,9 @@ export function useNodeStatusStream(
     options.initialBackoffMs ?? DEFAULT_INITIAL_BACKOFF_MS;
   const maxBackoffMs = options.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS;
 
-  const [statesByName, setStatesByName] = useState<Partial<Record<NodeType, string>>>({});
+  const [statesByName, setStatesByName] = useState<
+    Partial<Record<NodeType, string>>
+  >({});
   const [connectionStatus, setConnectionStatus] =
     useState<StreamConnectionStatus>('connecting');
 

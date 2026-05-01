@@ -34,6 +34,8 @@ export type {
 export {
   ConnectorConfigGenerator,
   ConnectorAdminClient,
+  TransportProbe,
+  DEFAULT_ATOR_PROXY,
 } from './connector/index.js';
 export type {
   ConnectorRuntimeConfig,
@@ -97,6 +99,9 @@ export type {
   WizardStatePayload,
   WizardInitRequest,
   WizardProgressMessage,
+  TransportStatusPayload,
+  TransportPatchRequest,
+  TransportPatchResponse,
 } from './api/index.js';
 export type { BandwidthStats } from './docker/index.js';
 export type { PacketLogEntry, PacketLogFilter } from './connector/types.js';

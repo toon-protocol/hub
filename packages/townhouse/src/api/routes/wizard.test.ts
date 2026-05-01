@@ -9,7 +9,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { registerWizardRoutes, buildConfigFromRequest, type WizardTransitionState } from './wizard.js';
+import {
+  registerWizardRoutes,
+  buildConfigFromRequest,
+  type WizardTransitionState,
+} from './wizard.js';
 import type { WizardInitRequest } from '../types.js';
 
 function makeTempDir(): string {
@@ -21,7 +25,9 @@ function makeTempDir(): string {
 const VALID_MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
-function makeValidPayload(overrides: Partial<WizardInitRequest> = {}): WizardInitRequest {
+function makeValidPayload(
+  overrides: Partial<WizardInitRequest> = {}
+): WizardInitRequest {
   return {
     password: 'test-password-123',
     password_confirm: 'test-password-123',
@@ -38,7 +44,11 @@ function makeValidPayload(overrides: Partial<WizardInitRequest> = {}): WizardIni
   };
 }
 
-async function buildApp(state: WizardTransitionState, configPath: string, walletPath: string) {
+async function buildApp(
+  state: WizardTransitionState,
+  configPath: string,
+  walletPath: string
+) {
   const app = Fastify({ logger: false });
   await app.register(websocket);
   registerWizardRoutes(app, { configPath, walletPath }, state);
@@ -107,14 +117,25 @@ describe('GET /wizard/state (AC-3)', () => {
 describe('POST /wizard/mnemonic-preview (AC-6)', () => {
   let dir: string;
 
-  beforeEach(() => { dir = makeTempDir(); });
-  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    dir = makeTempDir();
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
 
   it('returns a valid 12-word BIP-39 phrase', async () => {
     const state: WizardTransitionState = { mode: 'wizard' };
-    const app = await buildApp(state, join(dir, 'config.yaml'), join(dir, 'wallet.enc'));
+    const app = await buildApp(
+      state,
+      join(dir, 'config.yaml'),
+      join(dir, 'wallet.enc')
+    );
 
-    const res = await app.inject({ method: 'POST', url: '/wizard/mnemonic-preview' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/wizard/mnemonic-preview',
+    });
     expect(res.statusCode).toBe(200);
     const { mnemonic } = res.json() as { mnemonic: string };
     expect(typeof mnemonic).toBe('string');
@@ -123,18 +144,35 @@ describe('POST /wizard/mnemonic-preview (AC-6)', () => {
 
   it('returns distinct phrases on repeated calls', async () => {
     const state: WizardTransitionState = { mode: 'wizard' };
-    const app = await buildApp(state, join(dir, 'config.yaml'), join(dir, 'wallet.enc'));
+    const app = await buildApp(
+      state,
+      join(dir, 'config.yaml'),
+      join(dir, 'wallet.enc')
+    );
 
-    const r1 = await app.inject({ method: 'POST', url: '/wizard/mnemonic-preview' });
-    const r2 = await app.inject({ method: 'POST', url: '/wizard/mnemonic-preview' });
+    const r1 = await app.inject({
+      method: 'POST',
+      url: '/wizard/mnemonic-preview',
+    });
+    const r2 = await app.inject({
+      method: 'POST',
+      url: '/wizard/mnemonic-preview',
+    });
     expect(r1.json().mnemonic).not.toBe(r2.json().mnemonic);
   });
 
   it('returns 503 after transition to normal mode', async () => {
     const state: WizardTransitionState = { mode: 'normal' };
-    const app = await buildApp(state, join(dir, 'config.yaml'), join(dir, 'wallet.enc'));
+    const app = await buildApp(
+      state,
+      join(dir, 'config.yaml'),
+      join(dir, 'wallet.enc')
+    );
 
-    const res = await app.inject({ method: 'POST', url: '/wizard/mnemonic-preview' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/wizard/mnemonic-preview',
+    });
     expect(res.statusCode).toBe(503);
     expect(res.json().error).toBe('wizard_already_completed');
   });
@@ -147,9 +185,19 @@ describe('POST /wizard/mnemonic-preview (AC-6)', () => {
       const state: WizardTransitionState = { mode: 'wizard' };
       const app = Fastify({ logger: false });
       await app.register(websocket);
-      registerWizardRoutes(app, { configPath: join(dir, 'config.yaml'), walletPath: join(dir, 'wallet.enc') }, state);
+      registerWizardRoutes(
+        app,
+        {
+          configPath: join(dir, 'config.yaml'),
+          walletPath: join(dir, 'wallet.enc'),
+        },
+        state
+      );
 
-      const res = await app.inject({ method: 'POST', url: '/wizard/mnemonic-preview' });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/wizard/mnemonic-preview',
+      });
       const mnemonic = res.json().mnemonic as string;
 
       // Verify no log call contains ANY word of the mnemonic. The earlier
@@ -176,12 +224,24 @@ describe('POST /wizard/mnemonic-preview (AC-6)', () => {
 describe('POST /wizard/init (AC-4, AC-5)', () => {
   let dir: string;
 
-  beforeEach(() => { dir = makeTempDir(); });
-  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    dir = makeTempDir();
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
 
   async function postInit(payload: unknown, state?: WizardTransitionState) {
-    const st = state ?? { mode: 'wizard' as const, progressBuffer: [], progressSockets: new Set() };
-    const app = await buildApp(st, join(dir, 'config.yaml'), join(dir, 'wallet.enc'));
+    const st = state ?? {
+      mode: 'wizard' as const,
+      progressBuffer: [],
+      progressSockets: new Set(),
+    };
+    const app = await buildApp(
+      st,
+      join(dir, 'config.yaml'),
+      join(dir, 'wallet.enc')
+    );
     return app.inject({
       method: 'POST',
       url: '/wizard/init',
@@ -190,26 +250,34 @@ describe('POST /wizard/init (AC-4, AC-5)', () => {
   }
 
   it('returns 400 password_invalid when password is empty', async () => {
-    const res = await postInit(makeValidPayload({ password: '', password_confirm: '' }));
+    const res = await postInit(
+      makeValidPayload({ password: '', password_confirm: '' })
+    );
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('password_invalid');
   });
 
   it('returns 400 password_invalid when password > 256 chars', async () => {
     const long = 'a'.repeat(257);
-    const res = await postInit(makeValidPayload({ password: long, password_confirm: long }));
+    const res = await postInit(
+      makeValidPayload({ password: long, password_confirm: long })
+    );
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('password_invalid');
   });
 
   it('returns 400 password_mismatch when passwords differ', async () => {
-    const res = await postInit(makeValidPayload({ password_confirm: 'different-pw' }));
+    const res = await postInit(
+      makeValidPayload({ password_confirm: 'different-pw' })
+    );
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('password_mismatch');
   });
 
   it('returns 400 mnemonic_mode_invalid for bad mnemonic_mode', async () => {
-    const res = await postInit(makeValidPayload({ mnemonic_mode: 'bad' as never }));
+    const res = await postInit(
+      makeValidPayload({ mnemonic_mode: 'bad' as never })
+    );
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('mnemonic_mode_invalid');
   });
@@ -221,7 +289,9 @@ describe('POST /wizard/init (AC-4, AC-5)', () => {
   });
 
   it('returns 400 mnemonic_invalid when mnemonic is not valid BIP-39', async () => {
-    const res = await postInit(makeValidPayload({ mnemonic: 'not a valid mnemonic at all really no' }));
+    const res = await postInit(
+      makeValidPayload({ mnemonic: 'not a valid mnemonic at all really no' })
+    );
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('mnemonic_invalid');
   });
@@ -234,49 +304,77 @@ describe('POST /wizard/init (AC-4, AC-5)', () => {
   });
 
   it('returns 400 backup_not_acknowledged even in import mode (AC-5)', async () => {
-    const res = await postInit(makeValidPayload({
-      mnemonic_mode: 'import',
-      mnemonic: VALID_MNEMONIC,
-      backup_ack: false,
-    }));
+    const res = await postInit(
+      makeValidPayload({
+        mnemonic_mode: 'import',
+        mnemonic: VALID_MNEMONIC,
+        backup_ack: false,
+      })
+    );
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('backup_not_acknowledged');
   });
 
   it('returns 400 no_nodes_selected when all nodes disabled', async () => {
-    const res = await postInit(makeValidPayload({
-      nodes: { town: { enabled: false }, mill: { enabled: false }, dvm: { enabled: false } },
-    }));
+    const res = await postInit(
+      makeValidPayload({
+        nodes: {
+          town: { enabled: false },
+          mill: { enabled: false },
+          dvm: { enabled: false },
+        },
+      })
+    );
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('no_nodes_selected');
   });
 
   it('returns 400 fee_out_of_range for town fee > 1000', async () => {
-    const res = await postInit(makeValidPayload({
-      nodes: { town: { enabled: true, feePerEvent: 1001 }, mill: { enabled: false }, dvm: { enabled: false } },
-    }));
+    const res = await postInit(
+      makeValidPayload({
+        nodes: {
+          town: { enabled: true, feePerEvent: 1001 },
+          mill: { enabled: false },
+          dvm: { enabled: false },
+        },
+      })
+    );
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('fee_out_of_range');
   });
 
   it('returns 400 fee_out_of_range for mill feeBasisPoints > 100', async () => {
-    const res = await postInit(makeValidPayload({
-      nodes: { town: { enabled: false }, mill: { enabled: true, feeBasisPoints: 101 }, dvm: { enabled: false } },
-    }));
+    const res = await postInit(
+      makeValidPayload({
+        nodes: {
+          town: { enabled: false },
+          mill: { enabled: true, feeBasisPoints: 101 },
+          dvm: { enabled: false },
+        },
+      })
+    );
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('fee_out_of_range');
   });
 
   it('returns 400 fee_out_of_range for dvm feePerJob > 100000', async () => {
-    const res = await postInit(makeValidPayload({
-      nodes: { town: { enabled: false }, mill: { enabled: false }, dvm: { enabled: true, feePerJob: 100001 } },
-    }));
+    const res = await postInit(
+      makeValidPayload({
+        nodes: {
+          town: { enabled: false },
+          mill: { enabled: false },
+          dvm: { enabled: true, feePerJob: 100001 },
+        },
+      })
+    );
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('fee_out_of_range');
   });
 
   it('returns 400 transport_invalid for bad transport mode', async () => {
-    const res = await postInit(makeValidPayload({ transport: { mode: 'bad' as never } }));
+    const res = await postInit(
+      makeValidPayload({ transport: { mode: 'bad' as never } })
+    );
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('transport_invalid');
   });
@@ -297,8 +395,16 @@ describe('POST /wizard/init (AC-4, AC-5)', () => {
 
   it('returns 409 wizard_already_completed after transition to normal mode', async () => {
     const state: WizardTransitionState = { mode: 'normal' };
-    const app = await buildApp(state, join(dir, 'config.yaml'), join(dir, 'wallet.enc'));
-    const res = await app.inject({ method: 'POST', url: '/wizard/init', payload: makeValidPayload() });
+    const app = await buildApp(
+      state,
+      join(dir, 'config.yaml'),
+      join(dir, 'wallet.enc')
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/wizard/init',
+      payload: makeValidPayload(),
+    });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe('wizard_already_completed');
   });
@@ -336,8 +442,16 @@ describe('POST /wizard/init (AC-4, AC-5)', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
-      const state: WizardTransitionState = { mode: 'wizard', progressBuffer: [], progressSockets: new Set() };
-      const app = await buildApp(state, join(dir, 'config.yaml'), join(dir, 'wallet.enc'));
+      const state: WizardTransitionState = {
+        mode: 'wizard',
+        progressBuffer: [],
+        progressSockets: new Set(),
+      };
+      const app = await buildApp(
+        state,
+        join(dir, 'config.yaml'),
+        join(dir, 'wallet.enc')
+      );
       const payload = makeValidPayload();
 
       await app.inject({ method: 'POST', url: '/wizard/init', payload });
@@ -384,17 +498,28 @@ describe('buildConfigFromRequest', () => {
   });
 
   it('applies transport mode', () => {
-    const config = buildConfigFromRequest(makeValidPayload({ transport: { mode: 'ator' } }), '/tmp/test/config.yaml');
+    const config = buildConfigFromRequest(
+      makeValidPayload({ transport: { mode: 'ator' } }),
+      '/tmp/test/config.yaml'
+    );
     expect(config.transport.mode).toBe('ator');
   });
 
   it('sets wallet path relative to config dir (POSIX)', () => {
-    const config = buildConfigFromRequest(makeValidPayload(), '/home/user/.townhouse/config.yaml');
-    expect(config.wallet.encrypted_path).toBe('/home/user/.townhouse/wallet.enc');
+    const config = buildConfigFromRequest(
+      makeValidPayload(),
+      '/home/user/.townhouse/config.yaml'
+    );
+    expect(config.wallet.encrypted_path).toBe(
+      '/home/user/.townhouse/wallet.enc'
+    );
   });
 
   it('handles paths whose filename is not literally "config.yaml"', () => {
-    const config = buildConfigFromRequest(makeValidPayload(), '/tmp/foo/townhouse.yaml');
+    const config = buildConfigFromRequest(
+      makeValidPayload(),
+      '/tmp/foo/townhouse.yaml'
+    );
     // Must place wallet.enc in the same directory regardless of config filename
     expect(config.wallet.encrypted_path).toBe('/tmp/foo/wallet.enc');
   });
@@ -402,16 +527,28 @@ describe('buildConfigFromRequest', () => {
 
 describe('WS /wizard/progress (AC-7)', () => {
   let dir: string;
-  beforeEach(() => { dir = makeTempDir(); });
-  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    dir = makeTempDir();
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
 
   async function buildAndListen(state: WizardTransitionState) {
     const app = Fastify({ logger: false });
     await app.register(websocket);
-    registerWizardRoutes(app, { configPath: join(dir, 'config.yaml'), walletPath: join(dir, 'wallet.enc') }, state);
+    registerWizardRoutes(
+      app,
+      {
+        configPath: join(dir, 'config.yaml'),
+        walletPath: join(dir, 'wallet.enc'),
+      },
+      state
+    );
     await app.listen({ host: '127.0.0.1', port: 0 });
     const address = app.server.address();
-    if (!address || typeof address === 'string') throw new Error('Failed to bind WS test server');
+    if (!address || typeof address === 'string')
+      throw new Error('Failed to bind WS test server');
     return { app, port: address.port };
   }
 
@@ -433,7 +570,9 @@ describe('WS /wizard/progress (AC-7)', () => {
       // Attach the message listener BEFORE the open handshake completes —
       // the server replays the buffer immediately on upgrade, so a late
       // listener would miss the replay.
-      client.on('message', (data) => { received.push(String(data)); });
+      client.on('message', (data) => {
+        received.push(String(data));
+      });
       await new Promise<void>((resolve, reject) => {
         client.on('open', () => resolve());
         client.on('error', reject);
@@ -442,17 +581,30 @@ describe('WS /wizard/progress (AC-7)', () => {
       // Wait briefly for the buffer replay to drain
       await new Promise((r) => setTimeout(r, 50));
       expect(received).toHaveLength(2);
-      expect(JSON.parse(received[0]!)).toMatchObject({ type: 'pull_progress', image: 'connector' });
-      expect(JSON.parse(received[1]!)).toMatchObject({ type: 'container_starting', name: 'town' });
+      expect(JSON.parse(received[0]!)).toMatchObject({
+        type: 'pull_progress',
+        image: 'connector',
+      });
+      expect(JSON.parse(received[1]!)).toMatchObject({
+        type: 'container_starting',
+        name: 'town',
+      });
 
       // Live broadcast — push to the server's socket set and verify the client gets it
-      const liveMsg = { type: 'container_healthy' as const, name: 'town', ts: 3 };
+      const liveMsg = {
+        type: 'container_healthy' as const,
+        name: 'town',
+        ts: 3,
+      };
       for (const sock of state.progressSockets!) {
         sock.send(JSON.stringify(liveMsg));
       }
       await new Promise((r) => setTimeout(r, 50));
       expect(received).toHaveLength(3);
-      expect(JSON.parse(received[2]!)).toMatchObject({ type: 'container_healthy', name: 'town' });
+      expect(JSON.parse(received[2]!)).toMatchObject({
+        type: 'container_healthy',
+        name: 'town',
+      });
 
       client.close();
       await new Promise((r) => setTimeout(r, 50));

@@ -12,40 +12,78 @@ import type { ConnectorAdminClient } from '../../connector/admin-client.js';
 import { getDefaultConfig } from '../../config/defaults.js';
 
 class MockOrchestrator {
-  private statusEntries: Array<{ name: string; type: string; state: string }> = [
-    { name: 'mill', type: 'mill', state: 'running' },
-  ];
+  private statusEntries: Array<{ name: string; type: string; state: string }> =
+    [{ name: 'mill', type: 'mill', state: 'running' }];
   setStatus(entries: Array<{ name: string; type: string; state: string }>) {
     this.statusEntries = entries;
   }
   async status() {
     return this.statusEntries;
   }
-  async getNodeHealthEndpoint() { return 'http://127.0.0.1:3200'; }
-  async getContainerStats() { return null; }
-  on() { return this; }
-  off() { return this; }
+  async getNodeHealthEndpoint() {
+    return 'http://127.0.0.1:3200';
+  }
+  async getContainerStats() {
+    return null;
+  }
+  on() {
+    return this;
+  }
+  off() {
+    return this;
+  }
 }
 
 class MockWalletManager {
-  getNodeKeys() { return { evmAddress: '0x1234', nostrPubkey: 'a'.repeat(64), nostrSecretKey: new Uint8Array(32), evmPrivateKey: new Uint8Array(32), nostrDerivationPath: '', evmDerivationPath: '' }; }
-  listKeys() { return []; }
+  getNodeKeys() {
+    return {
+      evmAddress: '0x1234',
+      nostrPubkey: 'a'.repeat(64),
+      nostrSecretKey: new Uint8Array(32),
+      evmPrivateKey: new Uint8Array(32),
+      nostrDerivationPath: '',
+      evmDerivationPath: '',
+    };
+  }
+  listKeys() {
+    return [];
+  }
 }
 
 class MockConnectorAdmin {
-  private packets: Array<{ ilpAddressFrom: string; ilpAddressTo: string; amount: string; ts: number }> = [];
+  private packets: Array<{
+    ilpAddressFrom: string;
+    ilpAddressTo: string;
+    amount: string;
+    ts: number;
+  }> = [];
   private fail = false;
   private failWithCode: string | null = null;
-  private peers: Array<{ id: string; ilpAddresses: string[]; connected: boolean }> = [
-    { id: 'mill', ilpAddresses: ['test.mill'], connected: true },
-  ];
+  private peers: Array<{
+    id: string;
+    ilpAddresses: string[];
+    connected: boolean;
+  }> = [{ id: 'mill', ilpAddresses: ['test.mill'], connected: true }];
 
-  setPackets(packets: typeof this.packets) { this.packets = packets; }
-  setFail(f: boolean) { this.fail = f; }
-  setFailWithCode(code: string) { this.failWithCode = code; }
-  setPeers(p: typeof this.peers) { this.peers = p; }
+  setPackets(packets: typeof this.packets) {
+    this.packets = packets;
+  }
+  setFail(f: boolean) {
+    this.fail = f;
+  }
+  setFailWithCode(code: string) {
+    this.failWithCode = code;
+  }
+  setPeers(p: typeof this.peers) {
+    this.peers = p;
+  }
 
-  async getMetrics() { return { aggregate: { packetsForwarded: 0, packetsRejected: 0, bytesSent: 0 }, peers: [] }; }
+  async getMetrics() {
+    return {
+      aggregate: { packetsForwarded: 0, packetsRejected: 0, bytesSent: 0 },
+      peers: [],
+    };
+  }
 
   async getPeers() {
     return this.peers;
@@ -89,19 +127,39 @@ describe('GET /nodes/:nodeId/swaps/recent (AC-3, Story 21.11)', () => {
   it('returns count + volume + byPair from packet log', async () => {
     const admin = new MockConnectorAdmin();
     admin.setPackets([
-      { ilpAddressFrom: 'test.sender', ilpAddressTo: 'test.mill', amount: '1000000', ts: Date.now() },
-      { ilpAddressFrom: 'test.sender', ilpAddressTo: 'test.mill', amount: '2000000', ts: Date.now() },
-      { ilpAddressFrom: 'test.other', ilpAddressTo: 'test.mill', amount: '500000', ts: Date.now() },
+      {
+        ilpAddressFrom: 'test.sender',
+        ilpAddressTo: 'test.mill',
+        amount: '1000000',
+        ts: Date.now(),
+      },
+      {
+        ilpAddressFrom: 'test.sender',
+        ilpAddressTo: 'test.mill',
+        amount: '2000000',
+        ts: Date.now(),
+      },
+      {
+        ilpAddressFrom: 'test.other',
+        ilpAddressTo: 'test.mill',
+        amount: '500000',
+        ts: Date.now(),
+      },
     ]);
     registerNodeRoutes(app, buildDeps(admin));
 
-    const res = await app.inject({ method: 'GET', url: '/nodes/mill/swaps/recent' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/nodes/mill/swaps/recent',
+    });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.count).toBe(3);
     expect(body.volume).toBe('3500000');
     expect(body.byPair).toHaveLength(2);
-    const senderPair = body.byPair.find((p: { pair: string }) => p.pair.startsWith('test.sender'));
+    const senderPair = body.byPair.find((p: { pair: string }) =>
+      p.pair.startsWith('test.sender')
+    );
     expect(senderPair.count).toBe(2);
     expect(senderPair.volume).toBe('3000000');
   });
@@ -111,7 +169,10 @@ describe('GET /nodes/:nodeId/swaps/recent (AC-3, Story 21.11)', () => {
     admin.setPackets([]);
     registerNodeRoutes(app, buildDeps(admin));
 
-    const res = await app.inject({ method: 'GET', url: '/nodes/mill/swaps/recent' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/nodes/mill/swaps/recent',
+    });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.count).toBe(0);
@@ -123,7 +184,10 @@ describe('GET /nodes/:nodeId/swaps/recent (AC-3, Story 21.11)', () => {
     const admin = new MockConnectorAdmin();
     registerNodeRoutes(app, buildDeps(admin));
 
-    const res = await app.inject({ method: 'GET', url: '/nodes/mill/swaps/recent?windowSec=9999' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/nodes/mill/swaps/recent?windowSec=9999',
+    });
     expect(res.statusCode).toBe(400);
   });
 
@@ -131,7 +195,10 @@ describe('GET /nodes/:nodeId/swaps/recent (AC-3, Story 21.11)', () => {
     const admin = new MockConnectorAdmin();
     registerNodeRoutes(app, buildDeps(admin));
 
-    const res = await app.inject({ method: 'GET', url: '/nodes/mill/swaps/recent?windowSec=1e10' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/nodes/mill/swaps/recent?windowSec=1e10',
+    });
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).error).toBe('invalid_window_sec');
   });
@@ -141,7 +208,10 @@ describe('GET /nodes/:nodeId/swaps/recent (AC-3, Story 21.11)', () => {
     admin.setFail(true);
     registerNodeRoutes(app, buildDeps(admin));
 
-    const res = await app.inject({ method: 'GET', url: '/nodes/mill/swaps/recent' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/nodes/mill/swaps/recent',
+    });
     expect(res.statusCode).toBe(503);
   });
 
@@ -150,7 +220,10 @@ describe('GET /nodes/:nodeId/swaps/recent (AC-3, Story 21.11)', () => {
     admin.setFailWithCode('ConnectorEndpointNotFound');
     registerNodeRoutes(app, buildDeps(admin));
 
-    const res = await app.inject({ method: 'GET', url: '/nodes/mill/swaps/recent' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/nodes/mill/swaps/recent',
+    });
     expect(res.statusCode).toBe(503);
     expect(JSON.parse(res.body).error).toBe('connector_endpoint_not_found');
   });
@@ -188,7 +261,10 @@ describe('GET /nodes/:nodeId/swaps/recent (AC-3, Story 21.11)', () => {
 
     registerNodeRoutes(app, buildDeps(admin));
 
-    const res = await app.inject({ method: 'GET', url: '/nodes/mill/swaps/recent' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/nodes/mill/swaps/recent',
+    });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.count).toBe(0);
@@ -203,7 +279,10 @@ describe('GET /nodes/:nodeId/swaps/recent (AC-3, Story 21.11)', () => {
 
     registerNodeRoutes(app, buildDeps(admin, orch));
 
-    const res = await app.inject({ method: 'GET', url: '/nodes/town/swaps/recent' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/nodes/town/swaps/recent',
+    });
     expect(res.statusCode).toBe(404);
     expect(JSON.parse(res.body).error).toBe('swaps_only_for_mill');
   });

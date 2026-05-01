@@ -3,7 +3,11 @@
  * Consumed by both createApiServer and createWizardApiServer.
  */
 
-import Fastify, { type FastifyInstance, type FastifyServerOptions, type FastifyBaseLogger } from 'fastify';
+import Fastify, {
+  type FastifyInstance,
+  type FastifyServerOptions,
+  type FastifyBaseLogger,
+} from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { buildCorsOptions } from './cors.js';
@@ -27,7 +31,9 @@ export interface FastifyBuildOptions {
  * secrets (mnemonic, password, password_confirm) so request-shape logging cannot
  * leak credentials even if the log level is bumped.
  */
-export async function buildFastifyApp(opts: FastifyBuildOptions = {}): Promise<FastifyInstance> {
+export async function buildFastifyApp(
+  opts: FastifyBuildOptions = {}
+): Promise<FastifyInstance> {
   const bindHost = opts.bindHost ?? '127.0.0.1';
 
   if (!LOOPBACK_HOSTS.includes(bindHost)) {
@@ -68,11 +74,24 @@ export async function buildFastifyApp(opts: FastifyBuildOptions = {}): Promise<F
   const app = Fastify({
     logger,
     bodyLimit: 16 * 1024,
+    // SECURITY/CONTRACT: schemas with `additionalProperties: false` must REJECT
+    // unknown keys with a 400, not silently strip them. Operators shipping a typo
+    // should see a loud failure, not a no-op success.
+    ajv: {
+      customOptions: {
+        removeAdditional: false,
+      },
+    },
   } as FastifyServerOptions);
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error);
-    const err = error as { statusCode?: number; code?: string; message?: string; validation?: unknown };
+    const err = error as {
+      statusCode?: number;
+      code?: string;
+      message?: string;
+      validation?: unknown;
+    };
     const isCorsRejection = err.message === 'Origin not allowed';
     const statusCode = isCorsRejection ? 403 : (err.statusCode ?? 500);
 
@@ -92,7 +111,9 @@ export async function buildFastifyApp(opts: FastifyBuildOptions = {}): Promise<F
     }
 
     reply.status(statusCode).send({
-      error: isCorsRejection ? 'origin_not_allowed' : (err.code ?? 'internal_error'),
+      error: isCorsRejection
+        ? 'origin_not_allowed'
+        : (err.code ?? 'internal_error'),
       message,
     });
   });

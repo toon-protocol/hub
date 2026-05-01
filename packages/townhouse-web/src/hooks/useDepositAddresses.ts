@@ -42,7 +42,7 @@ export function useDepositAddresses(options: UseDepositAddressesOptions): {
           setStatus('error');
           return;
         }
-        const payload = await res.json() as { chains: DepositAddressEntry[] };
+        const payload = (await res.json()) as { chains: DepositAddressEntry[] };
         if (cancelled) return;
         setChains(payload.chains ?? []);
         setStatus('ready');

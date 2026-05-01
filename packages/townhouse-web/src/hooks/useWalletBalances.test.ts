@@ -4,14 +4,34 @@ import { useWalletBalances } from './useWalletBalances';
 
 const BALANCES_PAYLOAD = {
   entries: [
-    { nodeType: 'town', family: 'evm', token: 'ETH', address: '0x1111', balance: '1000', scale: 18, available: true },
-    { nodeType: 'mill', family: 'solana', token: 'SOL', address: 'SolAddr', balance: '500', scale: 9, available: true },
+    {
+      nodeType: 'town',
+      family: 'evm',
+      token: 'ETH',
+      address: '0x1111',
+      balance: '1000',
+      scale: 18,
+      available: true,
+    },
+    {
+      nodeType: 'mill',
+      family: 'solana',
+      token: 'SOL',
+      address: 'SolAddr',
+      balance: '500',
+      scale: 9,
+      available: true,
+    },
   ],
   ts: 1234567890,
 };
 
 function jsonRes(body: unknown, status = 200): Response {
-  return { ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) } as unknown as Response;
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  } as unknown as Response;
 }
 
 beforeEach(() => {
@@ -49,9 +69,14 @@ describe('useWalletBalances', () => {
 
   it('aborts on unmount', async () => {
     let observedSignal: AbortSignal | undefined;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(((_url: string, init?: { signal?: AbortSignal }) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(((
+      _url: string,
+      init?: { signal?: AbortSignal }
+    ) => {
       observedSignal = init?.signal;
-      return new Promise<Response>(() => { /* never resolves */ });
+      return new Promise<Response>(() => {
+        /* never resolves */
+      });
     }) as unknown as typeof fetch);
     const { unmount } = renderHook(() =>
       useWalletBalances({ url: '/api/wallet/balances', pollIntervalMs: 60_000 })

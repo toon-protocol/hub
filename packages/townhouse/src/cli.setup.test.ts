@@ -13,15 +13,51 @@ import { NoopBrowserOpener } from './cli/browser-opener.js';
 // Mock dockerode
 vi.mock('dockerode', () => ({
   default: class MockDocker {
-    createContainer() { return Promise.resolve({ start: vi.fn(), inspect: vi.fn().mockResolvedValue({ State: { Health: { Status: 'healthy' }, Running: true } }) }); }
-    getContainer() { return { start: vi.fn(), stop: vi.fn(), remove: vi.fn(), inspect: vi.fn().mockResolvedValue({ State: { Health: { Status: 'healthy' }, Running: true } }) }; }
-    listContainers() { return Promise.resolve([]); }
-    createNetwork() { return Promise.resolve({ remove: vi.fn() }); }
-    listNetworks() { return Promise.resolve([]); }
-    getNetwork() { return { remove: vi.fn() }; }
-    pull() { return Promise.resolve({ pipe: vi.fn() }); }
-    listImages() { return Promise.resolve([]); }
-    modem = { followProgress: vi.fn().mockImplementation((_s, onFinished) => { onFinished(null); }) };
+    createContainer() {
+      return Promise.resolve({
+        start: vi.fn(),
+        inspect: vi
+          .fn()
+          .mockResolvedValue({
+            State: { Health: { Status: 'healthy' }, Running: true },
+          }),
+      });
+    }
+    getContainer() {
+      return {
+        start: vi.fn(),
+        stop: vi.fn(),
+        remove: vi.fn(),
+        inspect: vi
+          .fn()
+          .mockResolvedValue({
+            State: { Health: { Status: 'healthy' }, Running: true },
+          }),
+      };
+    }
+    listContainers() {
+      return Promise.resolve([]);
+    }
+    createNetwork() {
+      return Promise.resolve({ remove: vi.fn() });
+    }
+    listNetworks() {
+      return Promise.resolve([]);
+    }
+    getNetwork() {
+      return { remove: vi.fn() };
+    }
+    pull() {
+      return Promise.resolve({ pipe: vi.fn() });
+    }
+    listImages() {
+      return Promise.resolve([]);
+    }
+    modem = {
+      followProgress: vi.fn().mockImplementation((_s, onFinished) => {
+        onFinished(null);
+      }),
+    };
   },
 }));
 
@@ -37,7 +73,10 @@ vi.mock('./api/wizard-server.js', () => ({
 }));
 
 function makeTempDir(): string {
-  const dir = join(tmpdir(), `townhouse-setup-test-${randomBytes(8).toString('hex')}`);
+  const dir = join(
+    tmpdir(),
+    `townhouse-setup-test-${randomBytes(8).toString('hex')}`
+  );
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -67,7 +106,9 @@ describe('CLI setup command (AC-1)', () => {
 
       await main(['setup', '--no-browser', '--config-dir', dir]);
 
-      const output = consoleLogSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      const output = consoleLogSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
       expect(output).toContain('Already initialized');
       expect(output).toContain('townhouse up');
     } finally {
@@ -85,7 +126,9 @@ describe('CLI setup command (AC-1)', () => {
 
       await main(['setup', '--no-browser', '--config-dir', dir]);
 
-      const errorOutput = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      const errorOutput = consoleSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
       expect(errorOutput).toContain('no wallet');
       expect(errorOutput).toContain('Delete the orphan config');
       expect(process.exitCode).toBe(1);
@@ -110,7 +153,14 @@ describe('CLI setup command (AC-1)', () => {
 
     const dir = makeTempDir();
     try {
-      await main(['setup', '--no-browser', '--port', '9999', '--config-dir', dir]);
+      await main([
+        'setup',
+        '--no-browser',
+        '--port',
+        '9999',
+        '--config-dir',
+        dir,
+      ]);
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({ port: 9999 })
       );
@@ -126,7 +176,11 @@ describe('CLI setup command (AC-1)', () => {
       // Plumb the opener through main()'s test seam — without this the assertion
       // is meaningless because the production opener is constructed inside
       // handleSetup and the noop instance is never consulted.
-      await main(['setup', '--no-browser', '--config-dir', dir], undefined, noop);
+      await main(
+        ['setup', '--no-browser', '--config-dir', dir],
+        undefined,
+        noop
+      );
       expect(noop.calls).toHaveLength(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -137,7 +191,11 @@ describe('CLI setup command (AC-1)', () => {
     const noop = new NoopBrowserOpener();
     const dir = makeTempDir();
     try {
-      await main(['setup', '--port', '9410', '--config-dir', dir], undefined, noop);
+      await main(
+        ['setup', '--port', '9410', '--config-dir', dir],
+        undefined,
+        noop
+      );
       expect(noop.calls).toEqual(['http://127.0.0.1:9410/wizard']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -147,8 +205,17 @@ describe('CLI setup command (AC-1)', () => {
   it('rejects --port with trailing junk like "9400foo"', async () => {
     const dir = makeTempDir();
     try {
-      await main(['setup', '--no-browser', '--port', '9400foo', '--config-dir', dir]);
-      const errorOutput = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      await main([
+        'setup',
+        '--no-browser',
+        '--port',
+        '9400foo',
+        '--config-dir',
+        dir,
+      ]);
+      const errorOutput = consoleSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
       expect(errorOutput).toContain('--port must be an integer');
       expect(process.exitCode).toBe(1);
     } finally {
@@ -160,8 +227,17 @@ describe('CLI setup command (AC-1)', () => {
   it('rejects invalid port', async () => {
     const dir = makeTempDir();
     try {
-      await main(['setup', '--no-browser', '--port', '999999', '--config-dir', dir]);
-      const errorOutput = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      await main([
+        'setup',
+        '--no-browser',
+        '--port',
+        '999999',
+        '--config-dir',
+        dir,
+      ]);
+      const errorOutput = consoleSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
       expect(errorOutput).toContain('port');
       expect(process.exitCode).toBe(1);
     } finally {
@@ -190,7 +266,9 @@ describe('CLI up command fail-fast (AC-2)', () => {
     const configPath = join(dir, 'config.yaml');
 
     try {
-      writeFileSync(configPath, `
+      writeFileSync(
+        configPath,
+        `
 nodes:
   town: { enabled: true }
   mill: { enabled: false }
@@ -207,11 +285,14 @@ api:
   host: 127.0.0.1
 logging:
   level: info
-`);
+`
+      );
 
       await main(['up', '-c', configPath]);
 
-      const errorOutput = consoleErrorSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      const errorOutput = consoleErrorSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
       expect(errorOutput).toContain('Wallet not found');
       expect(errorOutput).toContain('townhouse setup');
       expect(process.exitCode).toBe(1);

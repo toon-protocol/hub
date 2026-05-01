@@ -25,11 +25,17 @@ class StubOrchestrator extends EventEmitter {
   public statsMap = new Map<string, BandwidthStats | null>();
   public callCount = new Map<string, number>();
 
-  async status() { return []; }
+  async status() {
+    return [];
+  }
 
-  async getNodeRelayEndpoint() { return 'ws://localhost:7100'; }
+  async getNodeRelayEndpoint() {
+    return 'ws://localhost:7100';
+  }
 
-  async getContainerStats(containerName: string): Promise<BandwidthStats | null> {
+  async getContainerStats(
+    containerName: string
+  ): Promise<BandwidthStats | null> {
     const count = this.callCount.get(containerName) ?? 0;
     this.callCount.set(containerName, count + 1);
     return this.statsMap.get(containerName) ?? null;
@@ -46,10 +52,16 @@ class StubConnectorAdmin {
     };
   }
 
-  async getPacketLog() { return []; }
+  async getPacketLog() {
+    return [];
+  }
 }
 
-class StubWallet { listKeys() { return []; } }
+class StubWallet {
+  listKeys() {
+    return [];
+  }
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -67,7 +79,8 @@ describe('GET /nodes/:type/bandwidth', () => {
       config: getDefaultConfig(),
       orchestrator: orchestrator as unknown as DockerOrchestrator,
       wallet: new StubWallet() as unknown as WalletManager,
-      connectorAdmin: new StubConnectorAdmin() as unknown as ConnectorAdminClient,
+      connectorAdmin:
+        new StubConnectorAdmin() as unknown as ConnectorAdminClient,
     };
     registerNodeRoutes(app, deps);
     await app.listen({ host: '127.0.0.1', port: 0 });
@@ -91,7 +104,7 @@ describe('GET /nodes/:type/bandwidth', () => {
     const res = await fetch(`${url}/nodes/town/bandwidth`);
     expect(res.status).toBe(200);
 
-    const body = await res.json() as BandwidthPayload;
+    const body = (await res.json()) as BandwidthPayload;
     expect(body.bytesIn).toBe(1024);
     expect(body.bytesOut).toBe(2048);
     expect(body.sampleAt).toBe(now);
@@ -109,7 +122,7 @@ describe('GET /nodes/:type/bandwidth', () => {
   it('unknown type → 404', async () => {
     const res = await fetch(`${url}/nodes/unknown/bandwidth`);
     expect(res.status).toBe(404);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('unknown_node_type');
   });
 
@@ -122,7 +135,7 @@ describe('GET /nodes/:type/bandwidth', () => {
       });
       const res = await fetch(`${url}/nodes/${type}/bandwidth`);
       expect(res.status).toBe(200);
-      const body = await res.json() as BandwidthPayload;
+      const body = (await res.json()) as BandwidthPayload;
       expect(body.bytesIn).toBe(100);
     }
   });

@@ -14,7 +14,7 @@ import type { ConnectorRuntimeConfig, PeerEntry } from './types.js';
 const DEFAULT_ILP_ADDRESS = 'g.townhouse';
 
 /** Default ATOR SOCKS proxy address */
-const DEFAULT_ATOR_PROXY = 'socks5h://proxy.ator.io:9050';
+export const DEFAULT_ATOR_PROXY = 'socks5h://proxy.ator.io:9050';
 
 /** Default asset configuration for ILP peers */
 const DEFAULT_ASSET_CODE = 'USD';

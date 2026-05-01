@@ -11,15 +11,21 @@ const DEV_MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
 class MockOrchestrator {
-  on() { return this; }
-  off() { return this; }
-  async status() { return []; }
+  on() {
+    return this;
+  }
+  off() {
+    return this;
+  }
+  async status() {
+    return [];
+  }
 }
 
 class MockConnector {}
 
 // EVM mock helpers
-const MOCK_TX_HASH = '0x' + 'ab'.repeat(32) as `0x${string}`;
+const MOCK_TX_HASH = ('0x' + 'ab'.repeat(32)) as `0x${string}`;
 const MOCK_CHAIN_ID = 31337;
 
 // Mock viem so we never hit real network
@@ -47,7 +53,9 @@ vi.mock('viem', async (importOriginal) => {
 });
 
 vi.mock('viem/accounts', () => ({
-  privateKeyToAccount: vi.fn().mockReturnValue({ address: '0x1234' as `0x${string}` }),
+  privateKeyToAccount: vi
+    .fn()
+    .mockReturnValue({ address: '0x1234' as `0x${string}` }),
 }));
 
 // Fetch is mocked globally to simulate RPC responses for balance checks.
@@ -58,33 +66,42 @@ vi.mock('viem/accounts', () => ({
  *  with the `0x70a08231` selector is `balanceOf(address)`, everything else is
  *  treated as a native ETH balance query. Selector matching is robust to large
  *  ETH amounts that would cross any naive hex-length threshold. */
-function buildFetchMock(opts: { ethBalance?: bigint; usdcBalance?: bigint; fail?: boolean } = {}) {
+function buildFetchMock(
+  opts: { ethBalance?: bigint; usdcBalance?: bigint; fail?: boolean } = {}
+) {
   const eth = opts.ethBalance ?? 1_000_000_000_000_000_000_000n; // 1000 ETH
   const usdc = opts.usdcBalance ?? 1_000_000_000n; // 1000 USDC (scale 6)
-  return vi.fn().mockImplementation((_url: string, init?: { body?: string }) => {
-    if (opts.fail) {
-      const err = new TypeError('fetch failed');
-      (err as { cause?: { code?: string } }).cause = { code: 'ECONNREFUSED' };
-      return Promise.reject(err);
-    }
-    let body: { method?: string; params?: unknown[] } = {};
-    try {
-      body = init?.body ? (JSON.parse(init.body) as typeof body) : {};
-    } catch { /* leave empty */ }
-    const params = body.params ?? [];
-    const isErc20 =
-      body.method === 'eth_call' &&
-      typeof (params[0] as { data?: string } | undefined)?.data === 'string' &&
-      ((params[0] as { data: string }).data).toLowerCase().startsWith('0x70a08231');
-    return Promise.resolve({
-      ok: true,
-      json: async () => {
-        const hex = '0x' + eth.toString(16);
-        const usdcHex = '0x' + usdc.toString(16).padStart(64, '0');
-        return { result: isErc20 ? usdcHex : hex };
-      },
+  return vi
+    .fn()
+    .mockImplementation((_url: string, init?: { body?: string }) => {
+      if (opts.fail) {
+        const err = new TypeError('fetch failed');
+        (err as { cause?: { code?: string } }).cause = { code: 'ECONNREFUSED' };
+        return Promise.reject(err);
+      }
+      let body: { method?: string; params?: unknown[] } = {};
+      try {
+        body = init?.body ? (JSON.parse(init.body) as typeof body) : {};
+      } catch {
+        /* leave empty */
+      }
+      const params = body.params ?? [];
+      const isErc20 =
+        body.method === 'eth_call' &&
+        typeof (params[0] as { data?: string } | undefined)?.data ===
+          'string' &&
+        (params[0] as { data: string }).data
+          .toLowerCase()
+          .startsWith('0x70a08231');
+      return Promise.resolve({
+        ok: true,
+        json: async () => {
+          const hex = '0x' + eth.toString(16);
+          const usdcHex = '0x' + usdc.toString(16).padStart(64, '0');
+          return { result: isErc20 ? usdcHex : hex };
+        },
+      });
     });
-  });
 }
 
 afterEach(() => {
@@ -114,7 +131,10 @@ describe('POST /api/wallet/withdraw', () => {
   beforeEach(async () => {
     wallet = new WalletManager({ encryptedPath: '/tmp/test.enc' });
     await wallet.fromMnemonic(DEV_MNEMONIC);
-    vi.stubEnv('TOON_USDC_ADDRESS', '0x1234567890123456789012345678901234567890');
+    vi.stubEnv(
+      'TOON_USDC_ADDRESS',
+      '0x1234567890123456789012345678901234567890'
+    );
     vi.stubEnv('TOWNHOUSE_DEV_ANVIL_RPC', 'http://127.0.0.1:28545');
     vi.stubGlobal('fetch', buildFetchMock());
     app = buildApp(wallet);
@@ -174,7 +194,10 @@ describe('POST /api/wallet/withdraw', () => {
       },
     });
     expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body) as { estimatedGas: string; estimatedFee: string };
+    const body = JSON.parse(res.body) as {
+      estimatedGas: string;
+      estimatedFee: string;
+    };
     expect(body.estimatedGas).toBeDefined();
     expect(body.estimatedFee).toBeDefined();
     // Should not have txHash for dryRun
@@ -194,7 +217,9 @@ describe('POST /api/wallet/withdraw', () => {
       },
     });
     expect(res.statusCode).toBe(501);
-    expect(JSON.parse(res.body)).toMatchObject({ error: 'chain_not_supported_for_withdrawal' });
+    expect(JSON.parse(res.body)).toMatchObject({
+      error: 'chain_not_supported_for_withdrawal',
+    });
   });
 
   it('returns 501 for Mina chainFamily', async () => {
@@ -225,7 +250,9 @@ describe('POST /api/wallet/withdraw', () => {
       },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body)).toMatchObject({ code: 'invalid_recipient_format' });
+    expect(JSON.parse(res.body)).toMatchObject({
+      code: 'invalid_recipient_format',
+    });
   });
 
   it('returns 400 with code insufficient_balance when amount exceeds balance', async () => {
@@ -244,7 +271,9 @@ describe('POST /api/wallet/withdraw', () => {
       },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body)).toMatchObject({ code: 'insufficient_balance' });
+    expect(JSON.parse(res.body)).toMatchObject({
+      code: 'insufficient_balance',
+    });
   });
 
   it('returns 400 with code invalid_recipient_checksum distinct from format', async () => {
@@ -268,7 +297,9 @@ describe('POST /api/wallet/withdraw', () => {
     // important contract is that the response distinguishes "format" from
     // "checksum" and never collapses them into a single error code.
     if (res.statusCode === 400) {
-      expect(JSON.parse(res.body)).toMatchObject({ code: 'invalid_recipient_checksum' });
+      expect(JSON.parse(res.body)).toMatchObject({
+        code: 'invalid_recipient_checksum',
+      });
     } else {
       // viem.isAddress accepted the all-lowercase form — verify it did NOT
       // emit invalid_recipient_format for it (which would be wrong).
@@ -281,9 +312,13 @@ describe('POST /api/wallet/withdraw', () => {
     // throwing from the viem walletClient mock.
     const viem = await import('viem');
     vi.mocked(viem.createWalletClient).mockReturnValueOnce({
-      sendTransaction: vi.fn().mockRejectedValueOnce(
-        Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }),
-      ),
+      sendTransaction: vi
+        .fn()
+        .mockRejectedValueOnce(
+          Object.assign(new TypeError('fetch failed'), {
+            cause: { code: 'ECONNREFUSED' },
+          })
+        ),
       writeContract: vi.fn(),
     } as unknown as ReturnType<typeof viem.createWalletClient>);
 
@@ -321,7 +356,10 @@ describe('POST /api/wallet/withdraw', () => {
       connectorAdmin: new MockConnector() as unknown as ConnectorAdminClient,
     };
     const loggedApp = Fastify({
-      logger: { level: 'trace', stream: stream as unknown as NodeJS.WritableStream },
+      logger: {
+        level: 'trace',
+        stream: stream as unknown as NodeJS.WritableStream,
+      },
     });
     registerWalletWithdrawRoutes(loggedApp, deps);
 
@@ -341,7 +379,8 @@ describe('POST /api/wallet/withdraw', () => {
     expect(logBlob).not.toContain(MOCK_TX_HASH);
     // Private key (32 bytes hex) must not appear in any log line.
     const nodeKeys = wallet.getNodeKeys('town');
-    const privateKeyHex = '0x' + Buffer.from(nodeKeys.evmPrivateKey).toString('hex');
+    const privateKeyHex =
+      '0x' + Buffer.from(nodeKeys.evmPrivateKey).toString('hex');
     expect(logBlob).not.toContain(privateKeyHex);
     expect(logBlob).not.toContain(privateKeyHex.slice(2)); // also bare hex without 0x
 
@@ -369,7 +408,10 @@ describe('GET /api/wallet/transaction/:txHash', () => {
       url: `/wallet/transaction/${MOCK_TX_HASH}`,
     });
     expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body) as { status: string; blockNumber: number };
+    const body = JSON.parse(res.body) as {
+      status: string;
+      blockNumber: number;
+    };
     expect(body.status).toBe('success');
     expect(body.blockNumber).toBe(42);
   });
@@ -377,7 +419,9 @@ describe('GET /api/wallet/transaction/:txHash', () => {
   it('returns pending when receipt not found', async () => {
     const viem = await import('viem');
     vi.mocked(viem.createPublicClient).mockReturnValueOnce({
-      getTransactionReceipt: vi.fn().mockRejectedValueOnce(new Error('Transaction receipt not found')),
+      getTransactionReceipt: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Transaction receipt not found')),
       getChainId: vi.fn().mockResolvedValue(MOCK_CHAIN_ID),
       estimateGas: vi.fn(),
       getGasPrice: vi.fn(),

@@ -11,6 +11,8 @@ import {
   DockerOrchestrator,
   WalletManager,
   ConnectorAdminClient,
+  TransportProbe,
+  DEFAULT_ATOR_PROXY,
   createApiServer,
 } from '@toon-protocol/townhouse';
 import { homedir } from 'node:os';
@@ -34,7 +36,8 @@ config.nodes.dvm = { ...config.nodes.dvm, enabled: true };
 const docker = new Docker();
 const orchestrator = new DockerOrchestrator(docker, config);
 
-const walletPath = config.wallet.encrypted_path ?? join(homedir(), '.townhouse', 'wallet.enc');
+const walletPath =
+  config.wallet.encrypted_path ?? join(homedir(), '.townhouse', 'wallet.enc');
 const wallet = new WalletManager({ encryptedPath: walletPath });
 
 // Dev-loop wallet auto-init: set TOWNHOUSE_DEV_WALLET_MNEMONIC in .env.townhouse-dev
@@ -51,42 +54,68 @@ if (devMnemonic && devMnemonic !== TEST_VECTOR_MNEMONIC) {
   console.error(
     '[Townhouse API] TOWNHOUSE_DEV_WALLET_MNEMONIC is set but does not match the BIP-39 test-vector-zero phrase.\n' +
       '                The dev loop refuses to start with a non-test-vector mnemonic to prevent\n' +
-      "                accidental real-key derivation. If you need a different mnemonic, run\n" +
-      '                `townhouse init` to enter the password-gated production flow.',
+      '                accidental real-key derivation. If you need a different mnemonic, run\n' +
+      '                `townhouse init` to enter the password-gated production flow.'
   );
   process.exit(1);
 }
 if (devMnemonic) {
-  await wallet.fromMnemonic(devMnemonic).then(async (state) => {
-    const keys = state.keys;
-    const truncate = (addr) => addr ? `${addr.slice(0, 8)}…${addr.slice(-4)}` : '(none)';
-    console.log('[Townhouse API] dev wallet initialized from TOWNHOUSE_DEV_WALLET_MNEMONIC');
-    console.log(`[Townhouse API]   town EVM: ${truncate(keys.town.evmAddress)}`);
-    console.log(`[Townhouse API]   mill EVM: ${truncate(keys.mill.evmAddress)}`);
-    console.log(`[Townhouse API]   dvm  EVM: ${truncate(keys.dvm.evmAddress)}`);
+  await wallet
+    .fromMnemonic(devMnemonic)
+    .then(async (state) => {
+      const keys = state.keys;
+      const truncate = (addr) =>
+        addr ? `${addr.slice(0, 8)}…${addr.slice(-4)}` : '(none)';
+      console.log(
+        '[Townhouse API] dev wallet initialized from TOWNHOUSE_DEV_WALLET_MNEMONIC'
+      );
+      console.log(
+        `[Townhouse API]   town EVM: ${truncate(keys.town.evmAddress)}`
+      );
+      console.log(
+        `[Townhouse API]   mill EVM: ${truncate(keys.mill.evmAddress)}`
+      );
+      console.log(
+        `[Townhouse API]   dvm  EVM: ${truncate(keys.dvm.evmAddress)}`
+      );
 
-    // Decision-1 patch: also write ~/.townhouse/wallet.enc so POST /wallet/reveal
-    // is exercisable against the live dev stack. Encrypted with a documented dev
-    // password (`townhouse-dev`). Only writes if the file is absent — never
-    // overwrites an existing operator wallet.
-    try {
-      const { existsSync, mkdirSync, writeFileSync } = await import('node:fs');
-      const { dirname } = await import('node:path');
-      const { encryptWallet } = await import('@toon-protocol/townhouse');
-      if (!existsSync(walletPath)) {
-        mkdirSync(dirname(walletPath), { recursive: true });
-        const encrypted = await encryptWallet(devMnemonic, TEST_VECTOR_DEV_PASSWORD);
-        writeFileSync(walletPath, JSON.stringify(encrypted), 'utf8');
-        console.log(`[Townhouse API] wallet.enc written to ${walletPath} (dev password: ${TEST_VECTOR_DEV_PASSWORD})`);
+      // Decision-1 patch: also write ~/.townhouse/wallet.enc so POST /wallet/reveal
+      // is exercisable against the live dev stack. Encrypted with a documented dev
+      // password (`townhouse-dev`). Only writes if the file is absent — never
+      // overwrites an existing operator wallet.
+      try {
+        const { existsSync, mkdirSync, writeFileSync } =
+          await import('node:fs');
+        const { dirname } = await import('node:path');
+        const { encryptWallet } = await import('@toon-protocol/townhouse');
+        if (!existsSync(walletPath)) {
+          mkdirSync(dirname(walletPath), { recursive: true });
+          const encrypted = await encryptWallet(
+            devMnemonic,
+            TEST_VECTOR_DEV_PASSWORD
+          );
+          writeFileSync(walletPath, JSON.stringify(encrypted), 'utf8');
+          console.log(
+            `[Townhouse API] wallet.enc written to ${walletPath} (dev password: ${TEST_VECTOR_DEV_PASSWORD})`
+          );
+        }
+      } catch (err) {
+        console.warn(
+          '[Townhouse API] could not write dev wallet.enc:',
+          err.message
+        );
       }
-    } catch (err) {
-      console.warn('[Townhouse API] could not write dev wallet.enc:', err.message);
-    }
-  }).catch((err) => {
-    console.warn('[Townhouse API] TOWNHOUSE_DEV_WALLET_MNEMONIC is set but wallet.fromMnemonic failed:', err.message);
-  });
+    })
+    .catch((err) => {
+      console.warn(
+        '[Townhouse API] TOWNHOUSE_DEV_WALLET_MNEMONIC is set but wallet.fromMnemonic failed:',
+        err.message
+      );
+    });
 } else {
-  console.warn('[Townhouse API] TOWNHOUSE_DEV_WALLET_MNEMONIC not set — wallet routes will return 503');
+  console.warn(
+    '[Townhouse API] TOWNHOUSE_DEV_WALLET_MNEMONIC not set — wallet routes will return 503'
+  );
 }
 
 const connectorAdmin = new ConnectorAdminClient(connectorAdminUrl);
@@ -94,7 +123,26 @@ const connectorAdmin = new ConnectorAdminClient(connectorAdminUrl);
 // `configPath` is the YAML config destination consumed by `nodes-patch` route's
 // `saveConfig(deps.configPath, ...)`. Must NOT collide with `walletPath` — that
 // would corrupt the encrypted wallet file on a `PATCH /api/nodes/:type`.
-const configPath = process.env['TOWNHOUSE_CONFIG_PATH'] ?? join(homedir(), '.townhouse', 'townhouse-dev.yaml');
+const configPath =
+  process.env['TOWNHOUSE_CONFIG_PATH'] ??
+  join(homedir(), '.townhouse', 'townhouse-dev.yaml');
+
+// Transport probe — probes the dev SOCKS5 service (127.0.0.1:28050) when config
+// is set to ATOR mode; silent in direct mode (the default).
+const devSocksProxy =
+  process.env['TOWNHOUSE_DEV_SOCKS_PROXY'] ?? 'socks5://127.0.0.1:28050';
+const transportProbe = new TransportProbe({
+  proxyUrl:
+    config.transport.mode === 'ator'
+      ? (config.transport.socksProxy ?? DEFAULT_ATOR_PROXY)
+      : '',
+});
+if (config.transport.mode === 'ator') {
+  transportProbe.start();
+}
+// Dev-only: ?transport=ator on GET /api/transport returns an ATOR-mode stub
+// so designers can preview the green-ATOR-dot path without changing config.
+const devTransportOverride = process.env['TOWNHOUSE_DEV_TRANSPORT'];
 
 const apiDeps = {
   configPath,
@@ -102,9 +150,43 @@ const apiDeps = {
   orchestrator,
   wallet,
   connectorAdmin,
+  transportProbe,
 };
 
 const server = await createApiServer(apiDeps);
+
+// Dev-only: intercept GET /api/transport to support ?transport=ator preview.
+// This hook runs AFTER the route handler's schema validation but before the
+// real handler. We use addHook on the raw server to override the response
+// when the dev transport override query param is present.
+server.app.addHook('onRequest', async (request, reply) => {
+  if (request.method !== 'GET') return;
+  let pathname;
+  try {
+    pathname = new URL(request.url, 'http://localhost').pathname;
+  } catch {
+    // Malformed URL — let Fastify handle it normally.
+    return;
+  }
+  // Exact match — do NOT use startsWith, which would hijack future paths
+  // like /api/transport-status or /api/transport2.
+  if (pathname !== '/api/transport') return;
+  const forced =
+    new URL(request.url, 'http://localhost').searchParams.get('transport') ??
+    devTransportOverride;
+  if (!forced) return;
+  const mode = forced === 'ator' ? 'ator' : 'direct';
+  await reply.status(200).send({
+    mode,
+    ...(mode === 'ator' ? { socksProxy: devSocksProxy } : {}),
+    reachable: true,
+    latencyProxyMs: mode === 'ator' ? 5 : null,
+    latencyDirectMs: 3,
+    lastProbedAt: Date.now(),
+    probeError: null,
+    ts: Date.now(),
+  });
+});
 
 try {
   await server.app.listen({ host: '127.0.0.1', port: 9400 });

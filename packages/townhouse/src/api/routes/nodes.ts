@@ -251,9 +251,13 @@ export function registerNodeRoutes(app: FastifyInstance, deps: ApiDeps): void {
       });
     }
 
-    const sinceMs = since ? new Date(since).getTime() : Date.now() - 24 * 60 * 60 * 1000;
+    const sinceMs = since
+      ? new Date(since).getTime()
+      : Date.now() - 24 * 60 * 60 * 1000;
     if (isNaN(sinceMs)) {
-      return reply.status(400).send({ error: 'invalid_since', message: 'since must be ISO 8601' });
+      return reply
+        .status(400)
+        .send({ error: 'invalid_since', message: 'since must be ISO 8601' });
     }
 
     try {
@@ -277,9 +281,11 @@ export function registerNodeRoutes(app: FastifyInstance, deps: ApiDeps): void {
 
       // Bucket the packet log by time
       const bucketMs =
-        bucket === 'minute' ? 60_000 :
-        bucket === 'day'    ? 24 * 60 * 60_000 :
-        /* hour */            60 * 60_000;
+        bucket === 'minute'
+          ? 60_000
+          : bucket === 'day'
+            ? 24 * 60 * 60_000
+            : /* hour */ 60 * 60_000;
 
       const countsMap = new Map<number, number>();
       for (const entry of packets) {
@@ -298,7 +304,8 @@ export function registerNodeRoutes(app: FastifyInstance, deps: ApiDeps): void {
       if (err.code === 'ConnectorEndpointNotFound') {
         return reply.status(503).send({
           error: 'connector_endpoint_not_found',
-          message: 'Connector image does not expose GET /packets. See CONNECTOR_MIGRATION.md §getPacketLog.',
+          message:
+            'Connector image does not expose GET /packets. See CONNECTOR_MIGRATION.md §getPacketLog.',
         });
       }
       // Connector down or other error
@@ -338,9 +345,9 @@ export function registerNodeRoutes(app: FastifyInstance, deps: ApiDeps): void {
 
   // ── per-instance node resolution helper ───────────────────────────────────
 
-  async function resolveNodeId(nodeId: string): Promise<
-    { type: NodeType; instanceName: string } | null
-  > {
+  async function resolveNodeId(
+    nodeId: string
+  ): Promise<{ type: NodeType; instanceName: string } | null> {
     const status = await deps.orchestrator.status();
     const instance = status.find((s) => s.name === nodeId);
     if (instance) {
@@ -385,14 +392,16 @@ export function registerNodeRoutes(app: FastifyInstance, deps: ApiDeps): void {
         let res: Response;
         try {
           // nosemgrep: javascript.lang.security.detect-insecure-http -- Docker-internal, TLS unnecessary
-          res = await fetch(`${endpoint}/health`, { signal: controller.signal });
+          res = await fetch(`${endpoint}/health`, {
+            signal: controller.signal,
+          });
         } finally {
           clearTimeout(timeout);
         }
         if (!res.ok) {
           return reply.status(503).send({ error: 'node_unreachable' });
         }
-        const payload = await res.json() as NodeHealthPayload;
+        const payload = (await res.json()) as NodeHealthPayload;
         healthCache.set(cacheKey, { payload, cachedAt: Date.now() });
         return payload;
       } catch {
@@ -406,102 +415,103 @@ export function registerNodeRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get<{
     Params: { nodeId: string };
     Querystring: { windowSec?: string };
-  }>(
-    '/nodes/:nodeId/swaps/recent',
-    async (request, reply) => {
-      const { nodeId } = request.params;
+  }>('/nodes/:nodeId/swaps/recent', async (request, reply) => {
+    const { nodeId } = request.params;
 
-      const resolved = await resolveNodeId(nodeId);
-      if (!resolved) {
-        return reply.status(404).send({ error: 'unknown_node', nodeId });
-      }
-      if (resolved.type !== 'mill') {
-        return reply.status(404).send({
-          error: 'swaps_only_for_mill',
-          message: 'swaps/recent is only available for mill instances',
-        });
-      }
-
-      const rawWindowSec = request.query.windowSec;
-      // Reject scientific notation and non-decimal strings before parseInt
-      // silently truncates them ('1e10' → 1).
-      if (rawWindowSec !== undefined && !/^\d+$/.test(rawWindowSec)) {
-        return reply.status(400).send({
-          error: 'invalid_window_sec',
-          message: 'windowSec must be a non-negative integer (1–3600)',
-        });
-      }
-      const windowSec = rawWindowSec !== undefined
-        ? parseInt(rawWindowSec, 10)
-        : 300;
-      if (isNaN(windowSec) || windowSec < 1 || windowSec > 3600) {
-        return reply.status(400).send({
-          error: 'invalid_window_sec',
-          message: 'windowSec must be 1–3600',
-        });
-      }
-
-      // Resolve this instance's ILP address from connector peers.
-      // If the peer is not registered yet, return an empty result rather than
-      // an unfiltered packet log (which would include packets from every peer).
-      let ilpAddress: string | undefined;
-      try {
-        const peers = await deps.connectorAdmin.getPeers();
-        const peer = peers.find((p) => p.id === resolved.instanceName);
-        ilpAddress = peer?.ilpAddresses[0];
-      } catch {
-        // Connector unavailable — handled in the next try block.
-      }
-
-      if (!ilpAddress) {
-        const empty: MillSwapsRecentPayload = { count: 0, volume: '0', byPair: [] };
-        return empty;
-      }
-
-      try {
-        const packets = await deps.connectorAdmin.getPacketLog({
-          ilpAddress,
-          since: Date.now() - windowSec * 1_000,
-          limit: 10_000,
-        });
-
-        const byPairMap = new Map<string, { count: number; volume: bigint }>();
-        let totalVolume = 0n;
-
-        for (const entry of packets) {
-          totalVolume += BigInt(entry.amount ?? 0);
-          const pairKey = `${entry.ilpAddressFrom ?? '?'}→${entry.ilpAddressTo ?? '?'}`;
-          const existing = byPairMap.get(pairKey) ?? { count: 0, volume: 0n };
-          byPairMap.set(pairKey, {
-            count: existing.count + 1,
-            volume: existing.volume + BigInt(entry.amount ?? 0),
-          });
-        }
-
-        const byPair = Array.from(byPairMap.entries()).map(([pair, data]) => ({
-          pair,
-          count: data.count,
-          volume: data.volume.toString(),
-        }));
-
-        const payload: MillSwapsRecentPayload = {
-          count: packets.length,
-          volume: totalVolume.toString(),
-          byPair,
-        };
-        return payload;
-      } catch (error: unknown) {
-        const err = error as NodeJS.ErrnoException;
-        if (err.code === 'ConnectorEndpointNotFound') {
-          return reply.status(503).send({
-            error: 'connector_endpoint_not_found',
-            message: 'Connector image does not expose GET /packets. See CONNECTOR_MIGRATION.md.',
-          });
-        }
-        return reply.status(503).send({ error: 'connector_unavailable' });
-      }
+    const resolved = await resolveNodeId(nodeId);
+    if (!resolved) {
+      return reply.status(404).send({ error: 'unknown_node', nodeId });
     }
-  );
+    if (resolved.type !== 'mill') {
+      return reply.status(404).send({
+        error: 'swaps_only_for_mill',
+        message: 'swaps/recent is only available for mill instances',
+      });
+    }
+
+    const rawWindowSec = request.query.windowSec;
+    // Reject scientific notation and non-decimal strings before parseInt
+    // silently truncates them ('1e10' → 1).
+    if (rawWindowSec !== undefined && !/^\d+$/.test(rawWindowSec)) {
+      return reply.status(400).send({
+        error: 'invalid_window_sec',
+        message: 'windowSec must be a non-negative integer (1–3600)',
+      });
+    }
+    const windowSec =
+      rawWindowSec !== undefined ? parseInt(rawWindowSec, 10) : 300;
+    if (isNaN(windowSec) || windowSec < 1 || windowSec > 3600) {
+      return reply.status(400).send({
+        error: 'invalid_window_sec',
+        message: 'windowSec must be 1–3600',
+      });
+    }
+
+    // Resolve this instance's ILP address from connector peers.
+    // If the peer is not registered yet, return an empty result rather than
+    // an unfiltered packet log (which would include packets from every peer).
+    let ilpAddress: string | undefined;
+    try {
+      const peers = await deps.connectorAdmin.getPeers();
+      const peer = peers.find((p) => p.id === resolved.instanceName);
+      ilpAddress = peer?.ilpAddresses[0];
+    } catch {
+      // Connector unavailable — handled in the next try block.
+    }
+
+    if (!ilpAddress) {
+      const empty: MillSwapsRecentPayload = {
+        count: 0,
+        volume: '0',
+        byPair: [],
+      };
+      return empty;
+    }
+
+    try {
+      const packets = await deps.connectorAdmin.getPacketLog({
+        ilpAddress,
+        since: Date.now() - windowSec * 1_000,
+        limit: 10_000,
+      });
+
+      const byPairMap = new Map<string, { count: number; volume: bigint }>();
+      let totalVolume = 0n;
+
+      for (const entry of packets) {
+        totalVolume += BigInt(entry.amount ?? 0);
+        const pairKey = `${entry.ilpAddressFrom ?? '?'}→${entry.ilpAddressTo ?? '?'}`;
+        const existing = byPairMap.get(pairKey) ?? { count: 0, volume: 0n };
+        byPairMap.set(pairKey, {
+          count: existing.count + 1,
+          volume: existing.volume + BigInt(entry.amount ?? 0),
+        });
+      }
+
+      const byPair = Array.from(byPairMap.entries()).map(([pair, data]) => ({
+        pair,
+        count: data.count,
+        volume: data.volume.toString(),
+      }));
+
+      const payload: MillSwapsRecentPayload = {
+        count: packets.length,
+        volume: totalVolume.toString(),
+        byPair,
+      };
+      return payload;
+    } catch (error: unknown) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ConnectorEndpointNotFound') {
+        return reply.status(503).send({
+          error: 'connector_endpoint_not_found',
+          message:
+            'Connector image does not expose GET /packets. See CONNECTOR_MIGRATION.md.',
+        });
+      }
+      return reply.status(503).send({ error: 'connector_unavailable' });
+    }
+  });
 
   // ── GET /nodes/:nodeId/jobs/recent ────────────────────────────────────────
   // Returns DVM job throughput for the requested window (default 300 s).
@@ -512,159 +522,169 @@ export function registerNodeRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get<{
     Params: { nodeId: string };
     Querystring: { windowSec?: string };
-  }>(
-    '/nodes/:nodeId/jobs/recent',
-    async (request, reply) => {
-      const { nodeId } = request.params;
+  }>('/nodes/:nodeId/jobs/recent', async (request, reply) => {
+    const { nodeId } = request.params;
 
-      const resolved = await resolveNodeId(nodeId);
-      if (!resolved) {
-        return reply.status(404).send({ error: 'unknown_node', nodeId });
-      }
-      if (resolved.type !== 'dvm') {
-        return reply.status(404).send({
-          error: 'jobs_only_for_dvm',
-          message: 'jobs/recent is only available for dvm instances',
-        });
-      }
+    const resolved = await resolveNodeId(nodeId);
+    if (!resolved) {
+      return reply.status(404).send({ error: 'unknown_node', nodeId });
+    }
+    if (resolved.type !== 'dvm') {
+      return reply.status(404).send({
+        error: 'jobs_only_for_dvm',
+        message: 'jobs/recent is only available for dvm instances',
+      });
+    }
 
-      const rawWindowSec = request.query.windowSec;
-      if (rawWindowSec !== undefined && !/^\d+$/.test(rawWindowSec)) {
-        return reply.status(400).send({
-          error: 'invalid_window_sec',
-          message: 'windowSec must be a non-negative integer (1–300)',
-        });
-      }
-      const requestedWindowSec = rawWindowSec !== undefined
-        ? parseInt(rawWindowSec, 10)
-        : 300;
-      // The DVM in-memory counter is fixed at a 5-minute (300 s) window,
-      // so the byKind/byStatus/total fields can only honestly report the
-      // last 300 s. Reject windows outside [1, 300] rather than silently
-      // mixing windows across response fields.
-      if (requestedWindowSec < 1 || requestedWindowSec > 300) {
-        return reply.status(400).send({
-          error: 'invalid_window_sec',
-          message: 'windowSec must be 1–300 (DVM counter window is fixed at 5 min)',
-        });
-      }
-      const windowSec = requestedWindowSec;
+    const rawWindowSec = request.query.windowSec;
+    if (rawWindowSec !== undefined && !/^\d+$/.test(rawWindowSec)) {
+      return reply.status(400).send({
+        error: 'invalid_window_sec',
+        message: 'windowSec must be a non-negative integer (1–300)',
+      });
+    }
+    const requestedWindowSec =
+      rawWindowSec !== undefined ? parseInt(rawWindowSec, 10) : 300;
+    // The DVM in-memory counter is fixed at a 5-minute (300 s) window,
+    // so the byKind/byStatus/total fields can only honestly report the
+    // last 300 s. Reject windows outside [1, 300] rather than silently
+    // mixing windows across response fields.
+    if (requestedWindowSec < 1 || requestedWindowSec > 300) {
+      return reply.status(400).send({
+        error: 'invalid_window_sec',
+        message:
+          'windowSec must be 1–300 (DVM counter window is fixed at 5 min)',
+      });
+    }
+    const windowSec = requestedWindowSec;
 
-      // Resolve ILP address from connector peers
-      let ilpAddress: string | undefined;
-      let connectorDown = false;
-      try {
-        const peers = await deps.connectorAdmin.getPeers();
-        const peer = peers.find((p) => p.id === resolved.instanceName);
-        ilpAddress = peer?.ilpAddresses[0];
-      } catch {
-        connectorDown = true;
-      }
+    // Resolve ILP address from connector peers
+    let ilpAddress: string | undefined;
+    let connectorDown = false;
+    try {
+      const peers = await deps.connectorAdmin.getPeers();
+      const peer = peers.find((p) => p.id === resolved.instanceName);
+      ilpAddress = peer?.ilpAddresses[0];
+    } catch {
+      connectorDown = true;
+    }
 
-      if (connectorDown) {
-        return reply.status(503).send({ error: 'connector_unavailable' });
-      }
+    if (connectorDown) {
+      return reply.status(503).send({ error: 'connector_unavailable' });
+    }
 
-      // Fetch DVM health for byKind and byStatus (the canonical counter source)
-      let dvmHealth: DvmHealthResponse | null = null;
-      try {
-        const cached = healthCache.get(resolved.instanceName);
-        if (cached && Date.now() - cached.cachedAt < HEALTH_CACHE_TTL_MS) {
-          dvmHealth = cached.payload as DvmHealthResponse;
-        } else {
-          const endpoint = await deps.orchestrator.getNodeHealthEndpoint(resolved.instanceName, 'dvm');
-          // 3 s timeout mirrors the parallel /nodes/:nodeId/health route.
-          // A hung DVM container otherwise blocks Fastify indefinitely.
-          const healthController = new AbortController();
-          const healthTimeout = setTimeout(() => healthController.abort(), 3_000);
-          let healthRes: Response;
-          try {
-            // nosemgrep: javascript.lang.security.detect-insecure-http -- Docker-internal, TLS unnecessary
-            healthRes = await fetch(`${endpoint}/health`, {
-              signal: healthController.signal,
-            });
-          } finally {
-            clearTimeout(healthTimeout);
-          }
-          if (healthRes.ok) {
-            dvmHealth = await healthRes.json() as DvmHealthResponse;
-            healthCache.set(resolved.instanceName, { payload: dvmHealth, cachedAt: Date.now() });
-          }
+    // Fetch DVM health for byKind and byStatus (the canonical counter source)
+    let dvmHealth: DvmHealthResponse | null = null;
+    try {
+      const cached = healthCache.get(resolved.instanceName);
+      if (cached && Date.now() - cached.cachedAt < HEALTH_CACHE_TTL_MS) {
+        dvmHealth = cached.payload as DvmHealthResponse;
+      } else {
+        const endpoint = await deps.orchestrator.getNodeHealthEndpoint(
+          resolved.instanceName,
+          'dvm'
+        );
+        // 3 s timeout mirrors the parallel /nodes/:nodeId/health route.
+        // A hung DVM container otherwise blocks Fastify indefinitely.
+        const healthController = new AbortController();
+        const healthTimeout = setTimeout(() => healthController.abort(), 3_000);
+        let healthRes: Response;
+        try {
+          // nosemgrep: javascript.lang.security.detect-insecure-http -- Docker-internal, TLS unnecessary
+          healthRes = await fetch(`${endpoint}/health`, {
+            signal: healthController.signal,
+          });
+        } finally {
+          clearTimeout(healthTimeout);
         }
-      } catch {
-        // Health fetch failed — degrade gracefully
-      }
-
-      const byStatus = dvmHealth?.jobsRecent?.byStatus ?? {
-        processing: 0, success: 0, error: 0, partial: 0,
-      };
-
-      // Build byKind from DVM health counter (canonical) — group into JobsByKindEntry
-      const byKindFromHealth = dvmHealth?.jobsRecent?.byKind ?? [];
-      const byKindMap = new Map<number, { count: number; volume: bigint }>();
-      for (const entry of byKindFromHealth) {
-        byKindMap.set(entry.kind, { count: entry.count, volume: 0n });
-      }
-
-      if (!ilpAddress) {
-        // ILP address unknown — return zero-volume result with health-sourced counters
-        const payload: JobsRecentPayload = {
-          count: dvmHealth?.jobsRecent?.total ?? 0,
-          volume: '0',
-          byKind: Array.from(byKindMap.entries()).map(([kind, d]) => ({
-            kind, count: d.count, volume: '0',
-          })),
-          byStatus,
-        };
-        return payload;
-      }
-
-      try {
-        const packets = await deps.connectorAdmin.getPacketLog({
-          ilpAddress,
-          since: Date.now() - windowSec * 1_000,
-          limit: 10_000,
-        });
-
-        let totalVolume = 0n;
-        for (const entry of packets) {
-          totalVolume += BigInt(entry.amount ?? 0);
-          // kind field: feature-detect — if absent, group under bucket 0 (unattributed)
-          const kind = extractKindFromPacketEntry(entry);
-          const existing = byKindMap.get(kind) ?? { count: 0, volume: 0n };
-          // Only increment count from packet log if no DVM health data available;
-          // prefer DVM counter for count, use packet log for volume only.
-          byKindMap.set(kind, {
-            count: byKindFromHealth.length > 0 ? existing.count : existing.count + 1,
-            volume: existing.volume + BigInt(entry.amount ?? 0),
+        if (healthRes.ok) {
+          dvmHealth = (await healthRes.json()) as DvmHealthResponse;
+          healthCache.set(resolved.instanceName, {
+            payload: dvmHealth,
+            cachedAt: Date.now(),
           });
         }
+      }
+    } catch {
+      // Health fetch failed — degrade gracefully
+    }
 
-        const byKind = Array.from(byKindMap.entries()).map(([kind, d]) => ({
+    const byStatus = dvmHealth?.jobsRecent?.byStatus ?? {
+      processing: 0,
+      success: 0,
+      error: 0,
+      partial: 0,
+    };
+
+    // Build byKind from DVM health counter (canonical) — group into JobsByKindEntry
+    const byKindFromHealth = dvmHealth?.jobsRecent?.byKind ?? [];
+    const byKindMap = new Map<number, { count: number; volume: bigint }>();
+    for (const entry of byKindFromHealth) {
+      byKindMap.set(entry.kind, { count: entry.count, volume: 0n });
+    }
+
+    if (!ilpAddress) {
+      // ILP address unknown — return zero-volume result with health-sourced counters
+      const payload: JobsRecentPayload = {
+        count: dvmHealth?.jobsRecent?.total ?? 0,
+        volume: '0',
+        byKind: Array.from(byKindMap.entries()).map(([kind, d]) => ({
           kind,
           count: d.count,
-          volume: d.volume.toString(),
-        }));
-
-        const payload: JobsRecentPayload = {
-          count: dvmHealth?.jobsRecent?.total ?? packets.length,
-          volume: totalVolume.toString(),
-          byKind,
-          byStatus,
-        };
-        return payload;
-      } catch (error: unknown) {
-        const err = error as NodeJS.ErrnoException;
-        if (err.code === 'ConnectorEndpointNotFound') {
-          return reply.status(503).send({
-            error: 'connector_endpoint_not_found',
-            message: 'Connector image does not expose GET /packets. See CONNECTOR_MIGRATION.md.',
-          });
-        }
-        return reply.status(503).send({ error: 'connector_unavailable' });
-      }
+          volume: '0',
+        })),
+        byStatus,
+      };
+      return payload;
     }
-  );
+
+    try {
+      const packets = await deps.connectorAdmin.getPacketLog({
+        ilpAddress,
+        since: Date.now() - windowSec * 1_000,
+        limit: 10_000,
+      });
+
+      let totalVolume = 0n;
+      for (const entry of packets) {
+        totalVolume += BigInt(entry.amount ?? 0);
+        // kind field: feature-detect — if absent, group under bucket 0 (unattributed)
+        const kind = extractKindFromPacketEntry(entry);
+        const existing = byKindMap.get(kind) ?? { count: 0, volume: 0n };
+        // Only increment count from packet log if no DVM health data available;
+        // prefer DVM counter for count, use packet log for volume only.
+        byKindMap.set(kind, {
+          count:
+            byKindFromHealth.length > 0 ? existing.count : existing.count + 1,
+          volume: existing.volume + BigInt(entry.amount ?? 0),
+        });
+      }
+
+      const byKind = Array.from(byKindMap.entries()).map(([kind, d]) => ({
+        kind,
+        count: d.count,
+        volume: d.volume.toString(),
+      }));
+
+      const payload: JobsRecentPayload = {
+        count: dvmHealth?.jobsRecent?.total ?? packets.length,
+        volume: totalVolume.toString(),
+        byKind,
+        byStatus,
+      };
+      return payload;
+    } catch (error: unknown) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === 'ConnectorEndpointNotFound') {
+        return reply.status(503).send({
+          error: 'connector_endpoint_not_found',
+          message:
+            'Connector image does not expose GET /packets. See CONNECTOR_MIGRATION.md.',
+        });
+      }
+      return reply.status(503).send({ error: 'connector_unavailable' });
+    }
+  });
 
   // ── GET /nodes/:nodeId/deposit-addresses ──────────────────────────────────
 

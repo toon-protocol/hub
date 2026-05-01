@@ -12,7 +12,10 @@ import type { WizardInitialDeps } from './wizard-server.js';
 import Docker from 'dockerode';
 
 function makeTempDir(): string {
-  const dir = join(tmpdir(), `wizard-srv-test-${randomBytes(8).toString('hex')}`);
+  const dir = join(
+    tmpdir(),
+    `wizard-srv-test-${randomBytes(8).toString('hex')}`
+  );
   mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -40,7 +43,10 @@ describe('createWizardApiServer (AC-8)', () => {
   it('starts in wizard mode — GET /wizard/state returns mode: wizard', async () => {
     const server = await createWizardApiServer(deps);
     try {
-      const res = await server.app.inject({ method: 'GET', url: '/wizard/state' });
+      const res = await server.app.inject({
+        method: 'GET',
+        url: '/wizard/state',
+      });
       expect(res.statusCode).toBe(200);
       expect(res.json().mode).toBe('wizard');
     } finally {
@@ -61,10 +67,16 @@ describe('createWizardApiServer (AC-8)', () => {
   it('wizard routes respond to GET /wizard/state and POST /wizard/mnemonic-preview', async () => {
     const server = await createWizardApiServer(deps);
     try {
-      const stateRes = await server.app.inject({ method: 'GET', url: '/wizard/state' });
+      const stateRes = await server.app.inject({
+        method: 'GET',
+        url: '/wizard/state',
+      });
       expect(stateRes.statusCode).toBe(200);
 
-      const previewRes = await server.app.inject({ method: 'POST', url: '/wizard/mnemonic-preview' });
+      const previewRes = await server.app.inject({
+        method: 'POST',
+        url: '/wizard/mnemonic-preview',
+      });
       expect(previewRes.statusCode).toBe(200);
       expect(previewRes.json().mnemonic).toBeDefined();
     } finally {
@@ -85,9 +97,14 @@ describe('createWizardApiServer (AC-8)', () => {
           password: 'test-pw',
           password_confirm: 'test-pw',
           mnemonic_mode: 'generate',
-          mnemonic: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+          mnemonic:
+            'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
           backup_ack: true,
-          nodes: { town: { enabled: true }, mill: { enabled: false }, dvm: { enabled: false } },
+          nodes: {
+            town: { enabled: true },
+            mill: { enabled: false },
+            dvm: { enabled: false },
+          },
           transport: { mode: 'direct' },
         },
       });

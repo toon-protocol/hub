@@ -40,7 +40,12 @@ class MockOrchestrator {
 
   async status() {
     return [
-      { name: 'mill', type: 'mill', state: 'running', startedAt: new Date().toISOString() },
+      {
+        name: 'mill',
+        type: 'mill',
+        state: 'running',
+        startedAt: new Date().toISOString(),
+      },
     ];
   }
 
@@ -49,20 +54,46 @@ class MockOrchestrator {
     return this.healthEndpoint;
   }
 
-  async getContainerStats() { return null; }
-  on() { return this; }
-  off() { return this; }
+  async getContainerStats() {
+    return null;
+  }
+  on() {
+    return this;
+  }
+  off() {
+    return this;
+  }
 }
 
 class MockWalletManager {
-  getNodeKeys() { return { evmAddress: '0x1234', nostrPubkey: 'a'.repeat(64), nostrSecretKey: new Uint8Array(32), evmPrivateKey: new Uint8Array(32), nostrDerivationPath: '', evmDerivationPath: '' }; }
-  listKeys() { return []; }
+  getNodeKeys() {
+    return {
+      evmAddress: '0x1234',
+      nostrPubkey: 'a'.repeat(64),
+      nostrSecretKey: new Uint8Array(32),
+      evmPrivateKey: new Uint8Array(32),
+      nostrDerivationPath: '',
+      evmDerivationPath: '',
+    };
+  }
+  listKeys() {
+    return [];
+  }
 }
 
 class MockConnectorAdmin {
-  async getMetrics() { return { aggregate: { packetsForwarded: 0, packetsRejected: 0, bytesSent: 0 }, peers: [] }; }
-  async getPeers() { return []; }
-  async getPacketLog() { return []; }
+  async getMetrics() {
+    return {
+      aggregate: { packetsForwarded: 0, packetsRejected: 0, bytesSent: 0 },
+      peers: [],
+    };
+  }
+  async getPeers() {
+    return [];
+  }
+  async getPacketLog() {
+    return [];
+  }
 }
 
 function buildDeps(orchestrator: MockOrchestrator): ApiDeps {
@@ -132,7 +163,10 @@ describe('GET /nodes/:nodeId/health (AC-2, Story 21.11)', () => {
     const deps = buildDeps(new MockOrchestrator());
     registerNodeRoutes(app, deps);
 
-    const res = await app.inject({ method: 'GET', url: '/nodes/unknown/health' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/nodes/unknown/health',
+    });
     expect(res.statusCode).toBe(404);
     expect(JSON.parse(res.body).error).toBe('unknown_node');
   });
@@ -159,16 +193,37 @@ describe('GET /nodes/:nodeId/health (AC-2, Story 21.11)', () => {
     const multiOrch = {
       async status() {
         return [
-          { name: 'dev-mill-01', type: 'mill', state: 'running', startedAt: new Date().toISOString() },
-          { name: 'dev-mill-02', type: 'mill', state: 'running', startedAt: new Date().toISOString() },
+          {
+            name: 'dev-mill-01',
+            type: 'mill',
+            state: 'running',
+            startedAt: new Date().toISOString(),
+          },
+          {
+            name: 'dev-mill-02',
+            type: 'mill',
+            state: 'running',
+            startedAt: new Date().toISOString(),
+          },
         ];
       },
-      async getNodeHealthEndpoint(nodeId: string, _type: string): Promise<string> {
-        return nodeId === 'dev-mill-01' ? 'http://127.0.0.1:3201' : 'http://127.0.0.1:3202';
+      async getNodeHealthEndpoint(
+        nodeId: string,
+        _type: string
+      ): Promise<string> {
+        return nodeId === 'dev-mill-01'
+          ? 'http://127.0.0.1:3201'
+          : 'http://127.0.0.1:3202';
       },
-      async getContainerStats() { return null; },
-      on() { return this; },
-      off() { return this; },
+      async getContainerStats() {
+        return null;
+      },
+      on() {
+        return this;
+      },
+      off() {
+        return this;
+      },
     };
 
     fetchMock.mockImplementation(async (url: string) => ({
@@ -179,14 +234,24 @@ describe('GET /nodes/:nodeId/health (AC-2, Story 21.11)', () => {
     const deps = buildDeps(multiOrch as unknown as MockOrchestrator);
     registerNodeRoutes(app, deps);
 
-    const res1 = await app.inject({ method: 'GET', url: '/nodes/dev-mill-01/health' });
-    const res2 = await app.inject({ method: 'GET', url: '/nodes/dev-mill-02/health' });
+    const res1 = await app.inject({
+      method: 'GET',
+      url: '/nodes/dev-mill-01/health',
+    });
+    const res2 = await app.inject({
+      method: 'GET',
+      url: '/nodes/dev-mill-02/health',
+    });
 
     expect(res1.statusCode).toBe(200);
     expect(res2.statusCode).toBe(200);
     // Different endpoints fetched — cache must be per-instance, not per-type.
-    expect(JSON.parse(res1.body).nodePubkey).toBe('http://127.0.0.1:3201/health');
-    expect(JSON.parse(res2.body).nodePubkey).toBe('http://127.0.0.1:3202/health');
+    expect(JSON.parse(res1.body).nodePubkey).toBe(
+      'http://127.0.0.1:3201/health'
+    );
+    expect(JSON.parse(res2.body).nodePubkey).toBe(
+      'http://127.0.0.1:3202/health'
+    );
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

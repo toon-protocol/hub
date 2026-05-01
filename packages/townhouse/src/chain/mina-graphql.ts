@@ -9,7 +9,10 @@ const TIMEOUT_MS = 3_000;
  * Get MINA balance (nanomina) for a base58check address.
  * Returns balance as decimal string in nanomina (scale 9).
  */
-export async function getMinaBalance(graphqlUrl: string, address: string): Promise<string> {
+export async function getMinaBalance(
+  graphqlUrl: string,
+  address: string
+): Promise<string> {
   const query = `query GetBalance($pk: PublicKey!) {
     account(publicKey: $pk) {
       balance {
@@ -28,11 +31,12 @@ export async function getMinaBalance(graphqlUrl: string, address: string): Promi
       signal: controller.signal,
     });
     if (!res.ok) throw new Error(`Mina GraphQL failed: HTTP ${res.status}`);
-    const data = await res.json() as {
+    const data = (await res.json()) as {
       data?: { account?: { balance?: { total?: string } } };
       errors?: { message: string }[];
     };
-    if (data.errors?.length) throw new Error(`Mina GraphQL error: ${data.errors[0]?.message}`);
+    if (data.errors?.length)
+      throw new Error(`Mina GraphQL error: ${data.errors[0]?.message}`);
     const total = data.data?.account?.balance?.total;
     if (!total) return '0';
     // total is returned as a decimal MINA string (e.g. "1000.000000000").

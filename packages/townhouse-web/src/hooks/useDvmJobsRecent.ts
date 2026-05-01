@@ -45,7 +45,8 @@ export function useDvmJobsRecent(options: UseDvmJobsRecentOptions): {
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     timeoutMs = DEFAULT_TIMEOUT_MS,
   } = options;
-  const url = options.url ?? `/api/nodes/${nodeId}/jobs/recent?windowSec=${windowSec}`;
+  const url =
+    options.url ?? `/api/nodes/${nodeId}/jobs/recent?windowSec=${windowSec}`;
 
   const [data, setData] = useState<DvmJobsRecent | null>(null);
   const [status, setStatus] = useState<DvmJobsStatus>('loading');
@@ -71,7 +72,7 @@ export function useDvmJobsRecent(options: UseDvmJobsRecentOptions): {
           setStatus('error');
           return;
         }
-        const payload = await res.json() as DvmJobsRecent;
+        const payload = (await res.json()) as DvmJobsRecent;
         if (cancelled) return;
         setData(payload);
         setStatus('ready');

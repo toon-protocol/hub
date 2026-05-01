@@ -1,5 +1,6 @@
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { Home } from './views/Home';
+import { SettingsView } from './views/Settings';
 import { TownView } from './views/Town';
 import { MillView } from './views/Mill';
 import { DvmView } from './views/Dvm';
@@ -15,6 +16,10 @@ const router = createBrowserRouter([
   {
     path: '/wizard',
     element: <WizardView />,
+  },
+  {
+    path: '/settings',
+    element: <SettingsView />,
   },
   {
     path: '/town',

@@ -19,7 +19,9 @@ const DEFAULT_TIMEOUT_MS = 5_000;
  * Polls `GET /api/nodes/:nodeId/health` every 5 s.
  * Returns the raw health payload — callers narrow to the specific shape.
  */
-export function useNodeHealth<T = Record<string, unknown>>(options: UseNodeHealthOptions): {
+export function useNodeHealth<T = Record<string, unknown>>(
+  options: UseNodeHealthOptions
+): {
   health: T | null;
   status: NodeHealthStatus;
   refetch: () => Promise<void>;
@@ -50,7 +52,7 @@ export function useNodeHealth<T = Record<string, unknown>>(options: UseNodeHealt
           setStatus('error');
           return;
         }
-        const payload = await res.json() as T;
+        const payload = (await res.json()) as T;
         if (cancelled) return;
         setHealth(payload);
         setStatus('ready');

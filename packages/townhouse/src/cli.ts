@@ -25,7 +25,11 @@ import { loadConfig } from './config/loader.js';
 import type { TownhouseConfig } from './config/schema.js';
 import { DockerOrchestrator } from './docker/index.js';
 import type { NodeType } from './docker/types.js';
-import { ConnectorAdminClient } from './connector/index.js';
+import {
+  ConnectorAdminClient,
+  TransportProbe,
+  DEFAULT_ATOR_PROXY,
+} from './connector/index.js';
 import { createApiServer } from './api/server.js';
 import { createWizardApiServer } from './api/wizard-server.js';
 import type { ApiServer } from './api/index.js';
@@ -204,7 +208,11 @@ async function handleSetup(
         `Port ${port} is already in use. Pass \`--port <n>\` to choose a different port.`
       );
       process.exitCode = 1;
-      try { await wizardServer.close(); } catch { /* best-effort */ }
+      try {
+        await wizardServer.close();
+      } catch {
+        /* best-effort */
+      }
       return;
     }
     throw err;
@@ -226,11 +234,17 @@ async function handleSetup(
     console.log(`\nReceived ${sig}, shutting down...`);
     try {
       await wizardServer.close();
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
     process.exit(0);
   };
-  process.once('SIGINT', () => { void shutdown('SIGINT'); });
-  process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+  process.once('SIGINT', () => {
+    void shutdown('SIGINT');
+  });
+  process.once('SIGTERM', () => {
+    void shutdown('SIGTERM');
+  });
 }
 
 async function handleWalletShow(
@@ -263,7 +277,9 @@ async function handleWalletShow(
   try {
     // Decrypt mnemonic in minimal scope — fromMnemonic derives keys then
     // the mnemonic string becomes unreachable (eligible for GC)
-    await walletManager.fromMnemonic(decryptWallet(result.wallet, walletPassword));
+    await walletManager.fromMnemonic(
+      decryptWallet(result.wallet, walletPassword)
+    );
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`Failed to decrypt wallet: ${msg}`);
@@ -429,7 +445,9 @@ async function handleUp(
     }
     walletManager = new WalletManager({ encryptedPath: walletPath });
     try {
-      await walletManager.fromMnemonic(decryptWallet(loaded.wallet, walletPassword));
+      await walletManager.fromMnemonic(
+        decryptWallet(loaded.wallet, walletPassword)
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`Failed to decrypt wallet: ${msg}`);
@@ -518,12 +536,23 @@ async function handleUp(
         `http://127.0.0.1:${config.connector.adminPort}`
       );
 
+      const transportProbe = new TransportProbe({
+        proxyUrl:
+          config.transport.mode === 'ator'
+            ? (config.transport.socksProxy ?? DEFAULT_ATOR_PROXY)
+            : '',
+      });
+      if (config.transport.mode === 'ator') {
+        transportProbe.start();
+      }
+
       const apiDeps = {
         configPath,
         config,
         orchestrator,
         wallet: walletManager,
         connectorAdmin,
+        transportProbe,
       };
 
       apiServer = await createApiServer(apiDeps);

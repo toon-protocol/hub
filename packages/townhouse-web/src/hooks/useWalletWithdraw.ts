@@ -14,15 +14,19 @@ export interface WithdrawErrorResponse {
 export type WithdrawHookResult = WithdrawResponse | WithdrawErrorResponse;
 
 /** Single-shot withdraw + receipt polling. Never caches secrets. */
-export function useWalletWithdraw(options: {
-  withdrawUrl?: string;
-  transactionUrl?: (txHash: string) => string;
-} = {}): {
+export function useWalletWithdraw(
+  options: {
+    withdrawUrl?: string;
+    transactionUrl?: (txHash: string) => string;
+  } = {}
+): {
   submit: (req: WithdrawRequest) => Promise<WithdrawHookResult>;
   getReceipt: (txHash: string) => Promise<TransactionReceiptPayload>;
 } {
   const withdrawUrl = options.withdrawUrl ?? '/api/wallet/withdraw'; // proxied to /wallet/withdraw
-  const txUrlFn = options.transactionUrl ?? ((txHash: string) => `/api/wallet/transaction/${txHash}`); // proxied
+  const txUrlFn =
+    options.transactionUrl ??
+    ((txHash: string) => `/api/wallet/transaction/${txHash}`); // proxied
 
   async function submit(req: WithdrawRequest): Promise<WithdrawHookResult> {
     const res = await fetch(withdrawUrl, {
@@ -44,13 +48,19 @@ export function useWalletWithdraw(options: {
       }
       throw new Error(`withdraw: HTTP ${res.status}`);
     }
-    if (parsed && typeof parsed === 'object' && ('txHash' in parsed || 'estimatedGas' in parsed)) {
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      ('txHash' in parsed || 'estimatedGas' in parsed)
+    ) {
       return parsed as WithdrawResponse;
     }
     throw new Error('withdraw: unexpected response shape');
   }
 
-  async function getReceipt(txHash: string): Promise<TransactionReceiptPayload> {
+  async function getReceipt(
+    txHash: string
+  ): Promise<TransactionReceiptPayload> {
     const res = await fetch(txUrlFn(txHash));
     if (!res.ok) {
       throw new Error(`receipt: HTTP ${res.status}`);

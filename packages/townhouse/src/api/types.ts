@@ -7,6 +7,7 @@ import type { DockerOrchestrator } from '../docker/orchestrator.js';
 import type { WalletManager } from '../wallet/index.js';
 import type { ConnectorAdminClient } from '../connector/index.js';
 import type { TownhouseConfig } from '../config/schema.js';
+import type { TransportProbe } from '../connector/transport-probe.js';
 import type { MillHealthResponse } from '@toon-protocol/mill';
 import type { DvmHealthResponse } from '@toon-protocol/sdk';
 
@@ -272,7 +273,10 @@ export interface RevealRequest {
 /** Response shape for POST /api/wallet/reveal */
 export type RevealResponse =
   | { mnemonic: string }
-  | { error: 'invalid_password' | 'wallet_not_initialized' | 'wallet_corrupted'; message?: string };
+  | {
+      error: 'invalid_password' | 'wallet_not_initialized' | 'wallet_corrupted';
+      message?: string;
+    };
 
 /** Response shape for GET /api/wallet/transaction/:txHash */
 export interface TransactionReceiptPayload {
@@ -312,12 +316,50 @@ export interface WizardInitRequest {
 
 /** Progress messages streamed over WS /api/wizard/progress */
 export type WizardProgressMessage =
-  | { type: 'pull_progress'; image: string; status: string; progress?: string; ts: number }
+  | {
+      type: 'pull_progress';
+      image: string;
+      status: string;
+      progress?: string;
+      ts: number;
+    }
   | { type: 'container_starting'; name: string; ts: number }
   | { type: 'container_healthy'; name: string; ts: number }
   | { type: 'container_failed'; name: string; reason: string; ts: number }
   | { type: 'launch_complete'; ts: number }
   | { type: 'error'; message: string; ts: number };
+
+// ── Transport API types (Story 21.15) ─────────────────────────────────────────
+
+/** Response shape for GET /api/transport */
+export interface TransportStatusPayload {
+  mode: 'direct' | 'ator';
+  /** Present only when mode === 'ator' */
+  socksProxy?: string;
+  reachable: boolean;
+  latencyProxyMs: number | null;
+  latencyDirectMs: number | null;
+  /** ms epoch; 0 if probe never ran */
+  lastProbedAt: number;
+  probeError: string | null;
+  /** Server timestamp at response build time */
+  ts: number;
+}
+
+/** Request body for PATCH /api/transport */
+export interface TransportPatchRequest {
+  mode: 'direct' | 'ator';
+  socksProxy?: string;
+}
+
+/** Response body for PATCH /api/transport */
+export interface TransportPatchResponse {
+  mode: 'direct' | 'ator';
+  socksProxy?: string;
+  restartTriggered: boolean;
+  /** ms epoch of connector restart; present when restartTriggered === true */
+  restartedAt?: number;
+}
 
 // ── API server types ───────────────────────────────────────────────────────────
 
@@ -334,5 +376,10 @@ export interface ApiDeps {
   orchestrator: DockerOrchestrator;
   wallet: WalletManager;
   connectorAdmin: ConnectorAdminClient;
+  /**
+   * Probe instance. Required: callers (createApiServer, createWizardApiServer,
+   * cli, dev API server) construct it from the config and pass it explicitly.
+   */
+  transportProbe: TransportProbe;
   logger?: FastifyBaseLogger;
 }

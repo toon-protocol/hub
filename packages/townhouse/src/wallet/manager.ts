@@ -38,7 +38,8 @@ import type {
 } from './types.js';
 import { deriveMillKeys } from '@toon-protocol/mill';
 
-const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const BASE58_ALPHABET =
+  '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 function base58Encode(bytes: Uint8Array): string {
   let zeros = 0;
   for (let i = 0; i < bytes.length && bytes[i] === 0; i++) zeros++;

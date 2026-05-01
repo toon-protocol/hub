@@ -21,12 +21,21 @@ class MockDockerOrchestrator {
     this.healthUrl = healthUrl;
   }
 
-  on(_event: string, _cb: () => void): this { return this; }
-  off(_event: string, _cb: () => void): this { return this; }
+  on(_event: string, _cb: () => void): this {
+    return this;
+  }
+  off(_event: string, _cb: () => void): this {
+    return this;
+  }
 
   async status() {
     return [
-      { name: 'townhouse-dev-dvm-01', type: 'dvm', state: 'running', startedAt: new Date().toISOString() },
+      {
+        name: 'townhouse-dev-dvm-01',
+        type: 'dvm',
+        state: 'running',
+        startedAt: new Date().toISOString(),
+      },
     ];
   }
 
@@ -41,7 +50,13 @@ class MockDockerOrchestrator {
 
 class MockConnectorAdminClient {
   private peers: { id: string; ilpAddresses: string[] }[] = [];
-  private packets: { ts: number; ilpAddressFrom: string; ilpAddressTo: string; amount: string; result: 'fulfill' | 'reject' | 'timeout' }[] = [];
+  private packets: {
+    ts: number;
+    ilpAddressFrom: string;
+    ilpAddressTo: string;
+    amount: string;
+    result: 'fulfill' | 'reject' | 'timeout';
+  }[] = [];
   private shouldFail = false;
   private endpointNotFound = false;
 
@@ -49,12 +64,24 @@ class MockConnectorAdminClient {
     this.peers = peers;
   }
 
-  setPackets(packets: { ts: number; ilpAddressFrom: string; ilpAddressTo: string; amount: string; result: 'fulfill' | 'reject' | 'timeout' }[]) {
+  setPackets(
+    packets: {
+      ts: number;
+      ilpAddressFrom: string;
+      ilpAddressTo: string;
+      amount: string;
+      result: 'fulfill' | 'reject' | 'timeout';
+    }[]
+  ) {
     this.packets = packets;
   }
 
-  setFail(fail: boolean) { this.shouldFail = fail; }
-  setEndpointNotFound(v: boolean) { this.endpointNotFound = v; }
+  setFail(fail: boolean) {
+    this.shouldFail = fail;
+  }
+  setEndpointNotFound(v: boolean) {
+    this.endpointNotFound = v;
+  }
 
   async getPeers() {
     if (this.shouldFail) throw new Error('connector down');
@@ -72,7 +99,12 @@ class MockConnectorAdminClient {
   }
 
   async getMetrics() {
-    return { uptimeSeconds: 0, aggregate: { packetsForwarded: 0, packetsRejected: 0, bytesSent: 0 }, peers: [], timestamp: '' };
+    return {
+      uptimeSeconds: 0,
+      aggregate: { packetsForwarded: 0, packetsRejected: 0, bytesSent: 0 },
+      peers: [],
+      timestamp: '',
+    };
   }
 }
 
@@ -88,7 +120,10 @@ const mockDvmHealth = {
   basePricePerByte: '10',
   jobsRecent: {
     total: 5,
-    byKind: [{ kind: 5094, count: 3 }, { kind: 5250, count: 2 }],
+    byKind: [
+      { kind: 5094, count: 3 },
+      { kind: 5250, count: 2 },
+    ],
     byStatus: { processing: 1, success: 3, error: 1, partial: 0 },
   },
 };
@@ -107,20 +142,35 @@ beforeEach(async () => {
     { id: 'townhouse-dev-dvm-01', ilpAddresses: ['g.test.dvm-01'] },
   ]);
   connectorAdmin.setPackets([
-    { ts: Date.now() - 1000, ilpAddressFrom: 'g.test.client', ilpAddressTo: 'g.test.dvm-01', amount: '100', result: 'fulfill' },
-    { ts: Date.now() - 2000, ilpAddressFrom: 'g.test.client', ilpAddressTo: 'g.test.dvm-01', amount: '200', result: 'fulfill' },
+    {
+      ts: Date.now() - 1000,
+      ilpAddressFrom: 'g.test.client',
+      ilpAddressTo: 'g.test.dvm-01',
+      amount: '100',
+      result: 'fulfill',
+    },
+    {
+      ts: Date.now() - 2000,
+      ilpAddressFrom: 'g.test.client',
+      ilpAddressTo: 'g.test.dvm-01',
+      amount: '200',
+      result: 'fulfill',
+    },
   ]);
 
   // Mock global fetch for health endpoint
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (String(url).includes('/health')) {
-      return {
-        ok: true,
-        json: async () => mockDvmHealth,
-      };
-    }
-    return { ok: false, status: 404 };
-  }));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (String(url).includes('/health')) {
+        return {
+          ok: true,
+          json: async () => mockDvmHealth,
+        };
+      }
+      return { ok: false, status: 404 };
+    })
+  );
 
   const config = getDefaultConfig();
   config.nodes.dvm.enabled = true;
@@ -129,7 +179,14 @@ beforeEach(async () => {
     configPath: '/tmp/test-config.yaml',
     config,
     orchestrator: orchestrator as unknown as DockerOrchestrator,
-    wallet: { listKeys: () => [], getNodeKeys: () => ({ nostrPubkey: 'a'.repeat(64), evmAddress: '0x1', nostrSecretKey: new Uint8Array(32) }) } as unknown as WalletManager,
+    wallet: {
+      listKeys: () => [],
+      getNodeKeys: () => ({
+        nostrPubkey: 'a'.repeat(64),
+        evmAddress: '0x1',
+        nostrSecretKey: new Uint8Array(32),
+      }),
+    } as unknown as WalletManager,
     connectorAdmin: connectorAdmin as unknown as ConnectorAdminClient,
   };
 
@@ -201,7 +258,14 @@ describe('GET /nodes/:nodeId/jobs/recent', () => {
       configPath: '/tmp/test2.yaml',
       config,
       orchestrator: orchWithMill as unknown as DockerOrchestrator,
-      wallet: { listKeys: () => [], getNodeKeys: () => ({ nostrPubkey: 'a'.repeat(64), evmAddress: '0x1', nostrSecretKey: new Uint8Array(32) }) } as unknown as WalletManager,
+      wallet: {
+        listKeys: () => [],
+        getNodeKeys: () => ({
+          nostrPubkey: 'a'.repeat(64),
+          evmAddress: '0x1',
+          nostrSecretKey: new Uint8Array(32),
+        }),
+      } as unknown as WalletManager,
       connectorAdmin: connectorAdmin as unknown as ConnectorAdminClient,
     };
     const app2 = Fastify();
@@ -259,7 +323,10 @@ describe('GET /nodes/:nodeId/jobs/recent', () => {
   });
 
   it('health fetch fail returns zero byStatus', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 500 }))
+    );
 
     const res = await app.inject({
       method: 'GET',

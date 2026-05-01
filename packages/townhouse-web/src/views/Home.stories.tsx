@@ -44,6 +44,10 @@ interface FixtureScenario {
   list: NodeInfo[];
   details?: Partial<Record<'town' | 'mill' | 'dvm', NodeDetail>>;
   failList?: number;
+  /** Override the transport mode for preview (default: direct) */
+  transportMode?: 'direct' | 'ator';
+  /** Override ATOR reachability for preview (default: true) */
+  transportReachable?: boolean;
 }
 
 class NoOpWebSocket {
@@ -72,8 +76,22 @@ function FixtureProvider({
     const originalFetch = globalThis.fetch;
     const originalWebSocket = (globalThis as Record<string, unknown>)['WebSocket'];
 
+    const mode = scenario.transportMode ?? 'direct';
+    const reachable = scenario.transportReachable ?? true;
+    const transportPayload = {
+      mode,
+      ...(mode === 'ator' ? { socksProxy: 'socks5h://proxy.ator.io:9050' } : {}),
+      reachable,
+      latencyProxyMs: mode === 'ator' && reachable ? 120 : null,
+      latencyDirectMs: 5,
+      lastProbedAt: Date.now(),
+      probeError: reachable ? null : 'ECONNREFUSED',
+      ts: Date.now(),
+    };
+
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
+      if (url.endsWith('/api/transport')) return jsonRes(transportPayload);
       if (url.endsWith('/api/nodes')) {
         if (scenario.failList) return jsonRes({}, scenario.failList);
         return jsonRes(scenario.list);
@@ -151,7 +169,6 @@ export const NetworkError: Story = {
 };
 
 export const AtorTransport: Story = {
-  args: { transportMode: 'ator' },
   parameters: {
     fixture: {
       list: fixtureNodes.slice(0, 2),
@@ -159,6 +176,22 @@ export const AtorTransport: Story = {
         town: makeDetail('town', 24),
         mill: makeDetail('mill', 7),
       },
+      transportMode: 'ator',
+      transportReachable: true,
+    } satisfies FixtureScenario,
+  },
+};
+
+export const AtorUnreachable: Story = {
+  parameters: {
+    fixture: {
+      list: fixtureNodes.slice(0, 2),
+      details: {
+        town: makeDetail('town', 24),
+        mill: makeDetail('mill', 7),
+      },
+      transportMode: 'ator',
+      transportReachable: false,
     } satisfies FixtureScenario,
   },
 };

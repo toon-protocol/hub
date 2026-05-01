@@ -12,14 +12,20 @@ async function rpcCall(
   rpcUrl: string,
   method: string,
   params: unknown[],
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<unknown> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new Error('rpc_timeout')), TIMEOUT_MS);
+  const timeout = setTimeout(
+    () => controller.abort(new Error('rpc_timeout')),
+    TIMEOUT_MS
+  );
   // Forward caller cancellation into our controller so the local timeout-driven
   // abort and the caller-driven abort both reach the underlying fetch.
   const onCallerAbort = signal
-    ? () => controller.abort((signal.reason as Error | undefined) ?? new Error('aborted'))
+    ? () =>
+        controller.abort(
+          (signal.reason as Error | undefined) ?? new Error('aborted')
+        )
     : null;
   if (signal && onCallerAbort) {
     if (signal.aborted) onCallerAbort();
@@ -33,9 +39,14 @@ async function rpcCall(
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`EVM RPC ${method} failed: HTTP ${res.status}`);
-    const data = (await res.json()) as { result?: string; error?: { message: string } };
-    if (data.error) throw new Error(`EVM RPC ${method} error: ${data.error.message}`);
+    if (!res.ok)
+      throw new Error(`EVM RPC ${method} failed: HTTP ${res.status}`);
+    const data = (await res.json()) as {
+      result?: string;
+      error?: { message: string };
+    };
+    if (data.error)
+      throw new Error(`EVM RPC ${method} error: ${data.error.message}`);
     return data.result;
   } finally {
     clearTimeout(timeout);
@@ -49,11 +60,17 @@ async function rpcCall(
  * Get native ETH balance (wei) for an address.
  * Returns balance as decimal string.
  */
-export async function getEvmBalance(rpcUrl: string, address: string): Promise<string> {
+export async function getEvmBalance(
+  rpcUrl: string,
+  address: string
+): Promise<string> {
   if (!HEX_ADDR_RE.test(address)) {
     throw new Error(`getEvmBalance: invalid address shape (${address})`);
   }
-  const hex = (await rpcCall(rpcUrl, 'eth_getBalance', [address, 'latest'])) as string;
+  const hex = (await rpcCall(rpcUrl, 'eth_getBalance', [
+    address,
+    'latest',
+  ])) as string;
   return BigInt(hex).toString();
 }
 
@@ -64,16 +81,23 @@ export async function getEvmBalance(rpcUrl: string, address: string): Promise<st
 export async function getErc20Balance(
   rpcUrl: string,
   contractAddress: string,
-  holderAddress: string,
+  holderAddress: string
 ): Promise<string> {
   if (!HEX_ADDR_RE.test(contractAddress)) {
-    throw new Error(`getErc20Balance: invalid contract address (${contractAddress})`);
+    throw new Error(
+      `getErc20Balance: invalid contract address (${contractAddress})`
+    );
   }
   if (!HEX_ADDR_RE.test(holderAddress)) {
-    throw new Error(`getErc20Balance: invalid holder address (${holderAddress})`);
+    throw new Error(
+      `getErc20Balance: invalid holder address (${holderAddress})`
+    );
   }
   // ABI-encode balanceOf(address): selector 0x70a08231 + padded address
-  const paddedAddr = holderAddress.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+  const paddedAddr = holderAddress
+    .toLowerCase()
+    .replace(/^0x/, '')
+    .padStart(64, '0');
   const data = `0x70a08231${paddedAddr}`;
 
   const hex = (await rpcCall(rpcUrl, 'eth_call', [

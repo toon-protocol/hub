@@ -12,7 +12,14 @@ import { useNodeStatusStream } from '@/hooks/useNodeStatusStream';
 import type { StreamConnectionStatus } from '@/hooks/useNodeStatusStream';
 import { mapToStatusDot, formatUptime } from '@/lib/node-status';
 import { useWizardState } from '@/hooks/useWizardState';
-import type { NodeInfo, NodeType, MetricsPayload } from '@toon-protocol/townhouse';
+import { useTransportStatus } from '@/hooks/useTransportStatus';
+import type { TransportStatusPayload } from '@toon-protocol/townhouse';
+import type { TransportStatusKind } from '@/hooks/useTransportStatus';
+import type {
+  NodeInfo,
+  NodeType,
+  MetricsPayload,
+} from '@toon-protocol/townhouse';
 
 const NODE_LABELS: Record<NodeType, string> = {
   town: 'town',
@@ -57,7 +64,8 @@ function NodeCard({ node, liveState, metrics }: NodeCardProps) {
   }
 
   const uptimeText = formatUptime(node.uptimeSeconds);
-  const uptimeAriaLabel = node.uptimeSeconds == null ? 'Uptime: unknown' : `Uptime: ${uptimeText}`;
+  const uptimeAriaLabel =
+    node.uptimeSeconds == null ? 'Uptime: unknown' : `Uptime: ${uptimeText}`;
 
   return (
     <article
@@ -114,11 +122,14 @@ function NodeCard({ node, liveState, metrics }: NodeCardProps) {
 }
 
 interface HomeHeaderProps {
-  transportMode: 'direct' | 'ator' | 'unknown';
   streamStatus: StreamConnectionStatus;
+  transportStatus: TransportStatusPayload | null;
+  transportStatusKind: TransportStatusKind;
 }
 
-function streamStatusToDot(status: StreamConnectionStatus): 'ok' | 'degraded' | 'down' {
+function streamStatusToDot(
+  status: StreamConnectionStatus
+): 'ok' | 'degraded' | 'down' {
   switch (status) {
     case 'open':
       return 'ok';
@@ -143,23 +154,71 @@ function streamStatusLabel(status: StreamConnectionStatus): string {
   }
 }
 
-function HomeHeader({ transportMode, streamStatus }: HomeHeaderProps) {
-  // AC-5: ATOR live-status is a 21.15 surface. Until `GET /api/transport-status`
-  // exists (or `/api/nodes` extends with `transportStatus`), this dot reflects
-  // only the configured transport mode — not connectivity.
-  // TODO(21.15): wire to live ATOR proxy reachability.
-  const transportDotState = transportMode === 'unknown' ? 'unknown' : 'ok';
-  const transportLabel =
-    transportMode === 'ator'
-      ? 'ATOR transport: configured'
-      : transportMode === 'direct'
-        ? 'Direct transport'
-        : 'Transport: unknown';
+/** Map transport status to dot state and aria-label string. */
+export function formatTransportLabel(
+  status: TransportStatusPayload | null,
+  statusKind: TransportStatusKind
+): { dotState: 'ok' | 'down' | 'unknown'; label: string } {
+  if (statusKind === 'loading' || statusKind === 'error') {
+    return { dotState: 'unknown', label: 'Transport: unknown' };
+  }
+  if (!status) {
+    return { dotState: 'unknown', label: 'Transport: unknown' };
+  }
+  if (status.mode === 'direct') {
+    return { dotState: 'ok', label: 'Direct transport' };
+  }
+  // ATOR mode — derive proxy host defensively; a malformed socksProxy must not
+  // crash the header.
+  let proxyHost = 'proxy';
+  if (status.socksProxy) {
+    try {
+      proxyHost = new URL(status.socksProxy).host || 'proxy';
+    } catch {
+      proxyHost = 'proxy';
+    }
+  }
+  if (status.reachable) {
+    const latency =
+      status.latencyProxyMs != null
+        ? `, ~${status.latencyProxyMs} ms via proxy`
+        : '';
+    const direct =
+      status.latencyDirectMs != null
+        ? ` / ~${status.latencyDirectMs} ms direct`
+        : '';
+    return {
+      dotState: 'ok',
+      label: `ATOR transport: connected (${proxyHost}${latency}${direct})`,
+    };
+  }
+  return {
+    dotState: 'down',
+    label: `ATOR transport: unreachable — ${proxyHost} not responding`,
+  };
+}
+
+function HomeHeader({
+  streamStatus,
+  transportStatus,
+  transportStatusKind,
+}: HomeHeaderProps) {
+  const { dotState, label } = formatTransportLabel(
+    transportStatus,
+    transportStatusKind
+  );
 
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="font-semibold tracking-tight-16">Townhouse</span>
       <div className="flex items-center gap-4 text-xs text-ink/60">
+        <Link
+          to="/settings"
+          className="font-geist-sans text-xs text-ink/60 hover:text-ink"
+          aria-label="View settings"
+        >
+          Settings
+        </Link>
         <Link
           to="/wallet"
           className="font-geist-sans text-xs text-ink/60 hover:text-ink"
@@ -167,12 +226,7 @@ function HomeHeader({ transportMode, streamStatus }: HomeHeaderProps) {
         >
           Wallet
         </Link>
-        <div className="flex items-center gap-2">
-          <span className="font-geist-mono uppercase tracking-wider" aria-hidden="true">
-            {transportMode}
-          </span>
-          <StatusDot state={transportDotState} aria-label={transportLabel} />
-        </div>
+        <StatusDot state={dotState} aria-label={label} />
         <StatusDot
           state={streamStatusToDot(streamStatus)}
           aria-label={streamStatusLabel(streamStatus)}
@@ -180,16 +234,6 @@ function HomeHeader({ transportMode, streamStatus }: HomeHeaderProps) {
       </div>
     </div>
   );
-}
-
-interface HomeProps {
-  /**
-   * Override the configured transport mode for testing or storybook.
-   * In product mode we default to `'unknown'` rather than guessing — the live
-   * Townhouse config is only available once `/api/transport-status` ships
-   * in 21.15.
-   */
-  transportMode?: 'direct' | 'ator' | 'unknown';
 }
 
 function NodeCardSkeleton() {
@@ -216,11 +260,13 @@ function NodeCardSkeleton() {
   );
 }
 
-export function Home({ transportMode = 'unknown' }: HomeProps = {}) {
+export function Home() {
   const navigate = useNavigate();
   const { nodes, metricsByType, status, refetch } = useNodes();
   const { statesByName, connectionStatus, reconnect } = useNodeStatusStream();
   const { state: wizardState, status: wizardStatus } = useWizardState();
+  const { status: transportStatus, statusKind: transportStatusKind } =
+    useTransportStatus();
 
   // AC-12: Auto-redirect to /wizard when setup hasn't been run.
   // Depend on the boolean derivation, not on the wizardState object — useWizardState
@@ -256,8 +302,9 @@ export function Home({ transportMode = 'unknown' }: HomeProps = {}) {
     <Shell
       header={
         <HomeHeader
-          transportMode={transportMode}
           streamStatus={connectionStatus}
+          transportStatus={transportStatus}
+          transportStatusKind={transportStatusKind}
         />
       }
     >
@@ -283,7 +330,10 @@ export function Home({ transportMode = 'unknown' }: HomeProps = {}) {
                 No nodes configured. Run the first-run wizard to enable Town,
                 Mill, or DVM.
               </p>
-              <Link to="/wizard" className={buttonVariants({ variant: 'primary' })}>
+              <Link
+                to="/wizard"
+                className={buttonVariants({ variant: 'primary' })}
+              >
                 Run wizard
               </Link>
             </div>
@@ -295,9 +345,7 @@ export function Home({ transportMode = 'unknown' }: HomeProps = {}) {
             >
               <p className="font-geist-sans max-w-md text-sm text-ink">
                 Could not reach Townhouse API. Is{' '}
-                <code className="font-geist-mono text-xs">
-                  pnpm dev:docker
-                </code>{' '}
+                <code className="font-geist-mono text-xs">pnpm dev:docker</code>{' '}
                 running?
               </p>
               <Button variant="secondary" onClick={handleRetry}>

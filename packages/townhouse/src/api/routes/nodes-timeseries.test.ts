@@ -23,9 +23,15 @@ import { getDefaultConfig } from '../../config/defaults.js';
 // ── Stubs ─────────────────────────────────────────────────────────────────────
 
 class StubOrchestrator extends EventEmitter {
-  async status() { return []; }
-  async getContainerStats() { return null; }
-  async getNodeRelayEndpoint() { return 'ws://localhost:7100'; }
+  async status() {
+    return [];
+  }
+  async getContainerStats() {
+    return null;
+  }
+  async getNodeRelayEndpoint() {
+    return 'ws://localhost:7100';
+  }
 }
 
 class StubConnectorAdmin {
@@ -45,9 +51,24 @@ class StubConnectorAdmin {
 
   async getPeers() {
     return [
-      { id: 'town', connected: true, ilpAddresses: ['g.toon.town.01'], routeCount: 1 },
-      { id: 'mill', connected: true, ilpAddresses: ['g.toon.mill.01'], routeCount: 1 },
-      { id: 'dvm',  connected: true, ilpAddresses: ['g.toon.dvm.01'],  routeCount: 1 },
+      {
+        id: 'town',
+        connected: true,
+        ilpAddresses: ['g.toon.town.01'],
+        routeCount: 1,
+      },
+      {
+        id: 'mill',
+        connected: true,
+        ilpAddresses: ['g.toon.mill.01'],
+        routeCount: 1,
+      },
+      {
+        id: 'dvm',
+        connected: true,
+        ilpAddresses: ['g.toon.dvm.01'],
+        routeCount: 1,
+      },
     ];
   }
 
@@ -65,7 +86,11 @@ class StubConnectorAdmin {
   }
 }
 
-class StubWallet { listKeys() { return []; } }
+class StubWallet {
+  listKeys() {
+    return [];
+  }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -123,7 +148,9 @@ describe('GET /nodes/:type/packets/timeseries', () => {
     const res = await fetch(`${url}/nodes/town/packets/timeseries?bucket=hour`);
     expect(res.status).toBe(200);
 
-    const body = await res.json() as { buckets: { ts: number; count: number }[] };
+    const body = (await res.json()) as {
+      buckets: { ts: number; count: number }[];
+    };
     expect(body).toHaveProperty('buckets');
     expect(Array.isArray(body.buckets)).toBe(true);
 
@@ -137,21 +164,21 @@ describe('GET /nodes/:type/packets/timeseries', () => {
     connector.packets = [];
     const res = await fetch(`${url}/nodes/town/packets/timeseries`);
     expect(res.status).toBe(200);
-    const body = await res.json() as { buckets: unknown[] };
+    const body = (await res.json()) as { buckets: unknown[] };
     expect(body.buckets).toEqual([]);
   });
 
   it('unknown type → 404', async () => {
     const res = await fetch(`${url}/nodes/unknown/packets/timeseries`);
     expect(res.status).toBe(404);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('unknown_node_type');
   });
 
   it('unsupported bucket size → 400', async () => {
     const res = await fetch(`${url}/nodes/town/packets/timeseries?bucket=week`);
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('unsupported_bucket');
   });
 
@@ -159,7 +186,7 @@ describe('GET /nodes/:type/packets/timeseries', () => {
     connector.shouldReturn404 = true;
     const res = await fetch(`${url}/nodes/town/packets/timeseries`);
     expect(res.status).toBe(503);
-    const body = await res.json() as { error: string; message: string };
+    const body = (await res.json()) as { error: string; message: string };
     expect(body.error).toBe('connector_endpoint_not_found');
     expect(body.message).toMatch(/CONNECTOR_MIGRATION/);
   });
@@ -168,7 +195,7 @@ describe('GET /nodes/:type/packets/timeseries', () => {
     connector.shouldFail = true;
     const res = await fetch(`${url}/nodes/town/packets/timeseries`);
     expect(res.status).toBe(503);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('connector_unavailable');
   });
 

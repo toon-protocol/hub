@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { signAndBroadcastEthTransfer, signAndBroadcastUsdcTransfer, getReceipt, estimateNativeTransferGas } from './evm-tx.js';
+import {
+  signAndBroadcastEthTransfer,
+  signAndBroadcastUsdcTransfer,
+  getReceipt,
+  estimateNativeTransferGas,
+} from './evm-tx.js';
 
 const HASH = ('0x' + 'ab'.repeat(32)) as `0x${string}`;
 const CHAIN_ID = 31337;
@@ -14,7 +19,9 @@ vi.mock('viem', async (importOriginal) => {
     })),
     createPublicClient: vi.fn(() => ({
       getChainId: vi.fn().mockResolvedValue(CHAIN_ID),
-      getTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success', blockNumber: 1n }),
+      getTransactionReceipt: vi
+        .fn()
+        .mockResolvedValue({ status: 'success', blockNumber: 1n }),
       estimateGas: vi.fn().mockResolvedValue(21000n),
       getGasPrice: vi.fn().mockResolvedValue(1_000_000_000n),
     })),
@@ -24,7 +31,9 @@ vi.mock('viem', async (importOriginal) => {
 });
 
 vi.mock('viem/accounts', () => ({
-  privateKeyToAccount: vi.fn().mockReturnValue({ address: '0x1234' as `0x${string}` }),
+  privateKeyToAccount: vi
+    .fn()
+    .mockReturnValue({ address: '0x1234' as `0x${string}` }),
 }));
 
 describe('evm-tx helpers', () => {

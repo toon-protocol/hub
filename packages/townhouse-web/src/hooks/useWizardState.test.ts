@@ -12,7 +12,11 @@ const MOCK_STATE: WizardStatePayload = {
 };
 
 function jsonRes(body: unknown) {
-  return { ok: true, status: 200, json: () => Promise.resolve(body) } as unknown as Response;
+  return {
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve(body),
+  } as unknown as Response;
 }
 
 afterEach(() => {
@@ -44,10 +48,12 @@ describe('useWizardState', () => {
 
   it('cancels in-flight fetch on unmount (abort signal)', async () => {
     let capturedSignal: AbortSignal | undefined;
-    vi.spyOn(globalThis, 'fetch').mockImplementation((_url, init?: RequestInit) => {
-      capturedSignal = init?.signal;
-      return new Promise(() => {}); // never resolves
-    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (_url, init?: RequestInit) => {
+        capturedSignal = init?.signal;
+        return new Promise(() => {}); // never resolves
+      }
+    );
 
     const { unmount } = renderHook(() =>
       useWizardState({ url: '/test/wizard/state', pollIntervalMs: 10000 })

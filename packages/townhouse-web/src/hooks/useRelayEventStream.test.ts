@@ -71,7 +71,10 @@ afterEach(() => {
 describe('useRelayEventStream', () => {
   it('starts in connecting state', () => {
     const { result } = renderHook(() =>
-      useRelayEventStream({ nodeId: 'town-01', url: 'ws://localhost:9400/metrics?subscribe=relayEvents:town-01' })
+      useRelayEventStream({
+        nodeId: 'town-01',
+        url: 'ws://localhost:9400/metrics?subscribe=relayEvents:town-01',
+      })
     );
     expect(result.current.status).toBe('connecting');
     expect(result.current.events).toEqual([]);
@@ -79,7 +82,10 @@ describe('useRelayEventStream', () => {
 
   it('transitions to open when socket opens', async () => {
     const { result } = renderHook(() =>
-      useRelayEventStream({ nodeId: 'town-01', url: 'ws://localhost:9400/metrics' })
+      useRelayEventStream({
+        nodeId: 'town-01',
+        url: 'ws://localhost:9400/metrics',
+      })
     );
 
     await act(async () => {
@@ -91,7 +97,10 @@ describe('useRelayEventStream', () => {
 
   it('adds events to the buffer when relayEvents message arrives', async () => {
     const { result } = renderHook(() =>
-      useRelayEventStream({ nodeId: 'town-01', url: 'ws://localhost:9400/metrics' })
+      useRelayEventStream({
+        nodeId: 'town-01',
+        url: 'ws://localhost:9400/metrics',
+      })
     );
 
     await act(async () => {
@@ -111,7 +120,10 @@ describe('useRelayEventStream', () => {
 
   it('only accepts events matching the subscribed nodeId', async () => {
     const { result } = renderHook(() =>
-      useRelayEventStream({ nodeId: 'town-01', url: 'ws://localhost:9400/metrics' })
+      useRelayEventStream({
+        nodeId: 'town-01',
+        url: 'ws://localhost:9400/metrics',
+      })
     );
 
     await act(async () => {
@@ -131,7 +143,11 @@ describe('useRelayEventStream', () => {
   it('respects buffer size — oldest events are dropped when full', async () => {
     const BUFFER = 3;
     const { result } = renderHook(() =>
-      useRelayEventStream({ nodeId: 'town-01', url: 'ws://localhost:9400/metrics', bufferSize: BUFFER })
+      useRelayEventStream({
+        nodeId: 'town-01',
+        url: 'ws://localhost:9400/metrics',
+        bufferSize: BUFFER,
+      })
     );
 
     await act(async () => {
@@ -184,7 +200,10 @@ describe('useRelayEventStream', () => {
 
   it('processes batch messages containing relayEvents', async () => {
     const { result } = renderHook(() =>
-      useRelayEventStream({ nodeId: 'town-01', url: 'ws://localhost:9400/metrics' })
+      useRelayEventStream({
+        nodeId: 'town-01',
+        url: 'ws://localhost:9400/metrics',
+      })
     );
 
     await act(async () => {

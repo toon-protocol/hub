@@ -23,7 +23,9 @@ const DEFAULT_REFETCH_INTERVAL_MS = 60_000;
  * Fetches `/api/nodes/:type/packets/timeseries` and refetches every minute.
  * Returns 'unavailable' status when the connector image doesn't expose the endpoint (503).
  */
-export function usePacketTimeseries(options: UsePacketTimeseriesOptions): UsePacketTimeseriesResult {
+export function usePacketTimeseries(
+  options: UsePacketTimeseriesOptions
+): UsePacketTimeseriesResult {
   const {
     nodeType,
     bucket = 'hour',
@@ -36,15 +38,21 @@ export function usePacketTimeseries(options: UsePacketTimeseriesOptions): UsePac
   const baseUrl = options.url ?? null;
 
   const [buckets, setBuckets] = useState<TimeseriesBucket[]>([]);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'unavailable'>('loading');
+  const [status, setStatus] = useState<
+    'loading' | 'ready' | 'error' | 'unavailable'
+  >('loading');
 
   useEffect(() => {
     let cancelled = false;
 
     async function fetch_() {
       // Compute `since` at fetch time so the 24-hour window slides correctly.
-      const since = new Date(Date.now() - lookbackHours * 60 * 60_000).toISOString();
-      const timeseriesUrl = baseUrl ?? `/api/nodes/${nodeType}/packets/timeseries?bucket=${bucket}&since=${encodeURIComponent(since)}`;
+      const since = new Date(
+        Date.now() - lookbackHours * 60 * 60_000
+      ).toISOString();
+      const timeseriesUrl =
+        baseUrl ??
+        `/api/nodes/${nodeType}/packets/timeseries?bucket=${bucket}&since=${encodeURIComponent(since)}`;
       try {
         const res = await fetch(timeseriesUrl);
         if (cancelled) return;
@@ -59,7 +67,7 @@ export function usePacketTimeseries(options: UsePacketTimeseriesOptions): UsePac
           return;
         }
 
-        const body = await res.json() as { buckets: TimeseriesBucket[] };
+        const body = (await res.json()) as { buckets: TimeseriesBucket[] };
         if (cancelled) return;
 
         setBuckets(body.buckets ?? []);

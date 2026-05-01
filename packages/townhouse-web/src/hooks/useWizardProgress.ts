@@ -15,7 +15,8 @@ interface UseWizardProgressOptions {
 }
 
 function defaultUrl(): string {
-  if (typeof window === 'undefined') return 'ws://127.0.0.1:9400/api/wizard/progress';
+  if (typeof window === 'undefined')
+    return 'ws://127.0.0.1:9400/api/wizard/progress';
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${window.location.host}/api/wizard/progress`;
 }
@@ -25,7 +26,9 @@ function defaultUrl(): string {
  * Reconnects with bounded exponential backoff on transient drops; the server's
  * progressBuffer replays missed messages on reconnect. Auto-closes on unmount.
  */
-export function useWizardProgress(options: UseWizardProgressOptions = {}): UseWizardProgressResult {
+export function useWizardProgress(
+  options: UseWizardProgressOptions = {}
+): UseWizardProgressResult {
   const url = options.url ?? defaultUrl();
   const maxReconnects = options.maxReconnects ?? 5;
 
@@ -97,7 +100,9 @@ export function useWizardProgress(options: UseWizardProgressOptions = {}): UseWi
       }
       try {
         socket?.close();
-      } catch { /* best-effort */ }
+      } catch {
+        /* best-effort */
+      }
     };
   }, [url, maxReconnects]);
 

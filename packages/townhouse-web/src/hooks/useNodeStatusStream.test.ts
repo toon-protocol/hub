@@ -105,8 +105,16 @@ describe('useNodeStatusStream', () => {
         type: 'batch',
         ts: Date.now(),
         messages: [
-          { type: 'nodeState', payload: { name: 'town', state: 'running' }, ts: Date.now() },
-          { type: 'nodeState', payload: { name: 'mill', state: 'paused' }, ts: Date.now() },
+          {
+            type: 'nodeState',
+            payload: { name: 'town', state: 'running' },
+            ts: Date.now(),
+          },
+          {
+            type: 'nodeState',
+            payload: { name: 'mill', state: 'paused' },
+            ts: Date.now(),
+          },
           { type: 'heartbeat', ts: Date.now() },
         ],
       });
@@ -258,7 +266,10 @@ describe('useNodeStatusStream', () => {
       });
     });
 
-    expect(result.current.statesByName).toEqual({ town: 'running', mill: 'paused' });
+    expect(result.current.statesByName).toEqual({
+      town: 'running',
+      mill: 'paused',
+    });
   });
 
   it('schedules a reconnect when the WebSocket constructor throws', async () => {
@@ -297,7 +308,9 @@ describe('useNodeStatusStream', () => {
   });
 
   it('warns and keeps the connection alive on malformed message payloads', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     const { result } = renderHook(() =>
       useNodeStatusStream({ url: 'ws://test/api/metrics' })
     );

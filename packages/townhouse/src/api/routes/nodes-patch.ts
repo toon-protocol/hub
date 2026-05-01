@@ -6,9 +6,11 @@ import type { FastifyInstance, FastifySchema } from 'fastify';
 import type { ApiDeps, NodeType } from '../types.js';
 import { validateConfig } from '../../config/validator.js';
 import { saveConfig } from '../../config/loader.js';
-
-/** Mutex flag to serialize config mutations */
-let isMutating = false;
+import {
+  acquireConfigMutex,
+  releaseConfigMutex,
+  resetConfigMutex as _resetConfigMutex,
+} from '../config-mutex.js';
 
 /** Request body for PATCH /nodes/:type/config */
 interface ConfigPatchBody {
@@ -81,13 +83,11 @@ export function registerConfigPatchRoutes(
       }
 
       // Check mutex
-      if (isMutating) {
+      if (!acquireConfigMutex()) {
         return reply.status(409).send({
           error: 'config_mutation_in_flight',
         });
       }
-
-      isMutating = true;
 
       try {
         // Use the live reference — mutations applied to `deps.config` persist across requests
@@ -189,10 +189,14 @@ export function registerConfigPatchRoutes(
         } else if (nodeType === 'mill') {
           return { enabled: u.enabled, feeBasisPoints: u.feeBasisPoints };
         } else {
-          return { enabled: u.enabled, feePerJob: u.feePerJob, kindPricing: u.kindPricing };
+          return {
+            enabled: u.enabled,
+            feePerJob: u.feePerJob,
+            kindPricing: u.kindPricing,
+          };
         }
       } finally {
-        isMutating = false;
+        releaseConfigMutex();
       }
     }
   );
@@ -200,7 +204,6 @@ export function registerConfigPatchRoutes(
 
 /**
  * Reset the mutation mutex (for testing).
+ * Re-exported from config-mutex.ts for backward compatibility with existing tests.
  */
-export function resetConfigMutex(): void {
-  isMutating = false;
-}
+export { _resetConfigMutex as resetConfigMutex };

@@ -17,9 +17,15 @@ const DEV_MNEMONIC =
 const DEV_PASSWORD = 'testpassword123';
 
 class MockOrchestrator {
-  on() { return this; }
-  off() { return this; }
-  async status() { return []; }
+  on() {
+    return this;
+  }
+  off() {
+    return this;
+  }
+  async status() {
+    return [];
+  }
 }
 
 class MockConnector {}
@@ -30,7 +36,10 @@ afterEach(() => {
 
 async function buildApp(walletPath: string): Promise<FastifyInstance> {
   const wallet = new WalletManager({ encryptedPath: walletPath });
-  const config = { ...getDefaultConfig(), wallet: { encrypted_path: walletPath } };
+  const config = {
+    ...getDefaultConfig(),
+    wallet: { encrypted_path: walletPath },
+  };
   const deps: ApiDeps = {
     configPath: '/tmp/test.yaml',
     config,
@@ -90,7 +99,9 @@ describe('POST /api/wallet/reveal', () => {
       payload: { password: DEV_PASSWORD },
     });
     expect(res.statusCode).toBe(503);
-    expect(JSON.parse(res.body)).toMatchObject({ error: 'wallet_not_initialized' });
+    expect(JSON.parse(res.body)).toMatchObject({
+      error: 'wallet_not_initialized',
+    });
   });
 
   it('returns 500 on corrupted wallet JSON', async () => {
@@ -132,11 +143,16 @@ describe('POST /api/wallet/reveal', () => {
       logger: {
         level: 'debug',
         stream: {
-          write(msg: string) { logMessages.push(msg); },
+          write(msg: string) {
+            logMessages.push(msg);
+          },
         },
       },
     });
-    const config = { ...getDefaultConfig(), wallet: { encrypted_path: walletPath } };
+    const config = {
+      ...getDefaultConfig(),
+      wallet: { encrypted_path: walletPath },
+    };
     const wallet = new WalletManager({ encryptedPath: walletPath });
     registerWalletRevealRoutes(logApp, {
       configPath: '/tmp/test.yaml',

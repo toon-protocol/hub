@@ -75,7 +75,17 @@ describe('useNodeMetrics', () => {
   it('returns null bandwidth when endpoint returns null', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = typeof input === 'string' ? input : (input as URL).toString();
-      if (url === detailUrl) return jsonRes({ id: 'town', type: 'town', enabled: true, state: 'running', uptimeSeconds: 0, image: '', config: {}, metrics: null });
+      if (url === detailUrl)
+        return jsonRes({
+          id: 'town',
+          type: 'town',
+          enabled: true,
+          state: 'running',
+          uptimeSeconds: 0,
+          image: '',
+          config: {},
+          metrics: null,
+        });
       if (url === bandwidthUrl) return jsonRes(null);
       throw new Error('unexpected ' + url);
     });

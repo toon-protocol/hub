@@ -144,10 +144,13 @@ export class ConnectorAdminClient {
    */
   async getPacketLog(filter: PacketLogFilter = {}): Promise<PacketLogEntry[]> {
     const params = new URLSearchParams();
-    if (filter.ilpAddress !== undefined) params.set('ilpAddress', filter.ilpAddress);
+    if (filter.ilpAddress !== undefined)
+      params.set('ilpAddress', filter.ilpAddress);
     if (filter.since !== undefined) params.set('since', String(filter.since));
     if (filter.limit !== undefined) params.set('limit', String(filter.limit));
-    const path = params.toString() ? `/packets?${params.toString()}` : '/packets';
+    const path = params.toString()
+      ? `/packets?${params.toString()}`
+      : '/packets';
 
     let response: Response;
     try {
@@ -155,7 +158,9 @@ export class ConnectorAdminClient {
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg.includes('404')) {
-        const err = new Error('Connector does not expose GET /packets — endpoint not found');
+        const err = new Error(
+          'Connector does not expose GET /packets — endpoint not found'
+        );
         (err as NodeJS.ErrnoException).code = 'ConnectorEndpointNotFound';
         throw err;
       }
@@ -164,7 +169,9 @@ export class ConnectorAdminClient {
 
     const body: unknown = await response.json();
     if (!Array.isArray(body)) {
-      throw new Error('Connector admin API: invalid packet log response shape — expected array');
+      throw new Error(
+        'Connector admin API: invalid packet log response shape — expected array'
+      );
     }
     return body as PacketLogResponse;
   }

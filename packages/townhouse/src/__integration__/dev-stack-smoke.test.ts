@@ -92,84 +92,70 @@ describe.skipIf(SKIP_DOCKER || ENV_FILE_MISSING)(
     // beforeAll 2 s + test1 6 s + test2 8 s + test3 12 s = 28 s.
 
     // ── Test 1: Connector health ───────────────────────────────────────────────
-    it(
-      'connector getHealth() returns 200 with valid HealthStatus shape',
-      async () => {
-        const client = new ConnectorAdminClient(connectorAdminUrl, 5_000);
-        const health = await client.getHealth();
+    it('connector getHealth() returns 200 with valid HealthStatus shape', async () => {
+      const client = new ConnectorAdminClient(connectorAdminUrl, 5_000);
+      const health = await client.getHealth();
 
-        expect(['healthy', 'unhealthy', 'starting', 'degraded']).toContain(
-          health.status
-        );
-        expect(typeof health.uptime).toBe('number');
-        expect(typeof health.peersConnected).toBe('number');
-        expect(typeof health.totalPeers).toBe('number');
-        expect(typeof health.timestamp).toBe('string');
-      },
-      6_000
-    );
+      expect(['healthy', 'unhealthy', 'starting', 'degraded']).toContain(
+        health.status
+      );
+      expect(typeof health.uptime).toBe('number');
+      expect(typeof health.peersConnected).toBe('number');
+      expect(typeof health.totalPeers).toBe('number');
+      expect(typeof health.timestamp).toBe('string');
+    }, 6_000);
 
     // ── Test 2: Connector peers (5 children, all connected) ───────────────────
-    it(
-      'connector getPeers() returns 5 entries with expected IDs, all connected',
-      async () => {
-        const client = new ConnectorAdminClient(connectorAdminUrl, 5_000);
-        const peers = await client.getPeers();
+    it('connector getPeers() returns 5 entries with expected IDs, all connected', async () => {
+      const client = new ConnectorAdminClient(connectorAdminUrl, 5_000);
+      const peers = await client.getPeers();
 
-        expect(Array.isArray(peers)).toBe(true);
-        expect(peers).toHaveLength(5);
+      expect(Array.isArray(peers)).toBe(true);
+      expect(peers).toHaveLength(5);
 
-        const expectedIds = new Set([
-          'town-01',
-          'town-02',
-          'mill-01',
-          'mill-02',
-          'dvm-01',
-        ]);
-        for (const peer of peers) {
-          expect(
-            expectedIds.has(peer.id),
-            `Unexpected peer ID: ${peer.id}`
-          ).toBe(true);
-          expect(
-            peer.connected,
-            `Expected peer ${peer.id} to be connected`
-          ).toBe(true);
-        }
-      },
-      8_000
-    );
+      const expectedIds = new Set([
+        'town-01',
+        'town-02',
+        'mill-01',
+        'mill-02',
+        'dvm-01',
+      ]);
+      for (const peer of peers) {
+        expect(expectedIds.has(peer.id), `Unexpected peer ID: ${peer.id}`).toBe(
+          true
+        );
+        expect(peer.connected, `Expected peer ${peer.id} to be connected`).toBe(
+          true
+        );
+      }
+    }, 8_000);
 
     // ── Test 3: Child node BLS health endpoints ────────────────────────────────
-    it(
-      'all 5 child nodes return 200 from their BLS health endpoints',
-      async () => {
-        const checks = Object.entries(childHealthEndpoints).map(
-          async ([name, url]) => {
-            if (!url) {
-              throw new Error(
-                `Health URL for ${name} is missing from .env.townhouse-dev`
-              );
-            }
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 5_000);
-            try {
-              const res = await fetch(`${url}/health`, {
-                signal: controller.signal,
-              });
-              expect(
-                res.status,
-                `${name} health endpoint returned ${res.status}`
-              ).toBe(200);
-            } finally {
-              clearTimeout(timer);
-            }
+    it('all 5 child nodes return 200 from their BLS health endpoints', async () => {
+      const checks = Object.entries(childHealthEndpoints).map(
+        async ([name, url]) => {
+          if (!url) {
+            throw new Error(
+              `Health URL for ${name} is missing from .env.townhouse-dev`
+            );
           }
-        );
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 5_000);
+          try {
+            const res = await fetch(`${url}/health`, {
+              signal: controller.signal,
+            });
+            expect(
+              res.status,
+              `${name} health endpoint returned ${res.status}`
+            ).toBe(200);
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+      );
 
-        await Promise.all(checks);
-      },
-      12_000
-    );
+      await Promise.all(checks);
+    }, 12_000);
   }
 );

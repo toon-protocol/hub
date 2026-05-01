@@ -33,7 +33,9 @@ const DEFAULT_POLL_INTERVAL_MS = 5_000;
  * Polls `/api/nodes/:type` and `/api/nodes/:type/bandwidth` every 5 s.
  * Returns connected-client count and bandwidth stats for a single node type.
  */
-export function useNodeMetrics(options: UseNodeMetricsOptions): UseNodeMetricsResult {
+export function useNodeMetrics(
+  options: UseNodeMetricsOptions
+): UseNodeMetricsResult {
   const {
     nodeType,
     detailUrl = `/api/nodes/${nodeType}`,
@@ -41,7 +43,11 @@ export function useNodeMetrics(options: UseNodeMetricsOptions): UseNodeMetricsRe
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   } = options;
 
-  const [metrics, setMetrics] = useState<NodeMetrics>({ connectedClients: null, bandwidth: null, currentFee: null });
+  const [metrics, setMetrics] = useState<NodeMetrics>({
+    connectedClients: null,
+    bandwidth: null,
+    currentFee: null,
+  });
   const [status, setStatus] = useState<NodeMetricsStatus>('loading');
 
   const pollRef = useRef<() => void>(() => {});
@@ -61,16 +67,20 @@ export function useNodeMetrics(options: UseNodeMetricsOptions): UseNodeMetricsRe
         let connectedClients: number | null = null;
         let currentFee: number | null = null;
         if (detailRes.ok) {
-          const detail = await detailRes.json() as NodeDetail;
+          const detail = (await detailRes.json()) as NodeDetail;
           // packetsForwarded used as a proxy until a dedicated connectedClients field lands
           connectedClients = detail.metrics?.packetsForwarded ?? null;
           // DVM uses feePerJob; Mill uses feeBasisPoints; Town uses feePerEvent
-          currentFee = detail.config?.feePerJob ?? detail.config?.feeBasisPoints ?? detail.config?.feePerEvent ?? null;
+          currentFee =
+            detail.config?.feePerJob ??
+            detail.config?.feeBasisPoints ??
+            detail.config?.feePerEvent ??
+            null;
         }
 
         let bandwidth: BandwidthPayload | null = null;
         if (bwRes.ok) {
-          const bwBody = await bwRes.json() as BandwidthPayload | null;
+          const bwBody = (await bwRes.json()) as BandwidthPayload | null;
           bandwidth = bwBody;
         }
 
@@ -96,7 +106,9 @@ export function useNodeMetrics(options: UseNodeMetricsOptions): UseNodeMetricsRe
     };
   }, [detailUrl, bandwidthUrl, pollIntervalMs]);
 
-  const refetch = useCallback(() => { pollRef.current(); }, []);
+  const refetch = useCallback(() => {
+    pollRef.current();
+  }, []);
 
   return { metrics, status, refetch };
 }

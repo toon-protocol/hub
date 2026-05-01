@@ -56,11 +56,18 @@ async function collectUntil(
   const received: unknown[] = [];
   return new Promise<unknown[]>((resolve, reject) => {
     const to = setTimeout(
-      () => reject(new Error(`timed out after ${timeoutMs}ms — ${received.length} msgs`)),
+      () =>
+        reject(
+          new Error(`timed out after ${timeoutMs}ms — ${received.length} msgs`)
+        ),
       timeoutMs
     );
     ws.on('message', (data) => {
-      try { received.push(JSON.parse(data.toString())); } catch { /* ignore */ }
+      try {
+        received.push(JSON.parse(data.toString()));
+      } catch {
+        /* ignore */
+      }
       if (predicate(received)) {
         clearTimeout(to);
         resolve(received);
@@ -98,9 +105,13 @@ class StubOrchestrator extends EventEmitter {
     return url;
   }
 
-  async getContainerStats() { return null; }
+  async getContainerStats() {
+    return null;
+  }
 
-  async status() { return []; }
+  async status() {
+    return [];
+  }
 }
 
 class StubConnectorAdmin {
@@ -114,7 +125,11 @@ class StubConnectorAdmin {
   }
 }
 
-class StubWallet { listKeys() { return []; } }
+class StubWallet {
+  listKeys() {
+    return [];
+  }
+}
 
 // ── Test setup ────────────────────────────────────────────────────────────────
 
@@ -163,7 +178,8 @@ describe('relayEvents WS subscription (AC #1, #2)', () => {
       config: getDefaultConfig(),
       orchestrator: orchestrator as unknown as DockerOrchestrator,
       wallet: new StubWallet() as unknown as WalletManager,
-      connectorAdmin: new StubConnectorAdmin() as unknown as ConnectorAdminClient,
+      connectorAdmin:
+        new StubConnectorAdmin() as unknown as ConnectorAdminClient,
     };
     registerMetricsWsRoutes(app, deps);
     await app.listen({ host: '127.0.0.1', port: 0 });
@@ -212,7 +228,9 @@ describe('relayEvents WS subscription (AC #1, #2)', () => {
 
     const relayMsg = flatten(msgs).find(
       (m) => (m as { type?: string }).type === 'relayEvents'
-    ) as { type: string; nodeId: string; payload: object; ts: number } | undefined;
+    ) as
+      | { type: string; nodeId: string; payload: object; ts: number }
+      | undefined;
 
     expect(relayMsg).toBeTruthy();
     expect(relayMsg?.nodeId).toBe('town-01');
@@ -233,16 +251,40 @@ describe('relayEvents WS subscription (AC #1, #2)', () => {
 
     await new Promise((r) => setTimeout(r, 200));
 
-    const eventA = { id: 'aa', kind: 1, pubkey: 'pp', content: 'from-01', tags: [], sig: 's', created_at: 1 };
-    const eventB = { id: 'bb', kind: 1, pubkey: 'pp', content: 'from-02', tags: [], sig: 's', created_at: 2 };
+    const eventA = {
+      id: 'aa',
+      kind: 1,
+      pubkey: 'pp',
+      content: 'from-01',
+      tags: [],
+      sig: 's',
+      created_at: 1,
+    };
+    const eventB = {
+      id: 'bb',
+      kind: 1,
+      pubkey: 'pp',
+      content: 'from-02',
+      tags: [],
+      sig: 's',
+      created_at: 2,
+    };
 
     const receivedA: unknown[] = [];
     const receivedB: unknown[] = [];
     wsA.on('message', (d) => {
-      try { receivedA.push(JSON.parse(d.toString())); } catch { /* ignore */ }
+      try {
+        receivedA.push(JSON.parse(d.toString()));
+      } catch {
+        /* ignore */
+      }
     });
     wsB.on('message', (d) => {
-      try { receivedB.push(JSON.parse(d.toString())); } catch { /* ignore */ }
+      try {
+        receivedB.push(JSON.parse(d.toString()));
+      } catch {
+        /* ignore */
+      }
     });
 
     relay01.push(eventA);
@@ -250,20 +292,44 @@ describe('relayEvents WS subscription (AC #1, #2)', () => {
 
     await new Promise((r) => setTimeout(r, 500));
 
-    const flatA = flatten(receivedA).filter((m) => (m as { type?: string }).type === 'relayEvents');
-    const flatB = flatten(receivedB).filter((m) => (m as { type?: string }).type === 'relayEvents');
+    const flatA = flatten(receivedA).filter(
+      (m) => (m as { type?: string }).type === 'relayEvents'
+    );
+    const flatB = flatten(receivedB).filter(
+      (m) => (m as { type?: string }).type === 'relayEvents'
+    );
 
     // Client A should only have events from town-01
-    expect(flatA.every((m) => (m as { nodeId?: string }).nodeId === 'town-01')).toBe(true);
-    expect(flatA.some((m) => (m as { payload?: { content?: string } }).payload?.content === 'from-01')).toBe(true);
+    expect(
+      flatA.every((m) => (m as { nodeId?: string }).nodeId === 'town-01')
+    ).toBe(true);
+    expect(
+      flatA.some(
+        (m) =>
+          (m as { payload?: { content?: string } }).payload?.content ===
+          'from-01'
+      )
+    ).toBe(true);
 
     // Client B should only have events from town-02
-    expect(flatB.every((m) => (m as { nodeId?: string }).nodeId === 'town-02')).toBe(true);
-    expect(flatB.some((m) => (m as { payload?: { content?: string } }).payload?.content === 'from-02')).toBe(true);
+    expect(
+      flatB.every((m) => (m as { nodeId?: string }).nodeId === 'town-02')
+    ).toBe(true);
+    expect(
+      flatB.some(
+        (m) =>
+          (m as { payload?: { content?: string } }).payload?.content ===
+          'from-02'
+      )
+    ).toBe(true);
 
     // No cross-node leak
-    expect(flatA.some((m) => (m as { nodeId?: string }).nodeId === 'town-02')).toBe(false);
-    expect(flatB.some((m) => (m as { nodeId?: string }).nodeId === 'town-01')).toBe(false);
+    expect(
+      flatA.some((m) => (m as { nodeId?: string }).nodeId === 'town-02')
+    ).toBe(false);
+    expect(
+      flatB.some((m) => (m as { nodeId?: string }).nodeId === 'town-01')
+    ).toBe(false);
 
     wsA.close();
     wsB.close();
@@ -281,7 +347,9 @@ describe('relayEvents WS subscription (AC #1, #2)', () => {
     let upstreamCloseCount = 0;
     wss.on('connection', (ws: WsClient) => {
       upstreamConnectCount++;
-      ws.on('close', () => { upstreamCloseCount++; });
+      ws.on('close', () => {
+        upstreamCloseCount++;
+      });
     });
 
     const ws = await connect(`${metricsUrl}?subscribe=relayEvents:town-01`);

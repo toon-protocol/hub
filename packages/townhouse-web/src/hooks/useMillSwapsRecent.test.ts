@@ -28,13 +28,17 @@ afterEach(() => {
 
 describe('useMillSwapsRecent', () => {
   it('starts in loading state', () => {
-    const { result } = renderHook(() => useMillSwapsRecent({ nodeId: 'mill', url }));
+    const { result } = renderHook(() =>
+      useMillSwapsRecent({ nodeId: 'mill', url })
+    );
     expect(result.current.status).toBe('loading');
     expect(result.current.data).toBeNull();
   });
 
   it('transitions to ready with swap data', async () => {
-    const { result } = renderHook(() => useMillSwapsRecent({ nodeId: 'mill', url }));
+    const { result } = renderHook(() =>
+      useMillSwapsRecent({ nodeId: 'mill', url })
+    );
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(result.current.data?.count).toBe(3);
     expect(result.current.data?.volume).toBe('3000000');
@@ -42,18 +46,26 @@ describe('useMillSwapsRecent', () => {
 
   it('transitions to error on fetch failure', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network error'));
-    const { result } = renderHook(() => useMillSwapsRecent({ nodeId: 'mill', url }));
+    const { result } = renderHook(() =>
+      useMillSwapsRecent({ nodeId: 'mill', url })
+    );
     await waitFor(() => expect(result.current.status).toBe('error'));
   });
 
   it('aborts on unmount', () => {
-    const { unmount } = renderHook(() => useMillSwapsRecent({ nodeId: 'mill', url }));
+    const { unmount } = renderHook(() =>
+      useMillSwapsRecent({ nodeId: 'mill', url })
+    );
     unmount();
   });
 
   it('exposes a refetch handle that triggers a fresh fetch', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonRes(SWAPS_PAYLOAD));
-    const { result } = renderHook(() => useMillSwapsRecent({ nodeId: 'mill', url }));
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonRes(SWAPS_PAYLOAD));
+    const { result } = renderHook(() =>
+      useMillSwapsRecent({ nodeId: 'mill', url })
+    );
     await waitFor(() => expect(result.current.status).toBe('ready'));
     const beforeCalls = fetchMock.mock.calls.length;
 
@@ -65,7 +77,9 @@ describe('useMillSwapsRecent', () => {
   });
 
   it('builds default URL from nodeId when no url override is provided', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonRes(SWAPS_PAYLOAD));
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonRes(SWAPS_PAYLOAD));
     const { result } = renderHook(() =>
       useMillSwapsRecent({ nodeId: 'dev-mill-02', windowSec: 60 })
     );

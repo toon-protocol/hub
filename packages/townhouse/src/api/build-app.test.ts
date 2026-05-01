@@ -15,7 +15,11 @@ describe('buildFastifyApp (AC-9)', () => {
 
   it('rejects non-loopback bind when requireLoopback=true', async () => {
     await expect(
-      buildFastifyApp({ logger: false, bindHost: '0.0.0.0', requireLoopback: true })
+      buildFastifyApp({
+        logger: false,
+        bindHost: '0.0.0.0',
+        requireLoopback: true,
+      })
     ).rejects.toThrow(/wizard refuses remote bind/);
   });
 

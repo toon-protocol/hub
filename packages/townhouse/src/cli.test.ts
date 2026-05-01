@@ -10,7 +10,10 @@ import { WalletManager, encryptWallet, saveWallet } from './wallet/index.js';
 const WALLET_TEST_PASSWORD = 'townhouse-test-pw';
 
 /** Create an encrypted wallet at the given path for use in `up` tests. */
-async function seedWallet(walletPath: string, password = WALLET_TEST_PASSWORD): Promise<void> {
+async function seedWallet(
+  walletPath: string,
+  password = WALLET_TEST_PASSWORD
+): Promise<void> {
   const wm = new WalletManager({ encryptedPath: walletPath });
   const { mnemonic } = await wm.generate();
   await saveWallet(walletPath, encryptWallet(mnemonic, password));
@@ -242,7 +245,11 @@ describe('CLI', () => {
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
 
       try {
-        writeFileSync(configPath, makeConfig({ town: true }, walletPath), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '-c', configPath]);
         const output = consoleSpy.mock.calls
@@ -267,7 +274,9 @@ describe('CLI', () => {
 
         await main(['up', '-c', configPath]);
 
-        const errorOutput = consoleErrorSpy.mock.calls.map((c) => String(c[0])).join('\n');
+        const errorOutput = consoleErrorSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
         expect(errorOutput).toContain('Wallet not found');
         expect(errorOutput).toContain('townhouse setup');
         expect(process.exitCode).toBe(1);
@@ -643,7 +652,11 @@ describe('CLI', () => {
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
 
       try {
-        writeFileSync(configPath, makeConfig({ town: true }, walletPath), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '--town', '-c', configPath]);
 
@@ -667,7 +680,11 @@ describe('CLI', () => {
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
 
       try {
-        writeFileSync(configPath, makeConfig({ mill: true }, walletPath), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ mill: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '--mill', '-c', configPath]);
 
@@ -690,7 +707,11 @@ describe('CLI', () => {
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
 
       try {
-        writeFileSync(configPath, makeConfig({ dvm: true }, walletPath), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ dvm: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '--dvm', '-c', configPath]);
 
@@ -713,7 +734,11 @@ describe('CLI', () => {
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
 
       try {
-        writeFileSync(configPath, makeConfig({ town: true, mill: true }, walletPath), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true, mill: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '--town', '--mill', '-c', configPath]);
 
@@ -737,7 +762,11 @@ describe('CLI', () => {
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
 
       try {
-        writeFileSync(configPath, makeConfig({ town: true, mill: true }, walletPath), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true, mill: true }, walletPath),
+          'utf-8'
+        );
 
         // No --town/--mill/--dvm flags: should start all enabled (town + mill)
         await main(['up', '-c', configPath]);
@@ -768,7 +797,11 @@ describe('CLI', () => {
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
 
       try {
-        writeFileSync(configPath, makeConfig({ town: true }, walletPath), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '--town', '-c', configPath]);
 
@@ -797,7 +830,11 @@ describe('CLI', () => {
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
 
       try {
-        writeFileSync(configPath, makeConfig({ town: true }, walletPath), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '--town', '-c', configPath]);
 
@@ -848,7 +885,11 @@ describe('CLI', () => {
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
 
       try {
-        writeFileSync(configPath, makeConfig({ town: true }, walletPath), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true }, walletPath),
+          'utf-8'
+        );
 
         await expect(main(['up', '--town', '-c', configPath])).rejects.toThrow(
           /docker.*not available/i

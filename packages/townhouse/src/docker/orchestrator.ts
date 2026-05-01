@@ -125,8 +125,16 @@ export class DockerOrchestrator extends EventEmitter {
     // Created/exited state) still allows remove() to run and clear the name.
     const connectorName = `${CONTAINER_PREFIX}connector`;
     const existingContainer = this.docker.getContainer(connectorName);
-    try { await existingContainer.stop({ t: 5 }); } catch { /* not running */ }
-    try { await existingContainer.remove(); } catch { /* may not exist */ }
+    try {
+      await existingContainer.stop({ t: 5 });
+    } catch {
+      /* not running */
+    }
+    try {
+      await existingContainer.remove();
+    } catch {
+      /* may not exist */
+    }
 
     // Ensure the network exists — regenerate can be called independently of
     // up() (e.g. fee change), so we cannot assume ensureNetwork() already ran.
@@ -227,7 +235,10 @@ export class DockerOrchestrator extends EventEmitter {
         | undefined;
       const binding = portBindings?.[`${TOWN_RELAY_PORT}/tcp`]?.[0];
       if (binding?.HostPort) {
-        const host = binding.HostIp && binding.HostIp !== '0.0.0.0' ? binding.HostIp : '127.0.0.1';
+        const host =
+          binding.HostIp && binding.HostIp !== '0.0.0.0'
+            ? binding.HostIp
+            : '127.0.0.1';
         // nosemgrep: javascript.lang.security.detect-insecure-websocket -- operator-controlled host, not user input
         return `ws://${host}:${binding.HostPort}`;
       }
@@ -249,11 +260,16 @@ export class DockerOrchestrator extends EventEmitter {
    * @param nodeId - The `NodeInfo.id` value (e.g. 'mill', 'dev-mill-01')
    * @param type - Node type (determines which internal port to use)
    */
-  async getNodeHealthEndpoint(nodeId: string, type: 'town' | 'mill' | 'dvm'): Promise<string> {
+  async getNodeHealthEndpoint(
+    nodeId: string,
+    type: 'town' | 'mill' | 'dvm'
+  ): Promise<string> {
     const port =
-      type === 'town' ? TOWN_HEALTH_PORT :
-      type === 'mill' ? MILL_HEALTH_PORT :
-      DVM_HEALTH_PORT;
+      type === 'town'
+        ? TOWN_HEALTH_PORT
+        : type === 'mill'
+          ? MILL_HEALTH_PORT
+          : DVM_HEALTH_PORT;
     const containerName = `${CONTAINER_PREFIX}${nodeId}`;
     try {
       const container = this.docker.getContainer(containerName);
@@ -263,7 +279,10 @@ export class DockerOrchestrator extends EventEmitter {
         | undefined;
       const binding = portBindings?.[`${port}/tcp`]?.[0];
       if (binding?.HostPort) {
-        const host = binding.HostIp && binding.HostIp !== '0.0.0.0' ? binding.HostIp : '127.0.0.1';
+        const host =
+          binding.HostIp && binding.HostIp !== '0.0.0.0'
+            ? binding.HostIp
+            : '127.0.0.1';
         return `http://${host}:${binding.HostPort}`;
       }
     } catch {
@@ -279,7 +298,9 @@ export class DockerOrchestrator extends EventEmitter {
    * @param containerName - Full container name (e.g. 'townhouse-town')
    * @returns Bandwidth stats or null when container is not running
    */
-  async getContainerStats(containerName: string): Promise<BandwidthStats | null> {
+  async getContainerStats(
+    containerName: string
+  ): Promise<BandwidthStats | null> {
     const cached = this.statsCache.get(containerName);
     if (cached && Date.now() - cached.cachedAt < STATS_CACHE_TTL_MS) {
       return cached.data;
@@ -287,15 +308,24 @@ export class DockerOrchestrator extends EventEmitter {
 
     try {
       const container = this.docker.getContainer(containerName);
-      const stats = await container.stats({ stream: false }) as unknown as Record<string, unknown>;
+      const stats = (await container.stats({
+        stream: false,
+      })) as unknown as Record<string, unknown>;
 
       const networks = stats['networks'] as
         | Record<string, { rx_bytes?: number; tx_bytes?: number }>
         | undefined;
 
       if (!networks) {
-        const result: BandwidthStats = { bytesIn: 0, bytesOut: 0, sampleAt: Date.now() };
-        this.statsCache.set(containerName, { data: result, cachedAt: Date.now() });
+        const result: BandwidthStats = {
+          bytesIn: 0,
+          bytesOut: 0,
+          sampleAt: Date.now(),
+        };
+        this.statsCache.set(containerName, {
+          data: result,
+          cachedAt: Date.now(),
+        });
         return result;
       }
 
@@ -306,8 +336,15 @@ export class DockerOrchestrator extends EventEmitter {
         bytesOut += iface.tx_bytes ?? 0;
       }
 
-      const result: BandwidthStats = { bytesIn, bytesOut, sampleAt: Date.now() };
-      this.statsCache.set(containerName, { data: result, cachedAt: Date.now() });
+      const result: BandwidthStats = {
+        bytesIn,
+        bytesOut,
+        sampleAt: Date.now(),
+      };
+      this.statsCache.set(containerName, {
+        data: result,
+        cachedAt: Date.now(),
+      });
       return result;
     } catch {
       // Container not running or stats unavailable
@@ -351,7 +388,11 @@ export class DockerOrchestrator extends EventEmitter {
         if (!name.startsWith(CONTAINER_PREFIX)) continue;
         const suffix = name.slice(CONTAINER_PREFIX.length); // e.g. "town", "dev-town-01"
         for (const type of allTypes) {
-          if (suffix === type || suffix.endsWith(`-${type}`) || suffix.includes(`-${type}-`)) {
+          if (
+            suffix === type ||
+            suffix.endsWith(`-${type}`) ||
+            suffix.includes(`-${type}-`)
+          ) {
             matching.push({ containerName: name, type, info: c });
             break;
           }

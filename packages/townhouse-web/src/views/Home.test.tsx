@@ -14,6 +14,17 @@ vi.mock('@/hooks/useWizardState', () => ({
   }),
 }));
 
+// Mock useTransportStatus — default to direct/reachable.
+// Use a mutable object so per-test overrides don't require re-mocking.
+const mockTransportStatus = {
+  status: { mode: 'direct' as const, reachable: true, latencyProxyMs: null as number | null, latencyDirectMs: 5 as number | null, lastProbedAt: Date.now(), probeError: null as string | null, ts: Date.now() },
+  statusKind: 'ready' as const,
+  refetch: vi.fn(),
+};
+vi.mock('@/hooks/useTransportStatus', () => ({
+  useTransportStatus: () => mockTransportStatus,
+}));
+
 // Hand-rolled WebSocket mock — same pattern as useNodeStatusStream.test.ts
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
@@ -261,16 +272,59 @@ describe('Home view', () => {
     );
   });
 
-  it('renders ATOR transport indicator in header (AC-5)', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonRes([fixtureNodes[0]!])
-    );
+  it('renders transport indicator in header via useTransportStatus hook (AC-5)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonRes([fixtureNodes[0]!]));
+    // useTransportStatus is mocked at module level to return direct/reachable
     render(
       <MemoryRouter>
-        <Home transportMode="direct" />
+        <Home />
       </MemoryRouter>
     );
-    expect(screen.getByLabelText(/direct transport/i)).toBeInTheDocument();
+    // The hook mock returns direct mode — expect a dot with role=img and name matching direct transport
+    expect(screen.getByRole('img', { name: /direct transport/i })).toBeInTheDocument();
+  });
+
+  it('renders ATOR dot when transport hook reports ATOR reachable', async () => {
+    // Override the mock status to ATOR/reachable
+    Object.assign(mockTransportStatus, {
+      status: {
+        mode: 'ator' as const,
+        socksProxy: 'socks5h://proxy.ator.io:9050',
+        reachable: true,
+        latencyProxyMs: 120,
+        latencyDirectMs: 5,
+        lastProbedAt: Date.now(),
+        probeError: null,
+        ts: Date.now(),
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonRes([fixtureNodes[0]!]));
+    render(
+      <MemoryRouter>
+        <Home />
+      </MemoryRouter>
+    );
+    // ATOR + reachable → dot label contains "connected"
+    await waitFor(() =>
+      expect(screen.getByRole('img', { name: /ator transport: connected/i })).toBeInTheDocument()
+    );
+    // Reset
+    Object.assign(mockTransportStatus, { status: { mode: 'direct' as const, reachable: true, latencyProxyMs: null, latencyDirectMs: 5, lastProbedAt: Date.now(), probeError: null, ts: Date.now() } });
+  });
+
+  it('renders Settings link in header', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      if (url === '/api/nodes') return jsonRes(fixtureNodes);
+      if (url === '/api/nodes/town') return jsonRes(makeDetail('town', 12));
+      if (url === '/api/nodes/mill') return jsonRes(makeDetail('mill', 5));
+      throw new Error('unexpected ' + url);
+    });
+    renderHome();
+    await waitFor(() => screen.getByLabelText(/^town node$/i));
+    const settingsLink = screen.getByRole('link', { name: /view settings/i });
+    expect(settingsLink).toBeInTheDocument();
+    expect(settingsLink.getAttribute('href')).toBe('/settings');
   });
 
   it('AC-8: passes axe-core WCAG 2.1 AA in ready state', async () => {

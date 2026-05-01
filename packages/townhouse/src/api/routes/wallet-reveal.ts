@@ -10,7 +10,10 @@ import type { ApiDeps } from '../types.js';
 import { loadWallet } from '../../wallet/storage.js';
 import { decryptWallet } from '../../wallet/crypto.js';
 
-export function registerWalletRevealRoutes(app: FastifyInstance, deps: ApiDeps): void {
+export function registerWalletRevealRoutes(
+  app: FastifyInstance,
+  deps: ApiDeps
+): void {
   app.post('/wallet/reveal', async (request, reply) => {
     const body = request.body as { password?: unknown };
 
@@ -37,7 +40,12 @@ export function registerWalletRevealRoutes(app: FastifyInstance, deps: ApiDeps):
       if (code === 'ENOENT' || code === 'ENOTDIR') {
         return reply.status(503).send({ error: 'wallet_not_initialized' });
       }
-      return reply.status(500).send({ error: 'wallet_corrupted', message: 'Failed to read wallet file' });
+      return reply
+        .status(500)
+        .send({
+          error: 'wallet_corrupted',
+          message: 'Failed to read wallet file',
+        });
     }
 
     if (!loaded) {
@@ -49,10 +57,20 @@ export function registerWalletRevealRoutes(app: FastifyInstance, deps: ApiDeps):
       wallet = loaded.wallet;
       // Validate JSON structure: all required fields present
       if (!wallet.salt || !wallet.iv || !wallet.ciphertext || !wallet.tag) {
-        return reply.status(500).send({ error: 'wallet_corrupted', message: 'Wallet file is missing required fields' });
+        return reply
+          .status(500)
+          .send({
+            error: 'wallet_corrupted',
+            message: 'Wallet file is missing required fields',
+          });
       }
     } catch {
-      return reply.status(500).send({ error: 'wallet_corrupted', message: 'Wallet file JSON is invalid' });
+      return reply
+        .status(500)
+        .send({
+          error: 'wallet_corrupted',
+          message: 'Wallet file JSON is invalid',
+        });
     }
 
     let mnemonic: string;

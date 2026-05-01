@@ -397,7 +397,9 @@ describe('DVM entrypoint Hono BLS server (Story 21.12)', () => {
   });
 
   it('[P0] entrypoint imports serve from @hono/node-server', () => {
-    expect(entrypoint).toMatch(/import.*serve.*from ['"]@hono\/node-server['"]/);
+    expect(entrypoint).toMatch(
+      /import.*serve.*from ['"]@hono\/node-server['"]/
+    );
   });
 
   it('[P0] entrypoint registers GET /health route on blsApp', () => {

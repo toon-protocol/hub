@@ -9,7 +9,10 @@ const TIMEOUT_MS = 3_000;
  * Get native SOL balance (lamports) for a base58 address.
  * Returns balance as decimal string.
  */
-export async function getSolanaBalance(rpcUrl: string, address: string): Promise<string> {
+export async function getSolanaBalance(
+  rpcUrl: string,
+  address: string
+): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -24,8 +27,9 @@ export async function getSolanaBalance(rpcUrl: string, address: string): Promise
       }),
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`Solana RPC getBalance failed: HTTP ${res.status}`);
-    const data = await res.json() as {
+    if (!res.ok)
+      throw new Error(`Solana RPC getBalance failed: HTTP ${res.status}`);
+    const data = (await res.json()) as {
       result?: { value?: number };
       error?: { message: string };
     };

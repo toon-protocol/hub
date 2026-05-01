@@ -32,13 +32,17 @@ afterEach(() => {
 
 describe('useDvmJobsRecent', () => {
   it('starts in loading state', () => {
-    const { result } = renderHook(() => useDvmJobsRecent({ nodeId: 'dev-dvm-01', url }));
+    const { result } = renderHook(() =>
+      useDvmJobsRecent({ nodeId: 'dev-dvm-01', url })
+    );
     expect(result.current.status).toBe('loading');
     expect(result.current.data).toBeNull();
   });
 
   it('transitions to ready with jobs data', async () => {
-    const { result } = renderHook(() => useDvmJobsRecent({ nodeId: 'dev-dvm-01', url }));
+    const { result } = renderHook(() =>
+      useDvmJobsRecent({ nodeId: 'dev-dvm-01', url })
+    );
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(result.current.data?.count).toBe(5);
     expect(result.current.data?.volume).toBe('1500000');
@@ -48,24 +52,34 @@ describe('useDvmJobsRecent', () => {
 
   it('transitions to error on fetch failure', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network error'));
-    const { result } = renderHook(() => useDvmJobsRecent({ nodeId: 'dev-dvm-01', url }));
+    const { result } = renderHook(() =>
+      useDvmJobsRecent({ nodeId: 'dev-dvm-01', url })
+    );
     await waitFor(() => expect(result.current.status).toBe('error'));
   });
 
   it('transitions to error on non-ok response', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonRes({}, 503));
-    const { result } = renderHook(() => useDvmJobsRecent({ nodeId: 'dev-dvm-01', url }));
+    const { result } = renderHook(() =>
+      useDvmJobsRecent({ nodeId: 'dev-dvm-01', url })
+    );
     await waitFor(() => expect(result.current.status).toBe('error'));
   });
 
   it('aborts on unmount without throwing', () => {
-    const { unmount } = renderHook(() => useDvmJobsRecent({ nodeId: 'dev-dvm-01', url }));
+    const { unmount } = renderHook(() =>
+      useDvmJobsRecent({ nodeId: 'dev-dvm-01', url })
+    );
     unmount();
   });
 
   it('exposes a refetch handle that triggers a fresh fetch', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonRes(JOBS_PAYLOAD));
-    const { result } = renderHook(() => useDvmJobsRecent({ nodeId: 'dev-dvm-01', url }));
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonRes(JOBS_PAYLOAD));
+    const { result } = renderHook(() =>
+      useDvmJobsRecent({ nodeId: 'dev-dvm-01', url })
+    );
     await waitFor(() => expect(result.current.status).toBe('ready'));
     const beforeCalls = fetchMock.mock.calls.length;
 
@@ -77,7 +91,9 @@ describe('useDvmJobsRecent', () => {
   });
 
   it('builds default URL from nodeId when no url override is provided', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonRes(JOBS_PAYLOAD));
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonRes(JOBS_PAYLOAD));
     const { result } = renderHook(() =>
       useDvmJobsRecent({ nodeId: 'dev-dvm-02', windowSec: 60 })
     );

@@ -40,7 +40,8 @@ export function useMillSwapsRecent(options: UseMillSwapsRecentOptions): {
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     timeoutMs = DEFAULT_TIMEOUT_MS,
   } = options;
-  const url = options.url ?? `/api/nodes/${nodeId}/swaps/recent?windowSec=${windowSec}`;
+  const url =
+    options.url ?? `/api/nodes/${nodeId}/swaps/recent?windowSec=${windowSec}`;
 
   const [data, setData] = useState<MillSwapsRecent | null>(null);
   const [status, setStatus] = useState<MillSwapsStatus>('loading');
@@ -61,7 +62,7 @@ export function useMillSwapsRecent(options: UseMillSwapsRecentOptions): {
           setStatus('error');
           return;
         }
-        const payload = await res.json() as MillSwapsRecent;
+        const payload = (await res.json()) as MillSwapsRecent;
         if (cancelled) return;
         setData(payload);
         setStatus('ready');

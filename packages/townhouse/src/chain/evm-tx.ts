@@ -117,7 +117,11 @@ export async function estimateNativeTransferGas(
 ): Promise<{ gas: string; fee: string }> {
   const publicClient = createPublicClient({ transport: http(rpcUrl) });
   const [gas, gasPrice] = await Promise.all([
-    publicClient.estimateGas({ account: fromAddress, to: recipient, value: amount }),
+    publicClient.estimateGas({
+      account: fromAddress,
+      to: recipient,
+      value: amount,
+    }),
     publicClient.getGasPrice(),
   ]);
   const fee = gas * gasPrice;

@@ -78,7 +78,9 @@ export function registerMetricsWsRoutes(
     const upstreamSockets = new Map<string, WebSocket>();
 
     // ── relayEvents subscriptions ─────────────────────────────────────────────
-    const rawQuery = request.url.includes('?') ? request.url.slice(request.url.indexOf('?') + 1) : '';
+    const rawQuery = request.url.includes('?')
+      ? request.url.slice(request.url.indexOf('?') + 1)
+      : '';
     const relayNodeIds = parseRelayEventSubscriptions(rawQuery);
 
     // Open upstream WS for each subscribed nodeId (async, non-blocking)
@@ -87,7 +89,8 @@ export function registerMetricsWsRoutes(
         for (const nodeId of relayNodeIds) {
           if (socket.readyState !== WebSocket.OPEN) break;
           try {
-            const relayUrl = await deps.orchestrator.getNodeRelayEndpoint(nodeId);
+            const relayUrl =
+              await deps.orchestrator.getNodeRelayEndpoint(nodeId);
             const upstream = new WebSocket(relayUrl);
             upstreamSockets.set(nodeId, upstream);
 
@@ -102,10 +105,16 @@ export function registerMetricsWsRoutes(
 
             function sendReq() {
               if (upstream.readyState === WebSocket.OPEN) {
-                upstream.send(JSON.stringify(['REQ', subId, {
-                  kinds: [0, 1, 6, 7, 9735],
-                  since: sinceTs,
-                }]));
+                upstream.send(
+                  JSON.stringify([
+                    'REQ',
+                    subId,
+                    {
+                      kinds: [0, 1, 6, 7, 9735],
+                      since: sinceTs,
+                    },
+                  ])
+                );
               }
             }
 
@@ -126,8 +135,14 @@ export function registerMetricsWsRoutes(
 
                 if (Array.isArray(msg) && msg[0] === 'EVENT' && msg[2]) {
                   // Real relay: NIP-01 ["EVENT", sub_id, toon_string]
-                  payload = decodeToon(msg[2] as string) as unknown as NostrEventPayload;
-                } else if (msg !== null && typeof msg === 'object' && !Array.isArray(msg)) {
+                  payload = decodeToon(
+                    msg[2] as string
+                  ) as unknown as NostrEventPayload;
+                } else if (
+                  msg !== null &&
+                  typeof msg === 'object' &&
+                  !Array.isArray(msg)
+                ) {
                   // Test stub: raw JSON event object
                   payload = msg as NostrEventPayload;
                 }
@@ -143,7 +158,8 @@ export function registerMetricsWsRoutes(
                     }
                   }
                   // Advance sinceTs so the next poll only fetches newer events.
-                  const createdAt = (payload as { created_at?: number }).created_at;
+                  const createdAt = (payload as { created_at?: number })
+                    .created_at;
                   if (typeof createdAt === 'number' && createdAt >= sinceTs) {
                     sinceTs = createdAt;
                   }
@@ -164,7 +180,10 @@ export function registerMetricsWsRoutes(
             });
 
             upstream.on('close', () => {
-              if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+              if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+              }
               upstreamSockets.delete(nodeId);
               // Notify the dashboard client so it can surface the AC-7 error UI
               // instead of silently showing an empty "No events yet" feed.
@@ -335,11 +354,18 @@ export function registerMetricsWsRoutes(
 
     socket.on('message', (data: Buffer | string) => {
       try {
-        const msg = JSON.parse(data.toString()) as { type?: string; nodeId?: string };
+        const msg = JSON.parse(data.toString()) as {
+          type?: string;
+          nodeId?: string;
+        };
         if (msg.type === 'unsubscribe' && typeof msg.nodeId === 'string') {
           const upstream = upstreamSockets.get(msg.nodeId);
           if (upstream) {
-            try { upstream.close(); } catch { /* best-effort */ }
+            try {
+              upstream.close();
+            } catch {
+              /* best-effort */
+            }
             upstreamSockets.delete(msg.nodeId);
           }
         }

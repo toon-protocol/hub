@@ -20,9 +20,16 @@ export function useWalletReveal(options: { url?: string } = {}): {
       // error rather than letting the JSON parse error bubble as "Network error".
       if (res.status === 401) return { error: 'invalid_password' };
       if (res.status === 503) return { error: 'wallet_not_initialized' };
-      return { error: 'wallet_corrupted', message: `unexpected response (${res.status})` };
+      return {
+        error: 'wallet_corrupted',
+        message: `unexpected response (${res.status})`,
+      };
     }
-    if (parsed && typeof parsed === 'object' && ('mnemonic' in parsed || 'error' in parsed)) {
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      ('mnemonic' in parsed || 'error' in parsed)
+    ) {
       return parsed as RevealResponse;
     }
     return { error: 'wallet_corrupted', message: 'unexpected response shape' };

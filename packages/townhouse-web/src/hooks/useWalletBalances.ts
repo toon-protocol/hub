@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { WalletBalanceEntry, WalletBalancesPayload } from '@toon-protocol/townhouse';
+import type {
+  WalletBalanceEntry,
+  WalletBalancesPayload,
+} from '@toon-protocol/townhouse';
 
 export type WalletBalancesStatus = 'loading' | 'ready' | 'error';
 
 /** Polls GET /api/wallet/balances every 5 s, mirrors useDvmJobsRecent shape. */
-export function useWalletBalances(options: {
-  pollIntervalMs?: number;
-  url?: string;
-  timeoutMs?: number;
-} = {}): {
+export function useWalletBalances(
+  options: {
+    pollIntervalMs?: number;
+    url?: string;
+    timeoutMs?: number;
+  } = {}
+): {
   entries: WalletBalanceEntry[];
   ts: number | null;
   status: WalletBalancesStatus;
@@ -46,7 +51,9 @@ export function useWalletBalances(options: {
         if (cancelled) return;
         // Validate shape — a server returning malformed JSON should not crash
         // downstream `entries.filter` callers.
-        const safeEntries = Array.isArray(payload.entries) ? payload.entries : [];
+        const safeEntries = Array.isArray(payload.entries)
+          ? payload.entries
+          : [];
         setEntries(safeEntries);
         setTs(typeof payload.ts === 'number' ? payload.ts : null);
         setStatus('ready');

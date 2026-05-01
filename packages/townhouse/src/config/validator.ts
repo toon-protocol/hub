@@ -68,7 +68,9 @@ function validateNodeConfig(
   }
   if (raw['kindPricing'] !== undefined) {
     assertObject(raw['kindPricing'], `${path}.kindPricing`);
-    for (const [k, v] of Object.entries(raw['kindPricing'] as Record<string, unknown>)) {
+    for (const [k, v] of Object.entries(
+      raw['kindPricing'] as Record<string, unknown>
+    )) {
       // Keys must be positive-integer strings — prevents prototype-key
       // pollution (`__proto__`, `constructor`) and env-var key injection
       // (newlines / spaces) when the orchestrator emits KIND_PRICING_<k>.

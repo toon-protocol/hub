@@ -383,7 +383,11 @@ describe('getPacketLog() shape contract', () => {
 
   it('passes ilpAddress, since, limit query params when provided', async () => {
     const stub = mockFetchAtPath('/packets', []);
-    await client.getPacketLog({ ilpAddress: 'g.toon.town', since: 1000, limit: 50 });
+    await client.getPacketLog({
+      ilpAddress: 'g.toon.town',
+      since: 1000,
+      limit: 50,
+    });
     const url = stub.calls[0] ?? '';
     expect(url).toContain('ilpAddress=g.toon.town');
     expect(url).toContain('since=1000');
@@ -400,7 +404,9 @@ describe('getPacketLog() shape contract', () => {
     mockFetchAtPath('/packets', 'Not Found', 404);
     const err = await client.getPacketLog().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as NodeJS.ErrnoException).code).toBe('ConnectorEndpointNotFound');
+    expect((err as NodeJS.ErrnoException).code).toBe(
+      'ConnectorEndpointNotFound'
+    );
   });
 
   it('rejects when body is not an array (shape drift indicator)', async () => {

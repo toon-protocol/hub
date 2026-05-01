@@ -3,7 +3,11 @@ import { renderHook } from '@testing-library/react';
 import { useWalletWithdraw } from './useWalletWithdraw';
 
 function jsonRes(body: unknown, status = 200): Response {
-  return { ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) } as unknown as Response;
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  } as unknown as Response;
 }
 
 const MOCK_TX_HASH = '0x' + 'ab'.repeat(32);
@@ -17,7 +21,9 @@ describe('useWalletWithdraw', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonRes({ txHash: MOCK_TX_HASH, chainId: 31337 })
     );
-    const { result } = renderHook(() => useWalletWithdraw({ withdrawUrl: '/api/wallet/withdraw' }));
+    const { result } = renderHook(() =>
+      useWalletWithdraw({ withdrawUrl: '/api/wallet/withdraw' })
+    );
     const res = await result.current.submit({
       nodeType: 'town',
       chainFamily: 'evm',
@@ -33,7 +39,9 @@ describe('useWalletWithdraw', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonRes({ error: 'chain_not_supported_for_withdrawal' }, 501)
     );
-    const { result } = renderHook(() => useWalletWithdraw({ withdrawUrl: '/api/wallet/withdraw' }));
+    const { result } = renderHook(() =>
+      useWalletWithdraw({ withdrawUrl: '/api/wallet/withdraw' })
+    );
     const res = await result.current.submit({
       nodeType: 'mill',
       chainFamily: 'solana',
@@ -48,7 +56,9 @@ describe('useWalletWithdraw', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonRes({ error: 'insufficient_balance' }, 400)
     );
-    const { result } = renderHook(() => useWalletWithdraw({ withdrawUrl: '/api/wallet/withdraw' }));
+    const { result } = renderHook(() =>
+      useWalletWithdraw({ withdrawUrl: '/api/wallet/withdraw' })
+    );
     const res = await result.current.submit({
       nodeType: 'town',
       chainFamily: 'evm',

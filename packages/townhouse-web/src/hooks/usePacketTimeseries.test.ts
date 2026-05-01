@@ -18,7 +18,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const TEST_URL = '/api/nodes/town/packets/timeseries?bucket=hour&since=2026-01-01T00%3A00%3A00.000Z';
+const TEST_URL =
+  '/api/nodes/town/packets/timeseries?bucket=hour&since=2026-01-01T00%3A00%3A00.000Z';
 
 describe('usePacketTimeseries', () => {
   it('starts in loading state', () => {
@@ -46,10 +47,9 @@ describe('usePacketTimeseries', () => {
   });
 
   it('returns unavailable status when connector returns 503', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonRes(
-      { error: 'connector_endpoint_not_found' },
-      503
-    ));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonRes({ error: 'connector_endpoint_not_found' }, 503)
+    );
 
     const { result } = renderHook(() =>
       usePacketTimeseries({ nodeType: 'town', url: TEST_URL })

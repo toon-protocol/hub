@@ -60,14 +60,20 @@ describe('useNodeHealth', () => {
   });
 
   it('aborts on unmount', async () => {
-    const { unmount } = renderHook(() => useNodeHealth({ nodeId: 'mill', url }));
+    const { unmount } = renderHook(() =>
+      useNodeHealth({ nodeId: 'mill', url })
+    );
     unmount();
     // Should not throw
   });
 
   it('builds default URL from nodeId when no url override is provided', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonRes(MILL_HEALTH));
-    const { result } = renderHook(() => useNodeHealth({ nodeId: 'dev-mill-01' }));
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonRes(MILL_HEALTH));
+    const { result } = renderHook(() =>
+      useNodeHealth({ nodeId: 'dev-mill-01' })
+    );
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/nodes/dev-mill-01/health',

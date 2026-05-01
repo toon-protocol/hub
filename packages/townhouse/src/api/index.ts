@@ -46,6 +46,9 @@ export type {
   WizardStatePayload,
   WizardInitRequest,
   WizardProgressMessage,
+  TransportStatusPayload,
+  TransportPatchRequest,
+  TransportPatchResponse,
 } from './types.js';
 
 export {

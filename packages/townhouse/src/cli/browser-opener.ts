@@ -48,7 +48,9 @@ export class RealBrowserOpener implements BrowserOpener {
         // throw from spawn. Subscribe so we don't crash with an unhandled
         // 'error' event and so the user gets a hint about why no browser opened.
         child.once('error', (err: Error) => {
-          console.warn(`[Townhouse] Could not open browser via ${cmd}: ${err.message}`);
+          console.warn(
+            `[Townhouse] Could not open browser via ${cmd}: ${err.message}`
+          );
           settle();
         });
         child.once('spawn', () => {

@@ -19,9 +19,11 @@ import {
   getOpenWebSockets,
 } from './routes/metrics-ws.js';
 import { registerWizardRoutes } from './routes/wizard.js';
+import { registerTransportRoutes } from './routes/transport.js';
 
 /**
- * Create the Fastify API server.
+ * Create the Fastify API server. Caller MUST supply a `transportProbe` in
+ * `deps` (constructed from the config and started if mode === 'ator').
  */
 export async function createApiServer(deps: ApiDeps): Promise<ApiServer> {
   const { config, logger } = deps;
@@ -32,10 +34,17 @@ export async function createApiServer(deps: ApiDeps): Promise<ApiServer> {
   });
 
   // Register wizard state route in normal mode so the SPA can check state
-  registerWizardRoutes(app, {
-    configPath: deps.configPath,
-    walletPath: config.wallet.encrypted_path,
-  }, { mode: 'normal' });
+  registerWizardRoutes(
+    app,
+    {
+      configPath: deps.configPath,
+      walletPath: config.wallet.encrypted_path,
+    },
+    { mode: 'normal' }
+  );
+
+  // Register transport routes (before nodes routes)
+  registerTransportRoutes(app, deps);
 
   // Register all normal routes
   registerNodeRoutes(app, deps);
@@ -48,6 +57,12 @@ export async function createApiServer(deps: ApiDeps): Promise<ApiServer> {
 
   const CLOSE_TIMEOUT_MS = 5000;
   async function close(): Promise<void> {
+    try {
+      deps.transportProbe.stop();
+    } catch {
+      /* best-effort — must not block shutdown */
+    }
+
     const openSockets = getOpenWebSockets();
     for (const socket of openSockets) {
       try {

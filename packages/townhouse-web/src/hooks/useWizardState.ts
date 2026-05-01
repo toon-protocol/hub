@@ -23,7 +23,9 @@ const DEFAULT_FETCH_TIMEOUT_MS = 3000;
  * AC-25: In DEV builds, ?wizard=force in the URL overrides the API response
  * to simulate a fresh wizard session without deleting real config.
  */
-export function useWizardState(options: UseWizardStateOptions = {}): UseWizardStateResult {
+export function useWizardState(
+  options: UseWizardStateOptions = {}
+): UseWizardStateResult {
   const {
     url = '/api/wizard/state',
     pollIntervalMs = DEFAULT_POLL_MS,
@@ -53,7 +55,9 @@ export function useWizardState(options: UseWizardStateOptions = {}): UseWizardSt
         };
         setState(mockState);
         setStatus('ready');
-        return () => { mountedRef.current = false; };
+        return () => {
+          mountedRef.current = false;
+        };
       }
     }
 
@@ -97,7 +101,9 @@ export function useWizardState(options: UseWizardStateOptions = {}): UseWizardSt
     };
   }, [url, pollIntervalMs, fetchTimeoutMs]);
 
-  const refetch = useCallback(() => { pollRef.current(); }, []);
+  const refetch = useCallback(() => {
+    pollRef.current();
+  }, []);
 
   return { state, status, refetch };
 }

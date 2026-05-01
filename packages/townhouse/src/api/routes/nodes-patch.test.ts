@@ -349,7 +349,10 @@ describe('PATCH /nodes/dvm/config — kindPricing support', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    const body = response.json() as { feePerJob: number; kindPricing: Record<string, number> };
+    const body = response.json() as {
+      feePerJob: number;
+      kindPricing: Record<string, number>;
+    };
     expect(body.feePerJob).toBe(100);
     expect(body.kindPricing).toEqual({ '5094': 5, '5250': 10000 });
     expect(mock.getCalls()).toContain('regenerateConnectorConfig');

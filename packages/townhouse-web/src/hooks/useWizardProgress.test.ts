@@ -17,7 +17,9 @@ class MockWebSocket {
   }
 
   removeEventListener(event: string, handler: (e?: unknown) => void) {
-    this.listeners[event] = (this.listeners[event] ?? []).filter((h) => h !== handler);
+    this.listeners[event] = (this.listeners[event] ?? []).filter(
+      (h) => h !== handler
+    );
   }
 
   close() {
@@ -68,11 +70,16 @@ describe('useWizardProgress', () => {
 
     await act(async () => {
       MockWebSocket.instances[0]?.emit('open');
-      MockWebSocket.instances[0]?.emit('message', { data: JSON.stringify(msg) });
+      MockWebSocket.instances[0]?.emit('message', {
+        data: JSON.stringify(msg),
+      });
     });
 
     expect(result.current.messages).toHaveLength(1);
-    expect(result.current.messages[0]).toMatchObject({ type: 'pull_progress', image: 'toon:town' });
+    expect(result.current.messages[0]).toMatchObject({
+      type: 'pull_progress',
+      image: 'toon:town',
+    });
   });
 
   it('closes socket on unmount', async () => {
@@ -108,7 +115,10 @@ describe('useWizardProgress', () => {
     vi.useFakeTimers();
     try {
       const { result } = renderHook(() =>
-        useWizardProgress({ url: 'ws://test/wizard/progress', maxReconnects: 3 })
+        useWizardProgress({
+          url: 'ws://test/wizard/progress',
+          maxReconnects: 3,
+        })
       );
 
       await act(async () => {

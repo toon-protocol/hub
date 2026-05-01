@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { registerWalletBalancesRoutes, resetWalletBalancesCache } from './wallet-balances.js';
+import {
+  registerWalletBalancesRoutes,
+  resetWalletBalancesCache,
+} from './wallet-balances.js';
 import type { ApiDeps } from '../types.js';
 import type { DockerOrchestrator } from '../../docker/orchestrator.js';
 import type { ConnectorAdminClient } from '../../connector/admin-client.js';
@@ -11,9 +14,15 @@ const DEV_MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
 class MockOrchestrator {
-  on() { return this; }
-  off() { return this; }
-  async status() { return []; }
+  on() {
+    return this;
+  }
+  off() {
+    return this;
+  }
+  async status() {
+    return [];
+  }
 }
 
 class MockConnector {}
@@ -56,14 +65,26 @@ describe('GET /api/wallet/balances', () => {
     registerWalletBalancesRoutes(app, buildDeps(wallet));
     const res = await app.inject({ method: 'GET', url: '/wallet/balances' });
     expect(res.statusCode).toBe(503);
-    expect(JSON.parse(res.body)).toMatchObject({ error: 'wallet_not_initialized' });
+    expect(JSON.parse(res.body)).toMatchObject({
+      error: 'wallet_not_initialized',
+    });
   });
 
   it('returns entries with available:false when EVM RPC times out', async () => {
     await wallet.fromMnemonic(DEV_MNEMONIC);
     // Stub fetch to abort (simulate timeout)
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' })));
-    vi.stubEnv('TOON_USDC_ADDRESS', '0xUsdcAddr1234567890123456789012345678901234');
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockRejectedValue(
+          Object.assign(new Error('aborted'), { name: 'AbortError' })
+        )
+    );
+    vi.stubEnv(
+      'TOON_USDC_ADDRESS',
+      '0xUsdcAddr1234567890123456789012345678901234'
+    );
 
     registerWalletBalancesRoutes(app, buildDeps(wallet));
     const res = await app.inject({ method: 'GET', url: '/wallet/balances' });
@@ -77,17 +98,22 @@ describe('GET /api/wallet/balances', () => {
     vi.stubEnv('TOON_USDC_ADDRESS', '');
 
     // Mock ETH fetch success, ignore USDC (should be marked unavailable)
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
-      Promise.resolve({
-        ok: true,
-        json: async () => ({ result: '0xde0b6b3a7640000' }),
-      })
-    ));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ result: '0xde0b6b3a7640000' }),
+        })
+      )
+    );
 
     registerWalletBalancesRoutes(app, buildDeps(wallet));
     const res = await app.inject({ method: 'GET', url: '/wallet/balances' });
     expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body) as { entries: { token: string; available: boolean; reason?: string }[] };
+    const body = JSON.parse(res.body) as {
+      entries: { token: string; available: boolean; reason?: string }[];
+    };
     const usdcEntries = body.entries.filter((e) => e.token === 'USDC');
     expect(usdcEntries.length).toBeGreaterThan(0);
     for (const e of usdcEntries) {
@@ -98,34 +124,45 @@ describe('GET /api/wallet/balances', () => {
 
   it('happy path returns entries for all chains', async () => {
     await wallet.fromMnemonic(DEV_MNEMONIC);
-    vi.stubEnv('TOON_USDC_ADDRESS', '0x1234567890123456789012345678901234567890');
+    vi.stubEnv(
+      'TOON_USDC_ADDRESS',
+      '0x1234567890123456789012345678901234567890'
+    );
     vi.stubEnv('TOWNHOUSE_DEV_ANVIL_RPC', 'http://127.0.0.1:28545');
     vi.stubEnv('TOWNHOUSE_DEV_SOLANA_RPC', 'http://127.0.0.1:28899');
     vi.stubEnv('TOWNHOUSE_DEV_MINA_GRAPHQL', 'http://127.0.0.1:28085/graphql');
 
     // Mock all fetches to return 1 unit
-    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, opts: RequestInit) => {
-      const body = JSON.parse(opts?.body as string ?? '{}') as { method?: string; query?: string };
-      if (body.query) {
-        // Mina GraphQL
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, opts: RequestInit) => {
+        const body = JSON.parse((opts?.body as string) ?? '{}') as {
+          method?: string;
+          query?: string;
+        };
+        if (body.query) {
+          // Mina GraphQL
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              data: { account: { balance: { total: '1.000000000' } } },
+            }),
+          });
+        }
+        if (body.method === 'getBalance') {
+          // Solana
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ result: { value: 1_000_000_000 } }),
+          });
+        }
+        // EVM — return 1 wei for eth_getBalance, 1 for balanceOf
         return Promise.resolve({
           ok: true,
-          json: async () => ({ data: { account: { balance: { total: '1.000000000' } } } }),
+          json: async () => ({ result: '0x1' }),
         });
-      }
-      if (body.method === 'getBalance') {
-        // Solana
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ result: { value: 1_000_000_000 } }),
-        });
-      }
-      // EVM — return 1 wei for eth_getBalance, 1 for balanceOf
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({ result: '0x1' }),
-      });
-    }));
+      })
+    );
 
     registerWalletBalancesRoutes(app, buildDeps(wallet));
     const res = await app.inject({ method: 'GET', url: '/wallet/balances' });
@@ -141,13 +178,16 @@ describe('GET /api/wallet/balances', () => {
     vi.stubEnv('TOON_USDC_ADDRESS', '');
 
     let callCount = 0;
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => {
-      callCount++;
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({ result: '0x1' }),
-      });
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ result: '0x1' }),
+        });
+      })
+    );
 
     registerWalletBalancesRoutes(app, buildDeps(wallet));
     const [r1, r2] = await Promise.all([

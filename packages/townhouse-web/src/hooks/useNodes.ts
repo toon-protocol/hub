@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { NodeInfo, NodeDetail, MetricsPayload, NodeType } from '@toon-protocol/townhouse';
+import type {
+  NodeInfo,
+  NodeDetail,
+  MetricsPayload,
+  NodeType,
+} from '@toon-protocol/townhouse';
 
 export type UseNodesStatus = 'loading' | 'ready' | 'error';
 
@@ -45,7 +50,8 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 export function useNodes(options: UseNodesOptions = {}): UseNodesResult {
   const listUrl = options.listUrl ?? '/api/nodes';
   const detailUrl = options.detailUrl ?? defaultDetailUrl;
-  const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const requestTimeoutMs =
+    options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
 
   const [nodes, setNodes] = useState<NodeInfo[]>([]);
   const [metricsByType, setMetricsByType] = useState<
@@ -88,7 +94,10 @@ export function useNodes(options: UseNodesOptions = {}): UseNodesResult {
       const localController = new AbortController();
       const onParentAbort = () => localController.abort();
       parentSignal.addEventListener('abort', onParentAbort, { once: true });
-      const timeout = setTimeout(() => localController.abort(), requestTimeoutMs);
+      const timeout = setTimeout(
+        () => localController.abort(),
+        requestTimeoutMs
+      );
       try {
         return await fetch(input, { signal: localController.signal });
       } finally {

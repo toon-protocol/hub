@@ -8,7 +8,10 @@ export function formatVolume(volume: string, assetScale: number): string {
     const divisor = 10n ** BigInt(assetScale);
     const whole = raw / divisor;
     const frac = raw % divisor;
-    const fracStr = frac.toString().padStart(assetScale, '0').replace(/0+$/, '');
+    const fracStr = frac
+      .toString()
+      .padStart(assetScale, '0')
+      .replace(/0+$/, '');
     return fracStr ? `${whole}.${fracStr}` : whole.toString();
   } catch {
     return volume;

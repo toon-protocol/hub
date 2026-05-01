@@ -1,4 +1,7 @@
+import { useEffect, useRef } from 'react';
 import { Button } from '@/components/primitives/Button';
+import { TransportStatusPanel } from '@/components/TransportStatusPanel';
+import { useTransportStatus } from '@/hooks/useTransportStatus';
 
 export interface WizardStepPrivacyProps {
   transport: 'direct' | 'ator';
@@ -7,7 +10,29 @@ export interface WizardStepPrivacyProps {
   onBack: () => void;
 }
 
-export function WizardStepPrivacy({ transport, onChange, onContinue, onBack }: WizardStepPrivacyProps) {
+export function WizardStepPrivacy({
+  transport,
+  onChange,
+  onContinue,
+  onBack,
+}: WizardStepPrivacyProps) {
+  const { status, statusKind } = useTransportStatus();
+  const probeStartedRef = useRef(false);
+
+  // Lazy-start the wizard's ATOR probe only when the operator engages the ATOR
+  // option. Privacy: no outbound TCP/HTTPS until the user opts in. Idempotent.
+  useEffect(() => {
+    if (transport !== 'ator' || probeStartedRef.current) return;
+    probeStartedRef.current = true;
+    void fetch('/api/transport/wizard-probe-start', { method: 'POST' }).catch(
+      () => {
+        // The endpoint only exists in wizard mode and is best-effort. The panel
+        // will simply show "Probing transport…" forever if the call fails — no
+        // visible degradation beyond that.
+      }
+    );
+  }, [transport]);
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -23,7 +48,11 @@ export function WizardStepPrivacy({ transport, onChange, onContinue, onBack }: W
         </p>
       </div>
 
-      <div className="flex flex-col gap-3" role="radiogroup" aria-label="Transport mode">
+      <div
+        className="flex flex-col gap-3"
+        role="radiogroup"
+        aria-label="Transport mode"
+      >
         {(['direct', 'ator'] as const).map((mode) => (
           <label
             key={mode}
@@ -44,15 +73,27 @@ export function WizardStepPrivacy({ transport, onChange, onContinue, onBack }: W
               <p className="font-geist-sans text-xs text-ink/70">
                 {mode === 'direct'
                   ? 'Faster, less private. Recommended for now. Connect directly to the internet.'
-                  : 'Slower, more private. Routes through public ATOR proxies. Coming soon: live ATOR connectivity status (story 21.15).'}
+                  : 'Slower, more private. Routes through public ATOR proxies.'}
               </p>
+              {/* Live ATOR reachability preview — shown only on the ATOR option when selected */}
+              {mode === 'ator' && transport === 'ator' && (
+                <div className="mt-2">
+                  <TransportStatusPanel
+                    status={status}
+                    statusKind={statusKind}
+                    compact
+                  />
+                </div>
+              )}
             </div>
           </label>
         ))}
       </div>
 
       <div className="flex gap-3 justify-between">
-        <Button variant="secondary" onClick={onBack}>Back</Button>
+        <Button variant="secondary" onClick={onBack}>
+          Back
+        </Button>
         <Button onClick={onContinue}>Continue</Button>
       </div>
     </div>
