@@ -211,6 +211,78 @@ export interface DepositAddressesPayload {
   chains: DepositAddressEntry[];
 }
 
+// ── Wallet API types (Story 21.13) ────────────────────────────────────────────
+
+/** Per-chain balance entry returned by GET /api/wallet/balances */
+export interface WalletBalanceEntry {
+  nodeType: 'town' | 'mill' | 'dvm';
+  family: 'evm' | 'solana' | 'mina';
+  token: 'ETH' | 'USDC' | 'SOL' | 'MINA';
+  address: string;
+  /** Decimal string in raw units (wei, lamports, etc.) */
+  balance: string;
+  /** Decimal places — 18 for ETH, 6 for USDC, 9 for SOL, 9 for MINA */
+  scale: number;
+  available: boolean;
+  /** Populated when available === false */
+  reason?: string;
+}
+
+/** Response shape for GET /api/wallet/balances */
+export interface WalletBalancesPayload {
+  entries: WalletBalanceEntry[];
+  ts: number;
+}
+
+/** Request body for POST /api/wallet/withdraw.
+ *  `chainFamily` lists all values the route accepts at the wire level — the
+ *  handler returns 501 for solana/mina with a structured payload pointing the
+ *  caller at the deposit-address copy flow. */
+export interface WithdrawRequest {
+  nodeType: 'town' | 'mill' | 'dvm';
+  chainFamily: 'evm' | 'solana' | 'mina';
+  token: 'native' | 'USDC';
+  recipient: string;
+  /** Decimal string in raw units */
+  amount: string;
+  /** When true: returns gas estimate without broadcasting */
+  dryRun?: boolean;
+}
+
+/** Successful broadcast response (dryRun !== true). */
+export interface WithdrawSuccessResponse {
+  txHash: `0x${string}`;
+  chainId: number;
+}
+
+/** Successful dryRun response (no broadcast performed). */
+export interface WithdrawDryRunResponse {
+  estimatedGas: string;
+  estimatedFee: string;
+}
+
+/** Discriminated union — callers narrow by presence of `txHash`. */
+export type WithdrawResponse = WithdrawSuccessResponse | WithdrawDryRunResponse;
+
+/** Request body for POST /api/wallet/reveal */
+export interface RevealRequest {
+  password: string;
+}
+
+/** Response shape for POST /api/wallet/reveal */
+export type RevealResponse =
+  | { mnemonic: string }
+  | { error: 'invalid_password' | 'wallet_not_initialized' | 'wallet_corrupted'; message?: string };
+
+/** Response shape for GET /api/wallet/transaction/:txHash */
+export interface TransactionReceiptPayload {
+  status: 'pending' | 'success' | 'reverted';
+  blockNumber?: number;
+  txHash: string;
+}
+
+// ── API server types ───────────────────────────────────────────────────────────
+
 /** API server returned by createApiServer */
 export interface ApiServer {
   app: FastifyInstance;

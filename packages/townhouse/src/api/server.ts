@@ -12,6 +12,9 @@ import { WebSocket } from 'ws';
 import type { ApiServer, ApiDeps } from './types.js';
 import { registerNodeRoutes } from './routes/nodes.js';
 import { registerWalletRoutes } from './routes/wallet.js';
+import { registerWalletBalancesRoutes } from './routes/wallet-balances.js';
+import { registerWalletRevealRoutes } from './routes/wallet-reveal.js';
+import { registerWalletWithdrawRoutes } from './routes/wallet-withdraw.js';
 import { registerConfigPatchRoutes } from './routes/nodes-patch.js';
 import {
   registerMetricsWsRoutes,
@@ -82,6 +85,9 @@ export async function createApiServer(deps: ApiDeps): Promise<ApiServer> {
   // Register routes
   registerNodeRoutes(app, deps);
   registerWalletRoutes(app, deps);
+  registerWalletBalancesRoutes(app, deps);
+  registerWalletRevealRoutes(app, deps);
+  registerWalletWithdrawRoutes(app, deps);
   registerConfigPatchRoutes(app, deps);
   registerMetricsWsRoutes(app, deps);
 

@@ -45,7 +45,7 @@ export type {
   PeersResponse,
 } from './connector/index.js';
 
-export { WalletManager } from './wallet/index.js';
+export { WalletManager, encryptWallet, decryptWallet } from './wallet/index.js';
 export type {
   WalletManagerConfig,
   WalletState,
@@ -85,6 +85,15 @@ export type {
   DepositAddressesPayload,
   DepositAddressEntry,
   SwapByPairEntry,
+  WalletBalanceEntry,
+  WalletBalancesPayload,
+  WithdrawRequest,
+  WithdrawResponse,
+  WithdrawSuccessResponse,
+  WithdrawDryRunResponse,
+  RevealRequest,
+  RevealResponse,
+  TransactionReceiptPayload,
 } from './api/index.js';
 export type { BandwidthStats } from './docker/index.js';
 export type { PacketLogEntry, PacketLogFilter } from './connector/types.js';

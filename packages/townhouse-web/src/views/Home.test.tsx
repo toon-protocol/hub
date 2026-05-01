@@ -294,4 +294,19 @@ describe('Home view', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  it('AC-17: renders Wallet link in header (Story 21.13)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      if (url === '/api/nodes') return jsonRes(fixtureNodes);
+      if (url === '/api/nodes/town') return jsonRes(makeDetail('town', 12));
+      if (url === '/api/nodes/mill') return jsonRes(makeDetail('mill', 5));
+      throw new Error('unexpected ' + url);
+    });
+    renderHome();
+    await waitFor(() => screen.getByLabelText(/^town node$/i));
+    const walletLink = screen.getByRole('link', { name: /view wallet and keys/i });
+    expect(walletLink).toBeInTheDocument();
+    expect(walletLink.getAttribute('href')).toBe('/wallet');
+  });
 });

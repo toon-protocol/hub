@@ -158,6 +158,13 @@ function HomeHeader({ transportMode, streamStatus }: HomeHeaderProps) {
     <div className="flex items-center justify-between gap-3">
       <span className="font-semibold tracking-tight-16">Townhouse</span>
       <div className="flex items-center gap-4 text-xs text-ink/60">
+        <Link
+          to="/wallet"
+          className="font-geist-sans text-xs text-ink/60 hover:text-ink"
+          aria-label="View wallet and keys"
+        >
+          Wallet
+        </Link>
         <div className="flex items-center gap-2">
           <span className="font-geist-mono uppercase tracking-wider" aria-hidden="true">
             {transportMode}

@@ -33,6 +33,15 @@ export type {
   DepositAddressesPayload,
   DepositAddressEntry,
   SwapByPairEntry,
+  WalletBalanceEntry,
+  WalletBalancesPayload,
+  WithdrawRequest,
+  WithdrawResponse,
+  WithdrawSuccessResponse,
+  WithdrawDryRunResponse,
+  RevealRequest,
+  RevealResponse,
+  TransactionReceiptPayload,
 } from './types.js';
 
 export {

@@ -3,6 +3,7 @@ import { Home } from './views/Home';
 import { TownView } from './views/Town';
 import { MillView } from './views/Mill';
 import { DvmView } from './views/Dvm';
+import { WalletView } from './views/Wallet';
 import { NotFound } from './views/NotFound';
 
 const router = createBrowserRouter([
@@ -21,6 +22,10 @@ const router = createBrowserRouter([
   {
     path: '/dvm',
     element: <DvmView />,
+  },
+  {
+    path: '/wallet',
+    element: <WalletView />,
   },
   {
     path: '*',

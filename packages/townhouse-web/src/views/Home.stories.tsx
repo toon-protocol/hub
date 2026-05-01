@@ -162,3 +162,23 @@ export const AtorTransport: Story = {
     } satisfies FixtureScenario,
   },
 };
+
+/**
+ * Header `Wallet →` link (added by story 21.13). The MemoryRouter wraps the
+ * tree so `<Link>` renders an in-page anchor; clicking it would route to
+ * `/wallet` if the story tree included that route. This story exists so the
+ * wallet entry-point in the Home header is visually documented next to the
+ * other transport-mode indicators.
+ */
+export const HeaderWalletLink: Story = {
+  parameters: {
+    fixture: {
+      list: fixtureNodes,
+      details: {
+        town: makeDetail('town', 142),
+        mill: makeDetail('mill', 34),
+        dvm: makeDetail('dvm', 8),
+      },
+    } satisfies FixtureScenario,
+  },
+};

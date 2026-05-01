@@ -54,7 +54,10 @@ The contract (env var names the Fastify API reads):
 - `TOWNHOUSE_DEV_TOWN_01_RELAY`, `TOWNHOUSE_DEV_TOWN_02_RELAY` — relay WebSocket URLs
 - `TOWNHOUSE_DEV_TOWN_0{1,2}_HEALTH`, `TOWNHOUSE_DEV_MILL_0{1,2}_HEALTH`, `TOWNHOUSE_DEV_DVM_01_HEALTH` — BLS health URLs
 - `TOWNHOUSE_DEV_ANVIL_RPC`, `TOWNHOUSE_DEV_SOLANA_RPC`, `TOWNHOUSE_DEV_MINA_GRAPHQL` — chain RPC URLs
-- `SOLANA_PROGRAM_ID`, `MINA_ZKAPP_ADDRESS` — deployed contract addresses
+- `SOLANA_PROGRAM_ID`, `MINA_ZKAPP_ADDRESS`, `TOON_USDC_ADDRESS` — deployed contract addresses
+- `TOWNHOUSE_DEV_WALLET_MNEMONIC` — **DEV ONLY** BIP-39 test-vector-zero mnemonic (`abandon … about`); read by `api-server.mjs` to auto-initialize the `WalletManager` without running `townhouse init`. This is the publicly known test vector — NEVER use in production. The dev API loop **rejects any other value** at startup so a developer who pastes a real mnemonic by accident gets a loud error rather than silent address derivation.
+
+When the dev mnemonic is loaded, the API loop also writes `~/.townhouse/wallet.enc` (if absent) encrypted with the documented dev password `townhouse-dev`. This makes `POST /wallet/reveal` exercisable against the live dev stack — open the wallet view, click "Reveal seed phrase", enter `townhouse-dev`, see the 12-word mnemonic. The on-disk file is never overwritten if it already exists, so an operator who later runs the production `townhouse init` flow keeps their real wallet.
 
 `.env.townhouse-dev` is git-ignored. Never commit it.
 

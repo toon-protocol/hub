@@ -3,6 +3,7 @@
  * variants and asserts zero violations. This is the floor that view stories must maintain.
  */
 import { render } from '@testing-library/react';
+import { vi } from 'vitest';
 import { axe } from '../test-setup';
 import { Shell } from '@/components/primitives/Shell';
 import { Button } from '@/components/primitives/Button';
@@ -16,6 +17,17 @@ import { ChainIcon } from '@/components/primitives/ChainIcon';
 import { TokenIcon } from '@/components/primitives/TokenIcon';
 import { PairChip } from '@/components/primitives/PairChip';
 import { BreakdownPill } from '@/components/primitives/BreakdownPill';
+import { AddressBlock } from '@/components/AddressBlock';
+import { WithdrawModal } from '@/components/WithdrawModal';
+import { RevealSeedModal } from '@/components/RevealSeedModal';
+import type { WalletBalanceEntry } from '@toon-protocol/townhouse';
+
+// Mock qrcode.react for baseline tests
+vi.mock('qrcode.react', () => ({
+  QRCodeSVG: ({ value, 'aria-label': ariaLabel }: { value: string; 'aria-label'?: string }) => (
+    <svg data-testid="qr-code" aria-label={ariaLabel}><title>{value}</title></svg>
+  ),
+}));
 
 describe('a11y baseline — WCAG 2.1 AA', () => {
   it('Shell — default', async () => {
@@ -236,6 +248,71 @@ describe('a11y baseline — WCAG 2.1 AA', () => {
           { label: 'Meh', value: '0', tone: 'neutral' },
         ]}
       />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  // ── Story 21.13: Wallet components ─────────────────────────────────────────
+
+  it('AddressBlock — EVM with balance', async () => {
+    const { container } = render(
+      <AddressBlock
+        family="evm"
+        token="ETH"
+        address="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+        derivationPath="m/44'/60'/0'/0/0"
+        nodeType="town"
+        balance="1000000000000000000"
+        scale={18}
+        available={true}
+      />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('AddressBlock — Solana with balance', async () => {
+    const { container } = render(
+      <AddressBlock
+        family="solana"
+        token="SOL"
+        address="SolanaTestAddr123"
+        derivationPath="m/44'/501'/1'/0/0"
+        nodeType="mill"
+        balance="10000000000"
+        scale={9}
+        available={true}
+      />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('AddressBlock — Mina unavailable', async () => {
+    const { container } = render(
+      <AddressBlock
+        family="mina"
+        token="MINA"
+        address="B62TestAddr"
+        derivationPath="m/44'/12586'/1'/0/0"
+        nodeType="mill"
+        available={false}
+      />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('WithdrawModal — step 1 (chain selector)', async () => {
+    const balances: WalletBalanceEntry[] = [
+      { nodeType: 'town', family: 'evm', token: 'ETH', address: '0x1111', balance: '1000', scale: 18, available: true },
+    ];
+    const { container } = render(
+      <WithdrawModal nodeType="town" balances={balances} open={true} onClose={() => {}} />
+    );
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('RevealSeedModal — step 1 (password prompt)', async () => {
+    const { container } = render(
+      <RevealSeedModal open={true} onClose={() => {}} />
     );
     expect(await axe(container)).toHaveNoViolations();
   });
