@@ -18,7 +18,7 @@ export const NODE_BTP_PORT = 3000;
  * then `pnpm --filter @toon-protocol/townhouse test:canary`. See packages/sdk/CONNECTOR_MIGRATION.md
  * for the full checklist and breaking-changes history.
  */
-export const DEFAULT_CONNECTOR_IMAGE = 'ghcr.io/toon-protocol/connector:3.3.3';
+export const DEFAULT_CONNECTOR_IMAGE = 'ghcr.io/toon-protocol/connector:3.4.0';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).
