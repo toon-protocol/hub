@@ -21,6 +21,7 @@ deploy/akash/townhouse-keys/
 # as the deploy/akash/*-keys/ dirs above. Do NOT commit. The connector YAML
 # rendered with the concrete externalUrl is also operator-local state.
 infra/townhouse-hs-keys/
+infra/townhouse-hs-keys-relay/
 docker/configs/townhouse-hs-connector.local.yaml
 
 # Vendored external sources cloned by build scripts (e.g. Town-Frontend)
