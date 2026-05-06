@@ -6,7 +6,8 @@
  * - AC #1: Dockerfile builds successfully (multi-stage, correct CMD, EXPOSE, HEALTHCHECK)
  * - AC #2: Container accepts connector URL via CONNECTOR_URL env var (standalone HTTP mode)
  * - AC #3: Health endpoint at /health on BLS port (3400)
- * - AC #4: DVM handlers (kind:5094, kind:5250) registered
+ * - AC #4: Arweave DVM handler (kind:5094) registered. Post-ca29625 the
+ *          image is Arweave-only; kind:5250 (Dungeon) is no longer present.
  * - AC #5: Fee configurable via FEE_PER_JOB env var
  * - AC #6: Multi-stage build, non-root execution, HEALTHCHECK, EXPOSE 3300+3400
  * - AC #7: Compose stack integration (volume, healthcheck, identity env vars)
@@ -80,19 +81,25 @@ describe('DVM Node Dockerfile (Story 21.7)', () => {
       expect(dockerfile).toMatch(/--external:better-sqlite3/);
     });
 
-    it('[P0] should include externals for optional chain signers and turbo-sdk', () => {
+    it('[P0] should include externals required by the Arweave DVM bundle', () => {
       expect(dockerfile).toMatch(/--external:ethers/);
       expect(dockerfile).toMatch(/--external:express/);
-      expect(dockerfile).toMatch(/--external:mina-signer/);
-      expect(dockerfile).toMatch(/--external:o1js/);
       expect(dockerfile).toMatch(/--external:@solana\/kit/);
-      expect(dockerfile).toMatch(/--external:@toon-protocol\/mina-zkapp/);
       expect(dockerfile).toMatch(/--external:@ardrive\/turbo-sdk/);
+      // mina-zkapp is kept as an external because it's lazy-imported by code
+      // paths the Arweave DVM never hits — but the bundler still needs to
+      // know to skip it.
+      expect(dockerfile).toMatch(/--external:@toon-protocol\/mina-zkapp/);
     });
 
-    it('[P0] should include pet-dvm and memvid-node package filters', () => {
-      expect(dockerfile).toMatch(/--filter '@toon-protocol\/pet-dvm'/);
-      expect(dockerfile).toMatch(/--filter '@toon-protocol\/memvid-node'/);
+    it('[P0] should NOT include pet-dvm or memvid-node package filters (Arweave-only post-ca29625)', () => {
+      expect(dockerfile).not.toMatch(/--filter '@toon-protocol\/pet-dvm'/);
+      expect(dockerfile).not.toMatch(/--filter '@toon-protocol\/memvid-node'/);
+    });
+
+    it('[P0] should NOT include o1js or mina-signer externals (Dungeon DVM removed)', () => {
+      expect(dockerfile).not.toMatch(/--external:o1js/);
+      expect(dockerfile).not.toMatch(/--external:mina-signer/);
     });
   });
 
@@ -196,24 +203,24 @@ describe('DVM Entrypoint Adapter (Story 21.7)', () => {
     });
   });
 
-  // ── T-040: DVM handlers registered for kind:5094 and kind:5250 ──
+  // ── T-040: Arweave DVM handler registered (kind:5094 only, post-ca29625) ──
   describe('T-040: DVM handler registration', () => {
     it('[P0] should import createArweaveDvmHandler from @toon-protocol/sdk', () => {
       expect(entrypoint).toMatch(/createArweaveDvmHandler/);
       expect(entrypoint).toMatch(/from.*@toon-protocol\/sdk/);
     });
 
-    it('[P0] should import createDungeonDvmHandler from @toon-protocol/pet-dvm', () => {
-      expect(entrypoint).toMatch(/createDungeonDvmHandler/);
-      expect(entrypoint).toMatch(/from.*@toon-protocol\/pet-dvm/);
+    it('[P0] should NOT import createDungeonDvmHandler (Dungeon DVM removed)', () => {
+      expect(entrypoint).not.toMatch(/createDungeonDvmHandler/);
+      expect(entrypoint).not.toMatch(/from.*@toon-protocol\/pet-dvm/);
     });
 
     it('[P0] should register kind:5094 (Arweave DVM)', () => {
       expect(entrypoint).toMatch(/node\.on\(5094/);
     });
 
-    it('[P0] should register kind:5250 (Dungeon DVM)', () => {
-      expect(entrypoint).toMatch(/node\.on\(5250/);
+    it('[P0] should NOT register kind:5250 (Dungeon DVM removed)', () => {
+      expect(entrypoint).not.toMatch(/node\.on\(5250/);
     });
 
     it('[P1] should create ArweaveUploadAdapter from TURBO_TOKEN', () => {

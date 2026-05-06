@@ -7,6 +7,8 @@
  */
 
 import { EventEmitter } from 'node:events';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type Docker from 'dockerode';
 import type { TownhouseConfig } from '../config/schema.js';
 import { ConnectorConfigGenerator } from '../connector/config-generator.js';
@@ -566,10 +568,30 @@ export class DockerOrchestrator extends EventEmitter {
 
   /**
    * Start the connector container — always runs first.
+   *
+   * The connector image at 3.3.x reads its config from a YAML file pointed
+   * to by the `CONFIG_FILE` env var (default `./config.yaml`). We write the
+   * generated YAML to `<configDir>/connector.yaml` (sibling to wallet.enc),
+   * mount it as `/config/connector.yaml`, and set CONFIG_FILE accordingly.
+   *
+   * (Env-var-based config was set on the container historically but the
+   * connector image silently ignored them — see the YAML fix landing with
+   * this comment block.)
    */
   private async startConnector(): Promise<void> {
     const name = `${CONTAINER_PREFIX}connector`;
     const env = this.buildConnectorEnv();
+    env.push('CONFIG_FILE=/config/connector.yaml');
+
+    // Write the YAML config beside the wallet so it's stable across restarts.
+    const configDir = dirname(this.config.wallet.encrypted_path);
+    mkdirSync(configDir, { recursive: true, mode: 0o700 });
+    const yamlPath = join(configDir, 'connector.yaml');
+    const runtimeConfig = this.configGenerator.generate(this.activeNodes);
+    writeFileSync(yamlPath, this.configGenerator.toYaml(runtimeConfig), {
+      encoding: 'utf-8',
+      mode: 0o600,
+    });
 
     this.emit('containerState', { name, state: 'creating' });
 
@@ -583,6 +605,7 @@ export class DockerOrchestrator extends EventEmitter {
       },
       HostConfig: {
         NetworkMode: NETWORK_NAME,
+        Binds: [`${yamlPath}:/config/connector.yaml:ro`],
         PortBindings: {
           [`${this.config.connector.adminPort}/tcp`]: [
             {
@@ -748,6 +771,13 @@ export class DockerOrchestrator extends EventEmitter {
           for (const [kind, value] of Object.entries(kindPricing)) {
             env.push(`KIND_PRICING_${kind}=${value}`);
           }
+        }
+        // Arweave DVM (kind:5094) requires TURBO_TOKEN for authenticated
+        // uploads. Without it, the entrypoint installs a stub adapter that
+        // throws on first upload — dev-mode capped paths don't apply here.
+        const turboToken = process.env['TURBO_TOKEN'];
+        if (turboToken) {
+          env.push(`TURBO_TOKEN=${turboToken}`);
         }
         break;
       }

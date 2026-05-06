@@ -827,6 +827,56 @@ describe('DockerOrchestrator', () => {
       );
     });
 
+    it('passes TURBO_TOKEN from host env to dvm container', async () => {
+      const original = process.env['TURBO_TOKEN'];
+      process.env['TURBO_TOKEN'] = 'test-jwk-json';
+      try {
+        const config = configWithNodes(['dvm']);
+        const orchestrator = new DockerOrchestrator(
+          mockDocker.docker as any,
+          config
+        );
+        await orchestrator.up(['dvm']);
+
+        expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: 'townhouse-dvm',
+            Env: expect.arrayContaining(['TURBO_TOKEN=test-jwk-json']),
+          })
+        );
+      } finally {
+        if (original === undefined) {
+          delete process.env['TURBO_TOKEN'];
+        } else {
+          process.env['TURBO_TOKEN'] = original;
+        }
+      }
+    });
+
+    it('omits TURBO_TOKEN env when host env is unset', async () => {
+      const original = process.env['TURBO_TOKEN'];
+      delete process.env['TURBO_TOKEN'];
+      try {
+        const config = configWithNodes(['dvm']);
+        const orchestrator = new DockerOrchestrator(
+          mockDocker.docker as any,
+          config
+        );
+        await orchestrator.up(['dvm']);
+
+        const dvmCall = mockDocker.docker.createContainer.mock.calls.find(
+          (c: any[]) => c[0]?.name === 'townhouse-dvm'
+        );
+        expect(dvmCall).toBeDefined();
+        const env: string[] = dvmCall?.[0]?.Env ?? [];
+        expect(env.some((e) => e.startsWith('TURBO_TOKEN='))).toBe(false);
+      } finally {
+        if (original !== undefined) {
+          process.env['TURBO_TOKEN'] = original;
+        }
+      }
+    });
+
     it('includes SOCKS_PROXY env when transport mode is ator', async () => {
       const config = configWithNodes(['town']);
       config.transport.mode = 'ator';

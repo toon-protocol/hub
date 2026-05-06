@@ -59,7 +59,7 @@ const HELP_TEXT = `townhouse — TOON node orchestrator
 
 Usage:
   townhouse setup [--no-browser] [--port <n>] [--config-dir <dir>]  Run the first-run setup wizard
-  townhouse init [--force] [--config-dir <dir>] [--password <pw>]   Initialize config + wallet
+  townhouse init [--force] [--config-dir <dir>] [--password <pw>] [--preset <name>] [--yes]   Initialize config + wallet
   townhouse up [--town] [--mill] [--dvm] [-c <path>] [--password <pw>]  Start nodes
   townhouse down [-c <path>]                     Stop all nodes
   townhouse status [-c <path>]                   Show node status
@@ -74,6 +74,8 @@ Flags:
   --password   Wallet password (non-interactive mode)
   --no-browser Skip opening the browser automatically (setup command)
   --port       Override the API port (setup command, default 9400)
+  --preset     Init from a named preset (init only). Supported: demo
+  --yes        Non-interactive (init only); with --preset=demo uses demo password if --password absent
   If no flags given, starts all enabled nodes from config.`;
 
 const DEFAULT_CONFIG_DIR = join(homedir(), '.townhouse');
@@ -82,7 +84,9 @@ const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, 'config.yaml');
 async function handleInit(
   force: boolean,
   configDir?: string,
-  password?: string
+  password?: string,
+  preset?: 'demo',
+  yes?: boolean
 ): Promise<void> {
   const dir = resolve(configDir ?? DEFAULT_CONFIG_DIR);
   const configPath = join(dir, 'config.yaml');
@@ -97,9 +101,27 @@ async function handleInit(
 
   mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-  const defaultConfig = getDefaultConfig();
-  const yamlContent = stringify(defaultConfig);
-
+  // D2 — preset path takes precedence over default config for non-interactive
+  // demo init. Preset writes the same TownhouseConfig shape, so the rest of
+  // the init flow (wallet generation, etc.) is unaffected.
+  let configToWrite;
+  if (preset === 'demo') {
+    const { buildDemoConfig, DEMO_DETERMINISTIC_PASSWORD } = await import('./presets/demo.js');
+    configToWrite = buildDemoConfig({ walletPath: join(dir, 'wallet.enc') });
+    // AC-D2-6: --yes without --password under --preset=demo gets the
+    // deterministic demo password. Documented as DEMO ONLY.
+    if (yes && !password) {
+      password = DEMO_DETERMINISTIC_PASSWORD;
+      console.log('[demo preset] Using deterministic demo password (insecure — demo only).');
+    }
+  } else {
+    configToWrite = getDefaultConfig();
+    // Override wallet path to use the config dir, not the default home-dir path.
+    // getDefaultConfig() hardcodes ~/.townhouse/wallet.enc; tests and non-default
+    // config dirs need the wallet collocated with config.yaml.
+    configToWrite.wallet.encrypted_path = join(dir, 'wallet.enc');
+  }
+  const yamlContent = stringify(configToWrite);
   writeFileSync(configPath, yamlContent, {
     encoding: 'utf-8',
     mode: 0o600,
@@ -521,6 +543,19 @@ async function handleUp(
   // Track if the server started successfully (handlers stay registered if true)
   let serverStarted = false;
 
+  if (
+    profiles.includes('dvm') &&
+    config.nodes.dvm.enabled &&
+    !process.env['TURBO_TOKEN']
+  ) {
+    console.warn(
+      '[townhouse] WARN: TURBO_TOKEN is not set — Arweave DVM (kind:5094) uploads will fail at first job.'
+    );
+    console.warn(
+      '[townhouse] Export TURBO_TOKEN=<arweave-jwk-json> before `townhouse up` to enable uploads.'
+    );
+  }
+
   try {
     console.log(`Starting nodes: ${profiles.join(', ')}...`);
     if (!dryRun) {
@@ -644,6 +679,8 @@ export async function main(
       'dry-run': { type: 'boolean' },
       'no-browser': { type: 'boolean' },
       port: { type: 'string' },
+      preset: { type: 'string' },
+      yes: { type: 'boolean' },
     },
     strict: false,
     allowPositionals: true,
@@ -681,10 +718,18 @@ export async function main(
       break;
     }
     case 'init': {
+      const presetVal = values.preset as string | undefined;
+      if (presetVal !== undefined && presetVal !== 'demo') {
+        console.error(`Unknown preset: ${presetVal}. Supported: demo`);
+        process.exitCode = 1;
+        break;
+      }
       await handleInit(
         values.force === true,
         values['config-dir'] as string | undefined,
-        values.password as string | undefined
+        values.password as string | undefined,
+        presetVal,
+        values.yes === true
       );
       break;
     }
