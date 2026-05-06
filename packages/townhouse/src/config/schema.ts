@@ -115,6 +115,14 @@ export interface TransportConfig {
    * manages its own anon binary and publishes a .anyone hidden service.
    */
   hiddenService?: HiddenServiceConfig;
+  /**
+   * Town relay hidden service. When set, the orchestrator starts a second
+   * ator sidecar (parallel to any connector HS sidecar) that forwards
+   * inbound HS traffic to the town container's Nostr WebSocket port (7100),
+   * and the town container is configured to advertise the .anyone URL.
+   * Reuses HiddenServiceConfig — same shape as connector HS config.
+   */
+  relayHiddenService?: HiddenServiceConfig;
 }
 
 export interface ApiConfig {

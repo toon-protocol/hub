@@ -48,6 +48,16 @@ const MAX_START_RETRIES = 3;
 /** Internal connector port (Docker-internal, not exposed to host) */
 const CONNECTOR_INTERNAL_PORT = 3000;
 
+/** Default ator sidecar image tag for relay hidden service publication. */
+const RELAY_ATOR_SIDECAR_IMAGE = 'toon:townhouse-ator-sidecar';
+
+/**
+ * SOCKS port for the relay-side ator sidecar. Distinct from the connector
+ * HS sidecar's 9050 so the two can coexist on the same Docker network if
+ * both transports are enabled.
+ */
+const RELAY_ATOR_SOCKS_PORT = 9051;
+
 /**
  * Normalize a Docker image reference to include an explicit tag.
  * Docker defaults to `:latest` when no tag is specified, but
@@ -109,6 +119,16 @@ export class DockerOrchestrator extends EventEmitter {
 
     // Start all node containers in parallel
     await Promise.all(profiles.map((type) => this.startNode(type)));
+
+    // Optional: bring up the relay-side ator sidecar after town is started.
+    // It forwards inbound HS traffic to the town container's relay WS port,
+    // so it must be created after the town container exists in DNS.
+    if (
+      profiles.includes('town') &&
+      this.config.transport.relayHiddenService
+    ) {
+      await this.startRelayAtorSidecar();
+    }
   }
 
   /**
@@ -459,6 +479,16 @@ export class DockerOrchestrator extends EventEmitter {
       imagesToPull.add(normalizeImageTag(image));
     }
 
+    // Pull the relay ator sidecar when the operator opted in. Built locally
+    // by docker/townhouse-ator-sidecar — pull may 404, which is fine; the
+    // operator must have built it before `townhouse up` (see README).
+    if (
+      profiles.includes('town') &&
+      this.config.transport.relayHiddenService
+    ) {
+      imagesToPull.add(normalizeImageTag(RELAY_ATOR_SIDECAR_IMAGE));
+    }
+
     // Check which images exist locally
     const existingImages = await this.docker.listImages();
     const existingTags = new Set<string>();
@@ -678,6 +708,44 @@ export class DockerOrchestrator extends EventEmitter {
   }
 
   /**
+   * Start the relay-side ator sidecar that publishes a v3 hidden service
+   * forwarding inbound traffic to the town container's Nostr WebSocket port.
+   *
+   * The keypair directory is mounted read-write because the sidecar's
+   * entrypoint writes the `hostname` file on first boot (see
+   * docker/townhouse-ator-sidecar/Dockerfile). The town container picks up
+   * the resulting .anyone URL via the operator-set externalUrl field.
+   */
+  private async startRelayAtorSidecar(): Promise<void> {
+    const hsConfig = this.config.transport.relayHiddenService;
+    if (!hsConfig) return;
+
+    const name = `${CONTAINER_PREFIX}ator-sidecar-relay`;
+    const env = [
+      `HS_TARGET_HOST=${CONTAINER_PREFIX}town`,
+      `HS_TARGET_PORT=${TOWN_RELAY_PORT}`,
+      `HS_PORT=${hsConfig.port}`,
+      `SOCKS_PORT=${RELAY_ATOR_SOCKS_PORT}`,
+    ];
+
+    this.emit('containerState', { name, state: 'creating' });
+
+    const container = await this.docker.createContainer({
+      name,
+      Image: RELAY_ATOR_SIDECAR_IMAGE,
+      Env: env,
+      HostConfig: {
+        NetworkMode: NETWORK_NAME,
+        Binds: [`${hsConfig.dir}:/var/lib/anon/hs:rw`],
+      },
+    });
+
+    this.emit('containerState', { name, state: 'starting' });
+    await container.start();
+    this.emit('containerState', { name, state: 'running' });
+  }
+
+  /**
    * Stop and remove a single container.
    */
   private async stopAndRemove(containerName: string): Promise<void> {
@@ -751,6 +819,16 @@ export class DockerOrchestrator extends EventEmitter {
         const feePerEvent = this.config.nodes.town.feePerEvent;
         if (feePerEvent !== undefined) {
           env.push(`FEE_PER_EVENT=${feePerEvent}`);
+        }
+        // When the operator opts into a relay hidden service, the .anyone URL
+        // is advertised via packages/town/src/cli.ts which reads
+        // TOON_EXTERNAL_RELAY_URL into config.externalRelayUrl. We deliberately
+        // do NOT set config.ator.enabled — that would bind the relay to
+        // 127.0.0.1 inside the container, which the sidecar (reaching town via
+        // Docker DNS) cannot then forward to.
+        const relayHs = this.config.transport.relayHiddenService;
+        if (relayHs?.externalUrl) {
+          env.push(`TOON_EXTERNAL_RELAY_URL=${relayHs.externalUrl}`);
         }
         break;
       }

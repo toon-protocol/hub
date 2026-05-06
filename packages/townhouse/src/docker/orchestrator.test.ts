@@ -877,6 +877,152 @@ describe('DockerOrchestrator', () => {
       }
     });
 
+    it('does NOT create relay ator sidecar when relayHiddenService is unset', async () => {
+      const config = configWithNodes(['town']);
+      // transport.relayHiddenService intentionally undefined
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['town']);
+
+      expect(mockDocker.docker.createContainer).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-ator-sidecar-relay',
+        })
+      );
+    });
+
+    it('does NOT include TOON_EXTERNAL_RELAY_URL env on town when relayHiddenService is unset', async () => {
+      const config = configWithNodes(['town']);
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['town']);
+
+      const townCall = mockDocker.docker.createContainer.mock.calls.find(
+        (c: any[]) => c[0]?.name === 'townhouse-town'
+      );
+      expect(townCall).toBeDefined();
+      const townEnv: string[] = townCall?.[0]?.Env ?? [];
+      expect(townEnv.some((e) => e.startsWith('TOON_EXTERNAL_RELAY_URL='))).toBe(false);
+    });
+
+    it('creates relay ator sidecar with correct env when relayHiddenService is set', async () => {
+      const config = configWithNodes(['town']);
+      config.transport.relayHiddenService = {
+        dir: '/var/lib/townhouse/hs/relay',
+        port: 7100,
+        externalUrl: 'wss://abc123.anyone',
+      };
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['town']);
+
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-ator-sidecar-relay',
+          Image: 'toon:townhouse-ator-sidecar',
+          Env: expect.arrayContaining([
+            'HS_TARGET_HOST=townhouse-town',
+            'HS_TARGET_PORT=7100',
+            'HS_PORT=7100',
+            'SOCKS_PORT=9051',
+          ]),
+          HostConfig: expect.objectContaining({
+            NetworkMode: 'townhouse-net',
+            Binds: expect.arrayContaining([
+              '/var/lib/townhouse/hs/relay:/var/lib/anon/hs:rw',
+            ]),
+          }),
+        })
+      );
+    });
+
+    it('passes TOON_EXTERNAL_RELAY_URL to town when relayHiddenService.externalUrl is set', async () => {
+      const config = configWithNodes(['town']);
+      config.transport.relayHiddenService = {
+        dir: '/var/lib/townhouse/hs/relay',
+        port: 7100,
+        externalUrl: 'wss://abc123.anyone',
+      };
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['town']);
+
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-town',
+          Env: expect.arrayContaining([
+            'TOON_EXTERNAL_RELAY_URL=wss://abc123.anyone',
+          ]),
+        })
+      );
+    });
+
+    it('does NOT create relay sidecar when town profile is absent (mill-only)', async () => {
+      const config = configWithNodes(['mill']);
+      config.transport.relayHiddenService = {
+        dir: '/var/lib/townhouse/hs/relay',
+        port: 7100,
+        externalUrl: 'wss://abc123.anyone',
+      };
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['mill']);
+
+      expect(mockDocker.docker.createContainer).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-ator-sidecar-relay',
+        })
+      );
+    });
+
+    it('down() stops the relay ator sidecar alongside other townhouse containers', async () => {
+      const stopped: string[] = [];
+
+      mockDocker.docker.listContainers.mockResolvedValue([
+        { Names: ['/townhouse-connector'], State: 'running' },
+        { Names: ['/townhouse-town'], State: 'running' },
+        { Names: ['/townhouse-ator-sidecar-relay'], State: 'running' },
+      ]);
+      mockDocker.docker.getContainer.mockImplementation((name: string) => ({
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockImplementation(async () => {
+          stopped.push(name);
+        }),
+        remove: vi.fn().mockResolvedValue(undefined),
+        inspect: vi.fn().mockResolvedValue({
+          State: { Health: { Status: 'healthy' }, Running: true },
+        }),
+      }));
+
+      const config = configWithNodes(['town']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.down();
+
+      expect(stopped).toContain('townhouse-ator-sidecar-relay');
+      // sidecar is stopped before the connector (parallel "node" group)
+      expect(stopped.indexOf('townhouse-ator-sidecar-relay')).toBeLessThan(
+        stopped.indexOf('townhouse-connector')
+      );
+    });
+
     it('includes SOCKS_PROXY env when transport mode is ator', async () => {
       const config = configWithNodes(['town']);
       config.transport.mode = 'ator';
