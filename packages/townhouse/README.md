@@ -108,6 +108,157 @@ All ports are `127.0.0.1` only (never `0.0.0.0`). Full table also in `CLAUDE.md`
 - **Not for performance testing.** Boot-and-smoke only. Performance tuning is out of scope for this stack; it belongs in a dedicated story.
 - **Not multi-tenant.** The 5 child nodes use deterministic dev keys that never change across `up`/`down`/`up` cycles. They are NOT for use as real TOON nodes.
 
+## Running E2E Tests (Story 21.16)
+
+There are two test harnesses with different purposes:
+
+### 1. Dev stack integration (contributor dev loop)
+
+Uses `townhouse-dev-infra.sh` (multi-peer fixtures, deterministic keys, 28xxx ports).
+See "Local Dev Loop" above.
+
+```bash
+./scripts/townhouse-dev-infra.sh up
+pnpm --filter @toon-protocol/townhouse test:integration -- dev-stack-smoke
+```
+
+### 2. Real-CLI E2E (operator-facing lifecycle — Story 21.16)
+
+Uses `townhouse-test-infra.sh` (image pre-warm only; tests run the real CLI).
+
+```bash
+# One-time image cache warm-up (pulls connector image + builds toon:{town,mill,dvm})
+bash scripts/townhouse-test-infra.sh up
+
+# Run the integration suite (CLI lifecycle + config propagation)
+RUN_DOCKER_INTEGRATION=1 pnpm --filter @toon-protocol/townhouse test:integration
+
+# Or: combined script (up + test + down)
+pnpm --filter @toon-protocol/townhouse test:e2e:docker
+```
+
+**Key differences from the dev stack:**
+
+| | Dev stack (`townhouse-dev-infra.sh`) | Real-CLI E2E (`townhouse-test-infra.sh`) |
+|---|---|---|
+| Starts containers? | Yes (multi-peer compose) | No (tests run the real CLI) |
+| Keys | Deterministic dev keys | Fresh wallet per test (mkdtempSync) |
+| Topology | 2 Town + 2 Mill + 1 DVM + SOCKS5 | 1 Town + 1 Mill + 1 DVM |
+| Port range | 28xxx | 9400 (API), 9401 (connector admin) |
+| Audience | Dashboard developers | CI / publish gate validation |
+
+**Diagnostic runbook:** see the header comment in `scripts/townhouse-test-infra.sh`.
+
+**Playwright SPA tests (mock-driven + real-stack):**
+
+```bash
+# Mock-driven specs (transport flip, config change) — no real stack needed
+pnpm --filter @toon-protocol/townhouse-web e2e
+
+# Real-stack lifecycle spec — requires townhouse up to be running
+TOWNHOUSE_E2E_REAL_STACK=1 pnpm --filter @toon-protocol/townhouse-web e2e:real
+```
+
+## Running the townhouse as a hidden service (laptop)
+
+`docker-compose-townhouse-hs.yml` brings up the full operator stack —
+apex connector + town + mill + dvm + (optional) Anvil + Solana + EVM
+faucet — with the connector publishing a `.anyone` hidden service via
+the Anyone Protocol overlay. External peers reach the townhouse only
+through that `.anyone` address; the laptop never exposes anything to
+the public clearnet.
+
+```bash
+# 1. Build the local node images (one-time, until they're on ghcr)
+docker compose -f docker-compose-townhouse.yml --profile town --profile mill --profile dvm build
+
+# 2. Pick a chain profile (localnet is the default — copy when ready to switch)
+cp .env.townhouse-hs.example .env
+
+# 3. Boot the HS stack. Profiles select what runs:
+#    --profile localnet       bundles anvil + solana (skip for real testnets)
+#    --profile town/mill/dvm  child nodes
+#    --profile faucet         EVM ETH + Mock USDC faucet UI on :3500
+docker compose -f docker-compose-townhouse-hs.yml \
+  --profile localnet --profile town --profile mill --profile dvm --profile faucet up -d
+
+# 4. Wait ~30-90s for anon to bootstrap and publish the descriptor.
+#    Then read your published .anyone address:
+docker compose -f docker-compose-townhouse-hs.yml exec connector \
+  cat /var/lib/anon/hs/hostname
+# → eag2qnhil4vpvfo2eu3qtqj3rzzkrzbmboivwwbbgzr4svfvjigoxpad.anyone
+
+# 5. Share that address with peers. They reach you over Tor at:
+#      wss://<address>.anyone/btp
+```
+
+### Chain configuration
+
+Mill and the faucet read chain endpoints from environment variables, with
+localnet defaults. Override via `.env` to switch profiles — see
+`.env.townhouse-hs.example` for the four supported shapes:
+
+| Profile | EVM | Solana | Mock USDC |
+|---|---|---|---|
+| **localnet** (default) | bundled Anvil at `anvil:8545` | bundled validator at `solana:8899` | pre-deployed in both bundled images |
+| **Akash devnet** | `anvil` lease URL from `deploy/akash/leases.json` | `solana` lease URL from same | baked into `akash-anvil` + `akash-solana` images (same addresses as localnet) |
+| **Public testnet** | Sepolia (`infura.io/v3/<KEY>`) | `api.devnet.solana.com` | real Circle testnet USDC contracts |
+| **Mainnet** | mainnet RPC | `api.mainnet-beta.solana.com` | real Circle mainnet USDC — **disable the faucet profile** |
+
+Variables consumed: `EVM_RPC_URL`, `EVM_CHAIN_ID`, `EVM_USDC_ADDRESS`,
+`SOLANA_RPC_URL`, `SOLANA_USDC_MINT`. Setting these in `.env` configures
+the laptop compose AND the Akash deploy (`scripts/akash-deploy.sh
+townhouse`) identically.
+
+### Faucet workflow
+
+**EVM ETH + Mock USDC** — bundled `faucet` service runs at
+`http://127.0.0.1:3500`. Operator pastes their address, gets ETH for gas
+and Mock USDC for transfers. Rate-limited 1 request per address per hour
+by default (override via `FAUCET_RATE_LIMIT_HOURS`). The faucet uses
+well-known Anvil dev keys — only meaningful against localnet or the
+Akash devnet; harmless against testnets/mainnet (transactions just fail).
+
+**Solana SOL + Mock USDC** — the standalone EVM faucet container does
+NOT yet handle Solana. Two paths until that gap closes:
+
+1. **Dashboard panel**: the townhouse host API (`pnpm --filter
+   @toon-protocol/townhouse-web dev` + the host-side townhouse API)
+   exposes a Faucet panel that does both EVM and Solana drips through
+   `POST /api/faucet`. Best for live operator use.
+2. **Script**: `scripts/faucet-sol-usdc.mjs <recipient>` from the host —
+   talks to whatever `SOLANA_RPC_URL` resolves to in `leases.json`.
+
+Both options use the bootstrap-baked Mock USDC mint
+(`6GbdrVghwNKTz9raga7y3Y4qqX5Zgg3AC4d48Kt7C59Q`) and faucet authority
+keypair at `infra/solana/keys/faucet-authority.json`.
+
+### Persistence
+
+The `townhouse-hs-anon` named docker volume preserves
+`hs_ed25519_secret_key` across `docker compose down` cycles — the
+`.anyone` address is stable for as long as the volume exists. Delete the
+volume to rotate the address.
+
+### What's exposed on the host (loopback only)
+
+- Connector admin: `127.0.0.1:9401` — no auth, **never expose publicly**
+- Anvil RPC: `127.0.0.1:8545` (localnet profile)
+- Solana RPC: `127.0.0.1:8899`, WS `127.0.0.1:8900` (localnet profile)
+- Town Nostr relay clearnet: `127.0.0.1:7100` — direct local clients
+  bypass the HS, handy for debugging
+- EVM faucet UI: `127.0.0.1:3500` (faucet profile)
+
+### Akash deployment of the same stack
+
+`deploy/akash/townhouse.sdl.yaml` deploys apex + town + mill + dvm +
+faucet to Akash with the same architecture. Chain devnets stay as
+separate Akash leases (clearnet) — see `scripts/akash-deploy.sh`'s
+`cmd_townhouse` (TODO) for the leases.json wiring. The faucet's HTTP
+port is the SDL's "one global service" validator scaffolding;
+operationally, external peers reach the townhouse only via the `.anyone`
+hidden service.
+
 ## Package overview
 
 The `@toon-protocol/townhouse` package provides:
@@ -119,3 +270,46 @@ The `@toon-protocol/townhouse` package provides:
 - **Fastify REST/WebSocket metrics API** — host-side API for the dashboard (story 21.8)
 
 See `packages/townhouse/src/index.ts` for the full public API surface.
+
+## Transport configuration
+
+The `transport` block selects how the connector reaches peers (outbound) and
+how peers reach the connector (inbound).
+
+```yaml
+transport:
+  mode: direct          # 'direct' | 'ator'
+  socksProxy: socks5h://proxy.ator.io:9050   # required when mode='ator'
+  externalUrl: wss://my-connector.example/btp  # see below
+  hiddenService:        # optional — connector publishes its own .anyone HS
+    dir: /var/lib/anon/hs
+    port: 3000
+    startupTimeoutMs: 60000   # optional
+    stopTimeoutMs: 10000      # optional
+    externalUrl: wss://forced.anyone/btp  # optional override of "auto"
+```
+
+**`mode: 'direct'`** — clearnet TCP, no overlay. Default for development.
+
+**`mode: 'ator'`** — outbound BTP through the Anyone Protocol (ATOR) overlay
+via SOCKS5. Requires either `externalUrl` (operator-managed anon binary
+external to the connector) OR `hiddenService` (connector manages its own
+anon binary in-process and publishes a `.anyone` hidden service). Without
+one of these the connector rejects the manifest at boot — the validator
+catches this case before deploy.
+
+**`hiddenService` (Story 35.5 of the connector repo)** — when set, the
+connector boots `@anyone-protocol/anyone-client` in-process, spawns the
+`anon` binary, and publishes a v3 hidden service. The keypair lives at
+`dir`; persist that path on a mounted volume to keep the `.anyone` address
+stable across redeploys, or delete it to rotate. The connector reads
+`${dir}/hostname` after publish and advertises `wss://<hostname>.anyone/btp`
+to peers (you can override with an explicit `externalUrl` if needed).
+
+**Wire-format note (silent-bug fix in this story):** the previous shape
+emitted `transport: { mode: 'ator', socksProxy }` to the connector image,
+but the connector at 3.3.x reads a discriminated union keyed on `type`
+(`'direct' | 'socks5'`). The unknown `mode` field was silently discarded,
+defaulting to direct — operators toggling ATOR got direct traffic anyway.
+The current generator emits the correct `type: 'socks5'` shape with
+`externalUrl`, `managed`, and `managedOptions` per the connector contract.

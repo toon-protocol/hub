@@ -258,4 +258,151 @@ describe('ConnectorConfigGenerator', () => {
       }
     });
   });
+
+  // ── Hidden-service config (Story 35.5 connector contract) ──
+
+  describe('generate() — hidden service surface', () => {
+    it('passes through hiddenService when transport.mode is ator', () => {
+      const config = configWithNodes(['town']);
+      config.transport.mode = 'ator';
+      config.transport.hiddenService = {
+        dir: '/var/lib/anon/hs',
+        port: 3000,
+      };
+      const generator = new ConnectorConfigGenerator(config);
+      const result = generator.generate(['town']);
+
+      expect(result.transport.hiddenService).toEqual({
+        dir: '/var/lib/anon/hs',
+        port: 3000,
+      });
+    });
+
+    it('passes through externalUrl when set explicitly', () => {
+      const config = configWithNodes(['town']);
+      config.transport.mode = 'ator';
+      config.transport.externalUrl = 'wss://known.anyone/btp';
+      const generator = new ConnectorConfigGenerator(config);
+      const result = generator.generate(['town']);
+
+      expect(result.transport.externalUrl).toBe('wss://known.anyone/btp');
+    });
+  });
+
+  describe('toEnvVars() — hidden service env vars', () => {
+    it('emits TRANSPORT_HIDDEN_SERVICE_DIR + PORT when hiddenService is set', () => {
+      const config = configWithNodes(['town']);
+      config.transport.mode = 'ator';
+      config.transport.hiddenService = {
+        dir: '/var/lib/anon/hs',
+        port: 3000,
+      };
+      const generator = new ConnectorConfigGenerator(config);
+      const runtimeConfig = generator.generate(['town']);
+      const envVars = generator.toEnvVars(runtimeConfig);
+
+      expect(envVars['TRANSPORT_HIDDEN_SERVICE_DIR']).toBe('/var/lib/anon/hs');
+      expect(envVars['TRANSPORT_HIDDEN_SERVICE_PORT']).toBe('3000');
+    });
+
+    it('does not emit hidden-service env vars when hiddenService unset', () => {
+      const config = configWithNodes(['town']);
+      config.transport.mode = 'direct';
+      const generator = new ConnectorConfigGenerator(config);
+      const runtimeConfig = generator.generate(['town']);
+      const envVars = generator.toEnvVars(runtimeConfig);
+
+      expect(envVars['TRANSPORT_HIDDEN_SERVICE_DIR']).toBeUndefined();
+      expect(envVars['TRANSPORT_HIDDEN_SERVICE_PORT']).toBeUndefined();
+    });
+  });
+
+  describe('toYaml() — connector wire-format translation', () => {
+    // Important: the connector's YAML schema uses transport.type (not .mode)
+    // and expects a discriminated union with 'direct' | 'socks5'. The
+    // previous shape (mode: 'ator') was silently ignored by the connector,
+    // which defaulted to direct. These tests pin the post-fix wire format.
+
+    it('emits transport.type=direct for mode=direct', () => {
+      const config = configWithNodes(['town']);
+      config.transport.mode = 'direct';
+      const generator = new ConnectorConfigGenerator(config);
+      const runtimeConfig = generator.generate(['town']);
+      const yaml = generator.toYaml(runtimeConfig);
+
+      expect(yaml).toMatch(/transport:\s*\n\s+type:\s*direct/);
+      expect(yaml).not.toMatch(/socksProxy/);
+    });
+
+    it('emits type=socks5 + externalUrl + managed=false for ator + externalUrl', () => {
+      const config = configWithNodes(['town']);
+      config.transport.mode = 'ator';
+      config.transport.socksProxy = 'socks5h://proxy.ator.io:9050';
+      config.transport.externalUrl = 'wss://operator.example/btp';
+      const generator = new ConnectorConfigGenerator(config);
+      const runtimeConfig = generator.generate(['town']);
+      const yaml = generator.toYaml(runtimeConfig);
+
+      expect(yaml).toMatch(/type:\s*socks5/);
+      expect(yaml).toMatch(/socksProxy:\s*socks5h:\/\/proxy\.ator\.io:9050/);
+      expect(yaml).toMatch(/externalUrl:\s*wss:\/\/operator\.example\/btp/);
+      expect(yaml).toMatch(/managed:\s*false/);
+      expect(yaml).not.toMatch(/managedOptions/);
+    });
+
+    it('emits managed=true + managedOptions + externalUrl=auto for ator + hiddenService', () => {
+      const config = configWithNodes(['town']);
+      config.transport.mode = 'ator';
+      config.transport.socksProxy = 'socks5h://127.0.0.1:9050';
+      config.transport.hiddenService = {
+        dir: '/var/lib/anon/hs',
+        port: 3000,
+      };
+      const generator = new ConnectorConfigGenerator(config);
+      const runtimeConfig = generator.generate(['town']);
+      const yaml = generator.toYaml(runtimeConfig);
+
+      expect(yaml).toMatch(/type:\s*socks5/);
+      expect(yaml).toMatch(/externalUrl:\s*auto/);
+      expect(yaml).toMatch(/managed:\s*true/);
+      expect(yaml).toMatch(/managedOptions:/);
+      expect(yaml).toMatch(/hiddenServiceDir:\s*\/var\/lib\/anon\/hs/);
+      expect(yaml).toMatch(/hiddenServicePort:\s*3000/);
+    });
+
+    it('forwards hiddenService timeouts into managedOptions when set', () => {
+      const config = configWithNodes(['town']);
+      config.transport.mode = 'ator';
+      config.transport.hiddenService = {
+        dir: '/var/lib/anon/hs',
+        port: 3000,
+        startupTimeoutMs: 90000,
+        stopTimeoutMs: 15000,
+      };
+      const generator = new ConnectorConfigGenerator(config);
+      const runtimeConfig = generator.generate(['town']);
+      const yaml = generator.toYaml(runtimeConfig);
+
+      expect(yaml).toMatch(/startupTimeoutMs:\s*90000/);
+      expect(yaml).toMatch(/stopTimeoutMs:\s*15000/);
+    });
+
+    it('honors explicit hiddenService.externalUrl (operator override of "auto")', () => {
+      const config = configWithNodes(['town']);
+      config.transport.mode = 'ator';
+      config.transport.externalUrl = 'wss://forced.anyone/btp';
+      config.transport.hiddenService = {
+        dir: '/var/lib/anon/hs',
+        port: 3000,
+      };
+      const generator = new ConnectorConfigGenerator(config);
+      const runtimeConfig = generator.generate(['town']);
+      const yaml = generator.toYaml(runtimeConfig);
+
+      // managed=true (HS is set) BUT externalUrl is the explicit value, not 'auto'
+      expect(yaml).toMatch(/managed:\s*true/);
+      expect(yaml).toMatch(/externalUrl:\s*wss:\/\/forced\.anyone\/btp/);
+      expect(yaml).not.toMatch(/externalUrl:\s*auto/);
+    });
+  });
 });

@@ -7,6 +7,25 @@ dist/
 # Turbo
 .turbo/
 
+# Akash deploy state — leases (mutable, contains DSEQ + provider) and the
+# ATOR probe's v3 hidden-service keypair. The secret key is sensitive — never
+# commit it. The .anyone hostname is derived from the public key; if that
+# directory is removed, redeploying ator-probe generates a fresh hostname.
+deploy/akash/leases.json
+deploy/akash/denylist.json
+deploy/akash/ator-probe-keys/
+deploy/akash/townhouse-keys/
+
+# Townhouse HS local state (Phase 4 sidecar pattern). The .anyone keypair
+# at infra/townhouse-hs-keys/hs/ contains the secret key — same sensitivity
+# as the deploy/akash/*-keys/ dirs above. Do NOT commit. The connector YAML
+# rendered with the concrete externalUrl is also operator-local state.
+infra/townhouse-hs-keys/
+docker/configs/townhouse-hs-connector.local.yaml
+
+# Vendored external sources cloned by build scripts (e.g. Town-Frontend)
+.cache/
+
 # IDE
 .idea/
 .vscode/

@@ -201,14 +201,16 @@ describe('validateConfig', () => {
     );
   });
 
-  it('accepts config with socksProxy when transport mode is ator', () => {
+  it('accepts config with socksProxy + externalUrl when transport mode is ator', () => {
     const raw = validRaw();
     const transport = raw['transport'] as Record<string, unknown>;
     transport['mode'] = 'ator';
     transport['socksProxy'] = 'socks5://127.0.0.1:9050';
+    transport['externalUrl'] = 'wss://example.anyone/btp';
     const config = validateConfig(raw);
     expect(config.transport.mode).toBe('ator');
     expect(config.transport.socksProxy).toBe('socks5://127.0.0.1:9050');
+    expect(config.transport.externalUrl).toBe('wss://example.anyone/btp');
   });
 
   it('rejects non-string socksProxy', () => {
@@ -218,5 +220,98 @@ describe('validateConfig', () => {
     expect(() => validateConfig(raw)).toThrow(
       'config.transport.socksProxy must be a string'
     );
+  });
+
+  // ── Hidden-service block (Story 35.5 surface) ──
+
+  it('accepts config with hiddenService block when mode is ator', () => {
+    const raw = validRaw();
+    const transport = raw['transport'] as Record<string, unknown>;
+    transport['mode'] = 'ator';
+    transport['hiddenService'] = {
+      dir: '/var/lib/anon/hs',
+      port: 3000,
+    };
+    const config = validateConfig(raw);
+    expect(config.transport.hiddenService).toEqual({
+      dir: '/var/lib/anon/hs',
+      port: 3000,
+    });
+  });
+
+  it('accepts hiddenService with optional timeouts and externalUrl', () => {
+    const raw = validRaw();
+    const transport = raw['transport'] as Record<string, unknown>;
+    transport['mode'] = 'ator';
+    transport['hiddenService'] = {
+      dir: '/var/lib/anon/hs',
+      port: 3000,
+      externalUrl: 'wss://known.anyone/btp',
+      startupTimeoutMs: 90000,
+      stopTimeoutMs: 15000,
+    };
+    const config = validateConfig(raw);
+    expect(config.transport.hiddenService).toEqual({
+      dir: '/var/lib/anon/hs',
+      port: 3000,
+      externalUrl: 'wss://known.anyone/btp',
+      startupTimeoutMs: 90000,
+      stopTimeoutMs: 15000,
+    });
+  });
+
+  it('rejects hiddenService when mode is direct', () => {
+    const raw = validRaw();
+    const transport = raw['transport'] as Record<string, unknown>;
+    transport['mode'] = 'direct';
+    transport['hiddenService'] = {
+      dir: '/var/lib/anon/hs',
+      port: 3000,
+    };
+    expect(() => validateConfig(raw)).toThrow(
+      'config.transport.hiddenService is only valid when config.transport.mode is "ator"'
+    );
+  });
+
+  it('rejects hiddenService with missing dir', () => {
+    const raw = validRaw();
+    const transport = raw['transport'] as Record<string, unknown>;
+    transport['mode'] = 'ator';
+    transport['hiddenService'] = { port: 3000 };
+    expect(() => validateConfig(raw)).toThrow(
+      'config.transport.hiddenService.dir'
+    );
+  });
+
+  it('rejects hiddenService with non-numeric port', () => {
+    const raw = validRaw();
+    const transport = raw['transport'] as Record<string, unknown>;
+    transport['mode'] = 'ator';
+    transport['hiddenService'] = { dir: '/x', port: 'three thousand' };
+    expect(() => validateConfig(raw)).toThrow(
+      'config.transport.hiddenService.port'
+    );
+  });
+
+  it('rejects mode=ator without externalUrl AND without hiddenService', () => {
+    const raw = validRaw();
+    const transport = raw['transport'] as Record<string, unknown>;
+    transport['mode'] = 'ator';
+    transport['socksProxy'] = 'socks5h://127.0.0.1:9050';
+    // no externalUrl, no hiddenService
+    expect(() => validateConfig(raw)).toThrow(
+      'config.transport.mode="ator" requires either config.transport.externalUrl'
+    );
+  });
+
+  it('accepts mode=ator with hiddenService and no externalUrl (auto-resolved)', () => {
+    const raw = validRaw();
+    const transport = raw['transport'] as Record<string, unknown>;
+    transport['mode'] = 'ator';
+    transport['hiddenService'] = { dir: '/var/lib/anon/hs', port: 3000 };
+    // no externalUrl — generator emits 'auto' downstream
+    const config = validateConfig(raw);
+    expect(config.transport.externalUrl).toBeUndefined();
+    expect(config.transport.hiddenService).toBeDefined();
   });
 });
