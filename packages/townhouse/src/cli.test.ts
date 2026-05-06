@@ -397,7 +397,7 @@ describe('CLI', () => {
         expect(config.api.host).toBe('127.0.0.1');
         expect(config.transport.mode).toBe('direct');
         expect(config.logging.level).toBe('info');
-        expect(config.wallet.encrypted_path).toContain('.townhouse');
+        expect(config.wallet.encrypted_path).toBe(join(dir, 'wallet.enc'));
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -593,6 +593,88 @@ describe('CLI', () => {
         expect(output).toContain('250');
         expect(output).toContain('Active peers');
         expect(output).toContain('1/2');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('prints Hidden Services block with both .anyone URLs when ATOR HS configured', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValue(new Error('fetch failed: ECONNREFUSED'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        const cfg = `
+nodes:
+  town:
+    enabled: true
+    feePerEvent: 1000
+  mill:
+    enabled: false
+  dvm:
+    enabled: false
+wallet:
+  encrypted_path: /tmp/wallet.enc
+connector:
+  image: ghcr.io/toon-protocol/connector:3.3.3
+  adminPort: 9401
+transport:
+  mode: ator
+  socksProxy: socks5h://ator-sidecar:9050
+  externalUrl: wss://abc.anyone/btp
+  hiddenService:
+    dir: /var/lib/townhouse/hs/connector
+    port: 3000
+    externalUrl: wss://abc.anyone/btp
+  relayHiddenService:
+    dir: /var/lib/townhouse/hs/relay
+    port: 7100
+    externalUrl: wss://xyz.anyone:7100
+api:
+  port: 0
+  host: 127.0.0.1
+logging:
+  level: info
+`;
+        writeFileSync(configPath, cfg, 'utf-8');
+        await main(['status', '-c', configPath]);
+
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('Hidden Services');
+        expect(output).toContain('Connector (BTP):');
+        expect(output).toContain('wss://abc.anyone/btp');
+        expect(output).toContain('Relay (Nostr):');
+        expect(output).toContain('wss://xyz.anyone:7100');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does NOT print Hidden Services block in direct mode', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValue(new Error('fetch failed: ECONNREFUSED'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['status', '-c', configPath]);
+
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).not.toContain('Hidden Services');
       } finally {
         vi.unstubAllGlobals();
         rmSync(dir, { recursive: true, force: true });

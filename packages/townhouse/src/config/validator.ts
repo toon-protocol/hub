@@ -164,6 +164,39 @@ export function validateConfig(raw: unknown): TownhouseConfig {
       );
     }
   }
+  // relayHiddenService is the second optional HS — when set, the orchestrator
+  // launches a parallel sidecar that forwards inbound .anyone traffic to the
+  // town container's port 7100 so external Nostr clients can read the relay
+  // without routing through ILP/BTP. Reuses HiddenServiceConfig shape.
+  if (transport['relayHiddenService'] !== undefined) {
+    assertObject(
+      transport['relayHiddenService'],
+      'config.transport.relayHiddenService'
+    );
+    const hs = transport['relayHiddenService'] as Record<string, unknown>;
+    assertString(hs['dir'], 'config.transport.relayHiddenService.dir');
+    assertNumber(hs['port'], 'config.transport.relayHiddenService.port');
+    assertPort(hs['port'] as number, 'config.transport.relayHiddenService.port');
+    if (hs['externalUrl'] !== undefined) {
+      assertString(
+        hs['externalUrl'],
+        'config.transport.relayHiddenService.externalUrl'
+      );
+    }
+    if (hs['startupTimeoutMs'] !== undefined) {
+      assertNumber(
+        hs['startupTimeoutMs'],
+        'config.transport.relayHiddenService.startupTimeoutMs'
+      );
+    }
+    if (hs['stopTimeoutMs'] !== undefined) {
+      assertNumber(
+        hs['stopTimeoutMs'],
+        'config.transport.relayHiddenService.stopTimeoutMs'
+      );
+    }
+  }
+
   // mode='ator' requires SOMETHING to advertise: either explicit externalUrl
   // OR hiddenService (which makes externalUrl='auto' implicit). Without one
   // of these, the connector's socks5 transport rejects with "missing
@@ -229,6 +262,17 @@ export function validateConfig(raw: unknown): TownhouseConfig {
       ...(transport['hiddenService'] !== undefined
         ? {
             hiddenService: transport['hiddenService'] as {
+              dir: string;
+              port: number;
+              externalUrl?: string;
+              startupTimeoutMs?: number;
+              stopTimeoutMs?: number;
+            },
+          }
+        : {}),
+      ...(transport['relayHiddenService'] !== undefined
+        ? {
+            relayHiddenService: transport['relayHiddenService'] as {
               dir: string;
               port: number;
               externalUrl?: string;

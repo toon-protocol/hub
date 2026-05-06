@@ -340,6 +340,30 @@ async function handleStatus(
     console.log(`  ${s.name.padEnd(12)} ${s.state}${health}`);
   }
 
+  const connectorHs = config.transport.hiddenService;
+  const relayHs = config.transport.relayHiddenService;
+  if (
+    config.transport.mode === 'ator' ||
+    connectorHs?.externalUrl ||
+    relayHs?.externalUrl ||
+    config.transport.externalUrl
+  ) {
+    console.log('');
+    console.log('Hidden Services:');
+    console.log('----------------');
+    const connectorUrl =
+      connectorHs?.externalUrl ?? config.transport.externalUrl;
+    if (connectorUrl) {
+      console.log(`  Connector (BTP):  ${connectorUrl}`);
+    }
+    if (relayHs?.externalUrl) {
+      console.log(`  Relay (Nostr):    ${relayHs.externalUrl}`);
+    }
+    if (!connectorUrl && !relayHs?.externalUrl) {
+      console.log('  (ator mode set but no externalUrl configured)');
+    }
+  }
+
   // Try to include connector metrics (graceful degradation)
   try {
     const adminClient = new ConnectorAdminClient(
