@@ -826,9 +826,6 @@ importers:
       '@toon-protocol/mill':
         specifier: workspace:^
         version: link:../mill
-      '@toon-protocol/sdk':
-        specifier: workspace:*
-        version: link:../sdk
       dockerode:
         specifier: ^4.0.0
         version: 4.0.10
