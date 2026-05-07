@@ -45,7 +45,9 @@ export function useMillSwapsRecent(options: UseMillSwapsRecentOptions): {
 
   const [data, setData] = useState<MillSwapsRecent | null>(null);
   const [status, setStatus] = useState<MillSwapsStatus>('loading');
-  const pollRef = useRef<() => void>(() => {});
+  const pollRef = useRef<() => void>(() => {
+    /* placeholder until first effect runs */
+  });
 
   useEffect(() => {
     let cancelled = false;

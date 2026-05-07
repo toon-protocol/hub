@@ -162,7 +162,7 @@ function DvmCard({ node, isRestarting, onApplyKindFee }: DvmCardProps) {
   const primaryKindFee =
     rawPrimaryFee != null ? Number(rawPrimaryFee) : feePerJobFallback;
 
-  let averageVolumeBig: bigint = 0n;
+  let averageVolumeBig = 0n;
   if (jobsRecent && jobsRecent.count > 0) {
     try {
       averageVolumeBig = BigInt(jobsRecent.volume) / BigInt(jobsRecent.count);
@@ -386,7 +386,7 @@ export function DvmView() {
       ws.addEventListener('message', (event) => {
         backoffMs = 1_000;
         try {
-          type Msg = { type: string; messages?: { type: string }[] };
+          interface Msg { type: string; messages?: { type: string }[] }
           const msg = JSON.parse(String(event.data)) as Msg;
 
           function handle(m: { type: string }) {
@@ -402,7 +402,9 @@ export function DvmView() {
         } catch { /* ignore malformed */ }
       });
 
-      ws.addEventListener('error', () => {});
+      ws.addEventListener('error', () => {
+        /* errors surface via onclose */
+      });
 
       ws.addEventListener('close', () => {
         if (closed) return;

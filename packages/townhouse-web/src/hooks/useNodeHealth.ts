@@ -35,7 +35,9 @@ export function useNodeHealth<T = Record<string, unknown>>(
 
   const [health, setHealth] = useState<T | null>(null);
   const [status, setStatus] = useState<NodeHealthStatus>('loading');
-  const pollRef = useRef<() => Promise<void>>(async () => {});
+  const pollRef = useRef<() => Promise<void>>(async () => {
+    /* placeholder until first effect runs */
+  });
 
   useEffect(() => {
     let cancelled = false;

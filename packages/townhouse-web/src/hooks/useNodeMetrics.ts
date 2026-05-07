@@ -50,7 +50,9 @@ export function useNodeMetrics(
   });
   const [status, setStatus] = useState<NodeMetricsStatus>('loading');
 
-  const pollRef = useRef<() => void>(() => {});
+  const pollRef = useRef<() => void>(() => {
+    /* placeholder until first effect runs */
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -102,7 +104,9 @@ export function useNodeMetrics(
     return () => {
       cancelled = true;
       clearInterval(timer);
-      pollRef.current = () => {};
+      pollRef.current = () => {
+        /* cleared on unmount */
+      };
     };
   }, [detailUrl, bandwidthUrl, pollIntervalMs]);
 

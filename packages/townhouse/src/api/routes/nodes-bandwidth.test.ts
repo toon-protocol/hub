@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import Fastify, { type FastifyInstance } from 'fastify';
+import type Dockerode from 'dockerode';
 import { registerNodeRoutes } from './nodes.js';
 import type { ApiDeps, BandwidthPayload } from '../types.js';
 import type { DockerOrchestrator } from '../../docker/orchestrator.js';
@@ -167,7 +168,7 @@ describe('DockerOrchestrator.getContainerStats — 5 s cache', () => {
     const { DockerOrchestrator } = await import('../../docker/orchestrator.js');
     const { getDefaultConfig } = await import('../../config/defaults.js');
     const orch = new DockerOrchestrator(
-      mockDocker as unknown as import('dockerode').default,
+      mockDocker as unknown as Dockerode,
       getDefaultConfig()
     );
 

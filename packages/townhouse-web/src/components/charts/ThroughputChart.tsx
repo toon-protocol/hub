@@ -12,7 +12,7 @@ import {
 
 export interface ThroughputChartProps {
   status: 'loading' | 'ready' | 'error' | 'unavailable';
-  buckets: Array<{ ts: number; count: number }>;
+  buckets: { ts: number; count: number }[];
   count: number;
   /** Chart line color from tokens.type.*. */
   color: string;

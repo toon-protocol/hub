@@ -233,7 +233,9 @@ export class ConnectorConfigGenerator {
         transport.hiddenService = {
           dir: hs.dir,
           port: hs.port,
-          ...(hs.externalUrl !== undefined ? { externalUrl: hs.externalUrl } : {}),
+          ...(hs.externalUrl !== undefined
+            ? { externalUrl: hs.externalUrl }
+            : {}),
           ...(hs.startupTimeoutMs !== undefined
             ? { startupTimeoutMs: hs.startupTimeoutMs }
             : {}),

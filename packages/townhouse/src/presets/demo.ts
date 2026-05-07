@@ -103,15 +103,25 @@ export function resolveChainEndpoints(
     return { source: 'local-fallback', evm: localEvm, solana: localSol };
   }
 
-  const evmUrl = typeof parsed.anvil?.url === 'string' ? parsed.anvil.url : undefined;
-  const evmWs = typeof parsed.anvil?.ws_url === 'string' ? parsed.anvil.ws_url : undefined;
-  const solUrl = typeof parsed.solana?.url === 'string' ? parsed.solana.url : undefined;
-  const solWs = typeof parsed.solana?.ws_url === 'string' ? parsed.solana.ws_url : undefined;
+  const evmUrl =
+    typeof parsed.anvil?.url === 'string' ? parsed.anvil.url : undefined;
+  const evmWs =
+    typeof parsed.anvil?.ws_url === 'string' ? parsed.anvil.ws_url : undefined;
+  const solUrl =
+    typeof parsed.solana?.url === 'string' ? parsed.solana.url : undefined;
+  const solWs =
+    typeof parsed.solana?.ws_url === 'string'
+      ? parsed.solana.ws_url
+      : undefined;
 
   return {
     source: leasesPath,
-    evm: evmUrl ? { rpcUrl: evmUrl, ...(evmWs ? { wsUrl: evmWs } : {}) } : localEvm,
-    solana: solUrl ? { rpcUrl: solUrl, ...(solWs ? { wsUrl: solWs } : {}) } : localSol,
+    evm: evmUrl
+      ? { rpcUrl: evmUrl, ...(evmWs ? { wsUrl: evmWs } : {}) }
+      : localEvm,
+    solana: solUrl
+      ? { rpcUrl: solUrl, ...(solWs ? { wsUrl: solWs } : {}) }
+      : localSol,
   };
 }
 
@@ -174,7 +184,9 @@ export function buildDemoConfig(
           },
           solana: {
             rpcUrl: endpoints.solana.rpcUrl,
-            ...(endpoints.solana.wsUrl ? { wsUrl: endpoints.solana.wsUrl } : {}),
+            ...(endpoints.solana.wsUrl
+              ? { wsUrl: endpoints.solana.wsUrl }
+              : {}),
           },
         },
         pairs: ['EVM<->SOL'],

@@ -86,7 +86,9 @@ let cachedAuthority: SolanaKeypair | null = null;
 function loadFaucetAuthority(): SolanaKeypair | null {
   if (cachedAuthority) return cachedAuthority;
   try {
-    const arr = JSON.parse(readFileSync(DEFAULT_AUTHORITY_PATH(), 'utf8')) as number[];
+    const arr = JSON.parse(
+      readFileSync(DEFAULT_AUTHORITY_PATH(), 'utf8')
+    ) as number[];
     cachedAuthority = keypairFromJsonArray(arr);
     if (cachedAuthority.pubkeyBase58 !== SOLANA_FAUCET_AUTHORITY) {
       // Defensive: fail loud rather than silently sign with the wrong key.
@@ -95,7 +97,7 @@ function loadFaucetAuthority(): SolanaKeypair | null {
       );
     }
     return cachedAuthority;
-  } catch (err) {
+  } catch {
     // Missing keypair = USDC drip disabled; SOL drip still works.
     return null;
   }
@@ -151,7 +153,10 @@ async function rpc<T = unknown>(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   });
-  const json = (await res.json()) as { result?: T; error?: { message: string } };
+  const json = (await res.json()) as {
+    result?: T;
+    error?: { message: string };
+  };
   if (json.error) {
     throw new Error(`${method} failed: ${json.error.message}`);
   }
@@ -250,57 +255,55 @@ export function registerFaucetRoutes(
   app: FastifyInstance,
   _deps: ApiDeps
 ): void {
-  app.post<{ Body: FaucetRequestBody; Reply: FaucetResponse | { error: string } }>(
-    '/faucet',
-    async (req, reply) => {
-      const body = req.body ?? ({} as FaucetRequestBody);
+  app.post<{
+    Body: FaucetRequestBody;
+    Reply: FaucetResponse | { error: string };
+  }>('/faucet', async (req, reply) => {
+    const body = req.body ?? ({} as FaucetRequestBody);
 
-      // Validate chain.
-      if (body.chain !== 'evm' && body.chain !== 'solana') {
-        return reply.code(400).send({
-          error: "chain must be 'evm' or 'solana'",
-        });
-      }
-
-      // Validate recipient against per-chain regex.
-      const recipient = (body.recipient ?? '').trim();
-      const re = body.chain === 'evm' ? EVM_ADDRESS_RE : SOLANA_PUBKEY_RE;
-      if (!re.test(recipient)) {
-        return reply.code(400).send({
-          error:
-            body.chain === 'evm'
-              ? 'recipient must be a 0x-prefixed 40-hex EVM address'
-              : 'recipient must be a base58-encoded Solana pubkey',
-        });
-      }
-
-      // Defaults: 100 USDC drip for both chains, plus a fixed native gas
-      // top-up (1 ETH for EVM, 1 SOL for Solana). `amount` always means
-      // USDC — the dashboard's UI label mirrors this for both chains.
-      const amount =
-        typeof body.amount === 'number' && body.amount > 0
-          ? body.amount
-          : 100;
-
-      const leases = loadLeases(DEFAULT_LEASES_PATH());
-
-      try {
-        const tx =
-          body.chain === 'evm'
-            ? await dripEvm(recipient, amount, evmRpcUrl(leases))
-            : await dripSol(recipient, amount, solRpcUrl(leases));
-
-        return reply.code(200).send({
-          tx,
-          explorerUrl: buildExplorerUrl(body.chain, tx, leases),
-          recipient,
-          chain: body.chain,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        req.log.error({ err: message }, '[faucet] drip failed');
-        return reply.code(502).send({ error: message });
-      }
+    // Validate chain.
+    if (body.chain !== 'evm' && body.chain !== 'solana') {
+      return reply.code(400).send({
+        error: "chain must be 'evm' or 'solana'",
+      });
     }
-  );
+
+    // Validate recipient against per-chain regex.
+    const recipient = (body.recipient ?? '').trim();
+    const re = body.chain === 'evm' ? EVM_ADDRESS_RE : SOLANA_PUBKEY_RE;
+    if (!re.test(recipient)) {
+      return reply.code(400).send({
+        error:
+          body.chain === 'evm'
+            ? 'recipient must be a 0x-prefixed 40-hex EVM address'
+            : 'recipient must be a base58-encoded Solana pubkey',
+      });
+    }
+
+    // Defaults: 100 USDC drip for both chains, plus a fixed native gas
+    // top-up (1 ETH for EVM, 1 SOL for Solana). `amount` always means
+    // USDC — the dashboard's UI label mirrors this for both chains.
+    const amount =
+      typeof body.amount === 'number' && body.amount > 0 ? body.amount : 100;
+
+    const leases = loadLeases(DEFAULT_LEASES_PATH());
+
+    try {
+      const tx =
+        body.chain === 'evm'
+          ? await dripEvm(recipient, amount, evmRpcUrl(leases))
+          : await dripSol(recipient, amount, solRpcUrl(leases));
+
+      return reply.code(200).send({
+        tx,
+        explorerUrl: buildExplorerUrl(body.chain, tx, leases),
+        recipient,
+        chain: body.chain,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      req.log.error({ err: message }, '[faucet] drip failed');
+      return reply.code(502).send({ error: message });
+    }
+  });
 }

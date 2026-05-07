@@ -40,12 +40,10 @@ export function registerWalletRevealRoutes(
       if (code === 'ENOENT' || code === 'ENOTDIR') {
         return reply.status(503).send({ error: 'wallet_not_initialized' });
       }
-      return reply
-        .status(500)
-        .send({
-          error: 'wallet_corrupted',
-          message: 'Failed to read wallet file',
-        });
+      return reply.status(500).send({
+        error: 'wallet_corrupted',
+        message: 'Failed to read wallet file',
+      });
     }
 
     if (!loaded) {
@@ -57,20 +55,16 @@ export function registerWalletRevealRoutes(
       wallet = loaded.wallet;
       // Validate JSON structure: all required fields present
       if (!wallet.salt || !wallet.iv || !wallet.ciphertext || !wallet.tag) {
-        return reply
-          .status(500)
-          .send({
-            error: 'wallet_corrupted',
-            message: 'Wallet file is missing required fields',
-          });
+        return reply.status(500).send({
+          error: 'wallet_corrupted',
+          message: 'Wallet file is missing required fields',
+        });
       }
     } catch {
-      return reply
-        .status(500)
-        .send({
-          error: 'wallet_corrupted',
-          message: 'Wallet file JSON is invalid',
-        });
+      return reply.status(500).send({
+        error: 'wallet_corrupted',
+        message: 'Wallet file JSON is invalid',
+      });
     }
 
     let mnemonic: string;

@@ -32,7 +32,7 @@ class MockWebSocket {
   static CLOSED = 3;
   url: string;
   readyState = 0;
-  listeners = new Map<string, Array<(ev: { data?: unknown }) => void>>();
+  listeners = new Map<string, ((ev: { data?: unknown }) => void)[]>();
   closed = false;
   constructor(url: string) {
     this.url = url;

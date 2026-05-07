@@ -16,11 +16,9 @@ vi.mock('dockerode', () => ({
     createContainer() {
       return Promise.resolve({
         start: vi.fn(),
-        inspect: vi
-          .fn()
-          .mockResolvedValue({
-            State: { Health: { Status: 'healthy' }, Running: true },
-          }),
+        inspect: vi.fn().mockResolvedValue({
+          State: { Health: { Status: 'healthy' }, Running: true },
+        }),
       });
     }
     getContainer() {
@@ -28,11 +26,9 @@ vi.mock('dockerode', () => ({
         start: vi.fn(),
         stop: vi.fn(),
         remove: vi.fn(),
-        inspect: vi
-          .fn()
-          .mockResolvedValue({
-            State: { Health: { Status: 'healthy' }, Running: true },
-          }),
+        inspect: vi.fn().mockResolvedValue({
+          State: { Health: { Status: 'healthy' }, Running: true },
+        }),
       };
     }
     listContainers() {

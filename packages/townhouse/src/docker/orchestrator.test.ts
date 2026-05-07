@@ -908,7 +908,9 @@ describe('DockerOrchestrator', () => {
       );
       expect(townCall).toBeDefined();
       const townEnv: string[] = townCall?.[0]?.Env ?? [];
-      expect(townEnv.some((e) => e.startsWith('TOON_EXTERNAL_RELAY_URL='))).toBe(false);
+      expect(
+        townEnv.some((e) => e.startsWith('TOON_EXTERNAL_RELAY_URL='))
+      ).toBe(false);
     });
 
     it('creates relay ator sidecar with correct env when relayHiddenService is set', async () => {

@@ -51,8 +51,12 @@ describe('buildDemoConfig', () => {
 
   it('falls back to local devnet URLs when leases.json is absent', () => {
     const cfg = buildDemoConfig({ walletPath: '/tmp/x.enc', leasesPath: null });
-    expect(cfg.nodes.mill.chains?.evm?.rpcUrl).toBe(LOCAL_DEVNET_FALLBACK.anvilUrl);
-    expect(cfg.nodes.mill.chains?.solana?.rpcUrl).toBe(LOCAL_DEVNET_FALLBACK.solanaUrl);
+    expect(cfg.nodes.mill.chains?.evm?.rpcUrl).toBe(
+      LOCAL_DEVNET_FALLBACK.anvilUrl
+    );
+    expect(cfg.nodes.mill.chains?.solana?.rpcUrl).toBe(
+      LOCAL_DEVNET_FALLBACK.solanaUrl
+    );
     expect(cfg.preset?.chainEndpointSource).toBe('local-fallback');
   });
 
@@ -62,16 +66,31 @@ describe('buildDemoConfig', () => {
     writeFileSync(
       leasesFile,
       JSON.stringify({
-        anvil: { url: 'http://anvil.akash.example:32100', ws_url: 'ws://anvil.akash.example:32101' },
-        solana: { url: 'http://sol.akash.example:32200', ws_url: 'ws://sol.akash.example:32201' },
+        anvil: {
+          url: 'http://anvil.akash.example:32100',
+          ws_url: 'ws://anvil.akash.example:32101',
+        },
+        solana: {
+          url: 'http://sol.akash.example:32200',
+          ws_url: 'ws://sol.akash.example:32201',
+        },
       }),
       'utf-8'
     );
     try {
-      const cfg = buildDemoConfig({ walletPath: '/tmp/x.enc', leasesPath: leasesFile });
-      expect(cfg.nodes.mill.chains?.evm?.rpcUrl).toBe('http://anvil.akash.example:32100');
-      expect(cfg.nodes.mill.chains?.evm?.wsUrl).toBe('ws://anvil.akash.example:32101');
-      expect(cfg.nodes.mill.chains?.solana?.rpcUrl).toBe('http://sol.akash.example:32200');
+      const cfg = buildDemoConfig({
+        walletPath: '/tmp/x.enc',
+        leasesPath: leasesFile,
+      });
+      expect(cfg.nodes.mill.chains?.evm?.rpcUrl).toBe(
+        'http://anvil.akash.example:32100'
+      );
+      expect(cfg.nodes.mill.chains?.evm?.wsUrl).toBe(
+        'ws://anvil.akash.example:32101'
+      );
+      expect(cfg.nodes.mill.chains?.solana?.rpcUrl).toBe(
+        'http://sol.akash.example:32200'
+      );
       expect(cfg.preset?.chainEndpointSource).toBe(leasesFile);
     } finally {
       rmSync(dir, { recursive: true, force: true });

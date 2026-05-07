@@ -63,12 +63,10 @@ export function registerWalletWithdrawRoutes(
 
     // Validate nodeType
     if (!body.nodeType || !NODE_TYPES.has(body.nodeType)) {
-      return reply
-        .status(400)
-        .send({
-          error: 'invalid_node_type',
-          message: 'nodeType must be town, mill, or dvm',
-        });
+      return reply.status(400).send({
+        error: 'invalid_node_type',
+        message: 'nodeType must be town, mill, or dvm',
+      });
     }
 
     // v1: EVM-only; Solana/Mina → 501
@@ -80,22 +78,18 @@ export function registerWalletWithdrawRoutes(
       });
     }
     if (body.chainFamily !== 'evm') {
-      return reply
-        .status(400)
-        .send({
-          error: 'invalid_chain_family',
-          message: 'chainFamily must be evm, solana, or mina',
-        });
+      return reply.status(400).send({
+        error: 'invalid_chain_family',
+        message: 'chainFamily must be evm, solana, or mina',
+      });
     }
 
     // Validate token
     if (body.token !== 'native' && body.token !== 'USDC') {
-      return reply
-        .status(400)
-        .send({
-          error: 'invalid_token',
-          message: 'token must be native or USDC',
-        });
+      return reply.status(400).send({
+        error: 'invalid_token',
+        message: 'token must be native or USDC',
+      });
     }
 
     // Validate recipient — regex + viem isAddress for EIP-55
@@ -106,12 +100,10 @@ export function registerWalletWithdrawRoutes(
         .send({ error: 'invalid_recipient', code: 'invalid_recipient_format' });
     }
     if (!isAddress(recipient)) {
-      return reply
-        .status(400)
-        .send({
-          error: 'invalid_recipient',
-          code: 'invalid_recipient_checksum',
-        });
+      return reply.status(400).send({
+        error: 'invalid_recipient',
+        code: 'invalid_recipient_checksum',
+      });
     }
 
     // Validate amount
@@ -120,12 +112,10 @@ export function registerWalletWithdrawRoutes(
       amountBig = BigInt(body.amount ?? '');
       if (amountBig <= 0n) throw new Error('non-positive');
     } catch {
-      return reply
-        .status(400)
-        .send({
-          error: 'invalid_amount',
-          message: 'amount must be a positive integer string (raw units)',
-        });
+      return reply.status(400).send({
+        error: 'invalid_amount',
+        message: 'amount must be a positive integer string (raw units)',
+      });
     }
 
     const anvil =
@@ -146,12 +136,17 @@ export function registerWalletWithdrawRoutes(
 
     // USDC config is a server-side requirement, not user input — 503 not 400.
     if (body.token === 'USDC' && !usdcAddress) {
-      return reply
-        .status(503)
-        .send({
-          error: 'usdc_address_not_configured',
-          message: 'TOON_USDC_ADDRESS not set on server',
-        });
+      return reply.status(503).send({
+        error: 'usdc_address_not_configured',
+        message: 'TOON_USDC_ADDRESS not set on server',
+      });
+    }
+    // After the guard above, USDC requests have a valid usdcAddress.
+    function requireUsdc(): `0x${string}` {
+      if (!usdcAddress) {
+        throw new Error('usdcAddress missing after guard');
+      }
+      return usdcAddress;
     }
 
     // Balance check + gas-aware native cap.
@@ -163,16 +158,14 @@ export function registerWalletWithdrawRoutes(
       } else {
         // USDC — gas is paid in native ETH, not the USDC balance.
         onChainBalance = BigInt(
-          await getErc20Balance(anvil, usdcAddress!, evmAddress)
+          await getErc20Balance(anvil, requireUsdc(), evmAddress)
         );
       }
       if (amountBig > onChainBalance) {
-        return reply
-          .status(400)
-          .send({
-            error: 'insufficient_balance',
-            code: 'insufficient_balance',
-          });
+        return reply.status(400).send({
+          error: 'insufficient_balance',
+          code: 'insufficient_balance',
+        });
       }
       // Native-only gas headroom check: a "Max" withdraw passes the raw
       // balance check then fails at broadcast with "insufficient funds for
@@ -222,7 +215,7 @@ export function registerWalletWithdrawRoutes(
             : await estimateUsdcTransferGas(
                 anvil,
                 evmAddress,
-                usdcAddress!,
+                requireUsdc(),
                 recipient as `0x${string}`,
                 amountBig
               );
@@ -256,7 +249,7 @@ export function registerWalletWithdrawRoutes(
       } else {
         const result = await signAndBroadcastUsdcTransfer(
           anvil,
-          usdcAddress!,
+          requireUsdc(),
           nodeKeys.evmPrivateKey,
           recipient as `0x${string}`,
           amountBig
@@ -285,12 +278,10 @@ export function registerWalletWithdrawRoutes(
       const { txHash } = request.params;
 
       if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
-        return reply
-          .status(400)
-          .send({
-            error: 'invalid_tx_hash',
-            message: 'txHash must be a 0x-prefixed 32-byte hex string',
-          });
+        return reply.status(400).send({
+          error: 'invalid_tx_hash',
+          message: 'txHash must be a 0x-prefixed 32-byte hex string',
+        });
       }
 
       const anvil =

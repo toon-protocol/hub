@@ -109,23 +109,19 @@ export function registerWizardRoutes(
   // POST /wizard/init — validate, write wallet + config, fire async launch
   app.post('/wizard/init', async (request, reply) => {
     if (state.mode === 'normal') {
-      return reply
-        .status(409)
-        .send({
-          code: 'wizard_already_completed',
-          message: 'Setup is already complete.',
-        });
+      return reply.status(409).send({
+        code: 'wizard_already_completed',
+        message: 'Setup is already complete.',
+      });
     }
 
     // Concurrent-init guard: serialize against double-clicks and parallel POSTs.
     // The `wallet.enc` write below also uses O_EXCL ('wx') as a TOCTOU backstop.
     if (state.initInFlight) {
-      return reply
-        .status(409)
-        .send({
-          code: 'init_in_flight',
-          message: 'A setup is already in progress.',
-        });
+      return reply.status(409).send({
+        code: 'init_in_flight',
+        message: 'A setup is already in progress.',
+      });
     }
     state.initInFlight = true;
 
@@ -145,39 +141,31 @@ export function registerWizardRoutes(
         password.length === 0 ||
         password.length > 256
       ) {
-        return reply
-          .status(400)
-          .send({
-            code: 'password_invalid',
-            message: 'password must be 1–256 characters.',
-          });
+        return reply.status(400).send({
+          code: 'password_invalid',
+          message: 'password must be 1–256 characters.',
+        });
       }
       if (password !== password.trim()) {
-        return reply
-          .status(400)
-          .send({
-            code: 'password_invalid',
-            message: 'password cannot have leading or trailing whitespace.',
-          });
+        return reply.status(400).send({
+          code: 'password_invalid',
+          message: 'password cannot have leading or trailing whitespace.',
+        });
       }
       if (password !== body.password_confirm) {
-        return reply
-          .status(400)
-          .send({
-            code: 'password_mismatch',
-            message: 'Passwords do not match.',
-          });
+        return reply.status(400).send({
+          code: 'password_mismatch',
+          message: 'Passwords do not match.',
+        });
       }
 
       // Validate mnemonic_mode
       const mnemonicMode = body.mnemonic_mode;
       if (mnemonicMode !== 'generate' && mnemonicMode !== 'import') {
-        return reply
-          .status(400)
-          .send({
-            code: 'mnemonic_mode_invalid',
-            message: 'mnemonic_mode must be "generate" or "import".',
-          });
+        return reply.status(400).send({
+          code: 'mnemonic_mode_invalid',
+          message: 'mnemonic_mode must be "generate" or "import".',
+        });
       }
 
       // Validate mnemonic (both modes require a valid phrase — server validates regardless of source)
@@ -192,12 +180,10 @@ export function registerWizardRoutes(
           .send({ code: 'mnemonic_invalid', message: 'mnemonic is required.' });
       }
       if (!validateMnemonic(mnemonic.trim(), wordlist)) {
-        return reply
-          .status(400)
-          .send({
-            code: 'mnemonic_invalid',
-            message: 'Invalid BIP-39 mnemonic.',
-          });
+        return reply.status(400).send({
+          code: 'mnemonic_invalid',
+          message: 'Invalid BIP-39 mnemonic.',
+        });
       }
       const cleanMnemonic = mnemonic.trim();
 
@@ -220,12 +206,10 @@ export function registerWizardRoutes(
       const atLeastOne =
         nodes.town?.enabled || nodes.mill?.enabled || nodes.dvm?.enabled;
       if (!atLeastOne) {
-        return reply
-          .status(400)
-          .send({
-            code: 'no_nodes_selected',
-            message: 'At least one node must be enabled.',
-          });
+        return reply.status(400).send({
+          code: 'no_nodes_selected',
+          message: 'At least one node must be enabled.',
+        });
       }
 
       // Validate fee ranges
@@ -235,12 +219,10 @@ export function registerWizardRoutes(
           nodes.town.feePerEvent < 0 ||
           nodes.town.feePerEvent > 1000
         ) {
-          return reply
-            .status(400)
-            .send({
-              code: 'fee_out_of_range',
-              message: 'nodes.town.feePerEvent must be 0–1000.',
-            });
+          return reply.status(400).send({
+            code: 'fee_out_of_range',
+            message: 'nodes.town.feePerEvent must be 0–1000.',
+          });
         }
       }
       if (nodes.mill?.enabled && nodes.mill.feeBasisPoints !== undefined) {
@@ -249,12 +231,10 @@ export function registerWizardRoutes(
           nodes.mill.feeBasisPoints < 0 ||
           nodes.mill.feeBasisPoints > 100
         ) {
-          return reply
-            .status(400)
-            .send({
-              code: 'fee_out_of_range',
-              message: 'nodes.mill.feeBasisPoints must be 0–100.',
-            });
+          return reply.status(400).send({
+            code: 'fee_out_of_range',
+            message: 'nodes.mill.feeBasisPoints must be 0–100.',
+          });
         }
       }
       if (nodes.dvm?.enabled && nodes.dvm.feePerJob !== undefined) {
@@ -263,12 +243,10 @@ export function registerWizardRoutes(
           nodes.dvm.feePerJob < 0 ||
           nodes.dvm.feePerJob > 100000
         ) {
-          return reply
-            .status(400)
-            .send({
-              code: 'fee_out_of_range',
-              message: 'nodes.dvm.feePerJob must be 0–100000.',
-            });
+          return reply.status(400).send({
+            code: 'fee_out_of_range',
+            message: 'nodes.dvm.feePerJob must be 0–100000.',
+          });
         }
       }
 
@@ -278,30 +256,24 @@ export function registerWizardRoutes(
         !transport ||
         (transport.mode !== 'direct' && transport.mode !== 'ator')
       ) {
-        return reply
-          .status(400)
-          .send({
-            code: 'transport_invalid',
-            message: 'transport.mode must be "direct" or "ator".',
-          });
+        return reply.status(400).send({
+          code: 'transport_invalid',
+          message: 'transport.mode must be "direct" or "ator".',
+        });
       }
 
       // Conflict checks — TOCTOU-resilient: the wallet.enc write below uses O_EXCL ('wx').
       if (existsSync(deps.walletPath)) {
-        return reply
-          .status(409)
-          .send({
-            code: 'wallet_already_exists',
-            message: `A wallet already exists at ${deps.walletPath}. Delete it first.`,
-          });
+        return reply.status(409).send({
+          code: 'wallet_already_exists',
+          message: `A wallet already exists at ${deps.walletPath}. Delete it first.`,
+        });
       }
       if (existsSync(deps.configPath)) {
-        return reply
-          .status(409)
-          .send({
-            code: 'config_already_exists',
-            message: `A config already exists at ${deps.configPath}. Delete it first.`,
-          });
+        return reply.status(409).send({
+          code: 'config_already_exists',
+          message: `A config already exists at ${deps.configPath}. Delete it first.`,
+        });
       }
 
       // Create + save wallet. saveWallet writes with mode 0o600 already.

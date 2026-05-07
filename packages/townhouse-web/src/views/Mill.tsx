@@ -34,7 +34,7 @@ interface MillHealthShape {
   inventory?: Record<string, string>;
   inventoryAvailable?: Record<string, string>;
   /** Chain *family* identifiers per `MillChainKind` ('evm' | 'mina' | 'solana'). */
-  chains?: Array<'evm' | 'mina' | 'solana'>;
+  chains?: ('evm' | 'mina' | 'solana')[];
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -464,7 +464,7 @@ export function MillView() {
       ws.addEventListener('message', (event) => {
         backoffMs = 1_000;
         try {
-          type Msg = { type: string; messages?: { type: string }[] };
+          interface Msg { type: string; messages?: { type: string }[] }
           const msg = JSON.parse(String(event.data)) as Msg;
 
           function handle(m: { type: string }) {
@@ -480,7 +480,9 @@ export function MillView() {
         } catch { /* ignore malformed */ }
       });
 
-      ws.addEventListener('error', () => {});
+      ws.addEventListener('error', () => {
+        /* errors surface via onclose */
+      });
 
       ws.addEventListener('close', () => {
         if (closed) return;

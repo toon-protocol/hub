@@ -26,7 +26,9 @@ export function useWalletBalances(
   const [entries, setEntries] = useState<WalletBalanceEntry[]>([]);
   const [ts, setTs] = useState<number | null>(null);
   const [status, setStatus] = useState<WalletBalancesStatus>('loading');
-  const pollRef = useRef<() => Promise<void>>(async () => {});
+  const pollRef = useRef<() => Promise<void>>(async () => {
+    /* placeholder until first effect runs */
+  });
 
   useEffect(() => {
     setEntries([]);

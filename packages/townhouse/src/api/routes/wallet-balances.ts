@@ -338,7 +338,11 @@ export function registerWalletBalancesRoutes(
         return r.value.entry;
       }
       // Rejection branch: capture the original task identity rather than a fake stub.
-      const { nodeType, family, token, address, scale } = tasks[idx]!.identity;
+      const task = tasks[idx];
+      if (!task) {
+        throw new Error(`task missing for index ${idx}`);
+      }
+      const { nodeType, family, token, address, scale } = task.identity;
       const reason =
         r.reason instanceof Error ? r.reason.message : 'internal_error';
       return unavailable(nodeType, family, token, address, scale, reason);

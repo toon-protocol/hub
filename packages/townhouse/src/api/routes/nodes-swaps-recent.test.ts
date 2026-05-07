@@ -12,9 +12,10 @@ import type { ConnectorAdminClient } from '../../connector/admin-client.js';
 import { getDefaultConfig } from '../../config/defaults.js';
 
 class MockOrchestrator {
-  private statusEntries: Array<{ name: string; type: string; state: string }> =
-    [{ name: 'mill', type: 'mill', state: 'running' }];
-  setStatus(entries: Array<{ name: string; type: string; state: string }>) {
+  private statusEntries: { name: string; type: string; state: string }[] = [
+    { name: 'mill', type: 'mill', state: 'running' },
+  ];
+  setStatus(entries: { name: string; type: string; state: string }[]) {
     this.statusEntries = entries;
   }
   async status() {
@@ -51,19 +52,19 @@ class MockWalletManager {
 }
 
 class MockConnectorAdmin {
-  private packets: Array<{
+  private packets: {
     ilpAddressFrom: string;
     ilpAddressTo: string;
     amount: string;
     ts: number;
-  }> = [];
+  }[] = [];
   private fail = false;
   private failWithCode: string | null = null;
-  private peers: Array<{
+  private peers: {
     id: string;
     ilpAddresses: string[];
     connected: boolean;
-  }> = [{ id: 'mill', ilpAddresses: ['test.mill'], connected: true }];
+  }[] = [{ id: 'mill', ilpAddresses: ['test.mill'], connected: true }];
 
   setPackets(packets: typeof this.packets) {
     this.packets = packets;

@@ -10,7 +10,7 @@ import { colors } from '@/theme/tokens';
 // in particular the `color` prop wired to the mill accent token. Without
 // this, JSDOM + Recharts ResponsiveContainer make the rendered <Line>'s
 // stroke attribute unobservable.
-const throughputChartProps: Array<Record<string, unknown>> = [];
+const throughputChartProps: Record<string, unknown>[] = [];
 vi.mock('@/components/charts/ThroughputChart', () => ({
   ThroughputChart: (props: Record<string, unknown>) => {
     throughputChartProps.push(props);
@@ -78,7 +78,7 @@ const DEPOSIT_ADDRESSES = { chains: [{ family: 'evm', address: '0x1234' }] };
 
 interface FetchOverrides {
   health?: typeof MILL_HEALTH | (() => typeof MILL_HEALTH);
-  nodes?: Array<typeof MILL_NODE>;
+  nodes?: typeof MILL_NODE[];
 }
 
 function setupFetch(overrides: FetchOverrides = {}) {

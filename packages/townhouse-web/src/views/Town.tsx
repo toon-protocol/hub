@@ -446,7 +446,7 @@ export function TownView() {
       ws.addEventListener('message', (event) => {
         backoffMs = 1_000;
         try {
-          type Msg = { type: string; messages?: { type: string }[] };
+          interface Msg { type: string; messages?: { type: string }[] }
           const msg = JSON.parse(String(event.data)) as Msg;
 
           function handle(m: { type: string }) {

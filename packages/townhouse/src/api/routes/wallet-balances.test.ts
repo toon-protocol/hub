@@ -25,6 +25,7 @@ class MockOrchestrator {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class
 class MockConnector {}
 
 function buildDeps(wallet: WalletManager): ApiDeps {
@@ -177,11 +178,9 @@ describe('GET /api/wallet/balances', () => {
     await wallet.fromMnemonic(DEV_MNEMONIC);
     vi.stubEnv('TOON_USDC_ADDRESS', '');
 
-    let callCount = 0;
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation(() => {
-        callCount++;
         return Promise.resolve({
           ok: true,
           json: async () => ({ result: '0x1' }),

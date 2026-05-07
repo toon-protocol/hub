@@ -106,13 +106,16 @@ async function handleInit(
   // the init flow (wallet generation, etc.) is unaffected.
   let configToWrite;
   if (preset === 'demo') {
-    const { buildDemoConfig, DEMO_DETERMINISTIC_PASSWORD } = await import('./presets/demo.js');
+    const { buildDemoConfig, DEMO_DETERMINISTIC_PASSWORD } =
+      await import('./presets/demo.js');
     configToWrite = buildDemoConfig({ walletPath: join(dir, 'wallet.enc') });
     // AC-D2-6: --yes without --password under --preset=demo gets the
     // deterministic demo password. Documented as DEMO ONLY.
     if (yes && !password) {
       password = DEMO_DETERMINISTIC_PASSWORD;
-      console.log('[demo preset] Using deterministic demo password (insecure — demo only).');
+      console.log(
+        '[demo preset] Using deterministic demo password (insecure — demo only).'
+      );
     }
   } else {
     configToWrite = getDefaultConfig();

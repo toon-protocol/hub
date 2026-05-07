@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import { useNodeStatusStream } from './useNodeStatusStream';
 
 class MockWebSocket {
@@ -9,7 +9,7 @@ class MockWebSocket {
 
   url: string;
   readyState = 0;
-  listeners = new Map<string, Array<(ev: { data?: unknown }) => void>>();
+  listeners = new Map<string, ((ev: { data?: unknown }) => void)[]>();
   closed = false;
 
   constructor(url: string) {

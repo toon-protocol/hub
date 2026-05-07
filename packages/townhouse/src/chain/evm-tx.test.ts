@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type * as ViemModule from 'viem';
 import {
   signAndBroadcastEthTransfer,
   signAndBroadcastUsdcTransfer,
@@ -10,7 +11,7 @@ const HASH = ('0x' + 'ab'.repeat(32)) as `0x${string}`;
 const CHAIN_ID = 31337;
 
 vi.mock('viem', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('viem')>();
+  const actual = await importOriginal<typeof ViemModule>();
   return {
     ...actual,
     createWalletClient: vi.fn(() => ({

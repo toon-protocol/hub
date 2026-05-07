@@ -123,10 +123,7 @@ export class DockerOrchestrator extends EventEmitter {
     // Optional: bring up the relay-side ator sidecar after town is started.
     // It forwards inbound HS traffic to the town container's relay WS port,
     // so it must be created after the town container exists in DNS.
-    if (
-      profiles.includes('town') &&
-      this.config.transport.relayHiddenService
-    ) {
+    if (profiles.includes('town') && this.config.transport.relayHiddenService) {
       await this.startRelayAtorSidecar();
     }
   }
@@ -253,7 +250,7 @@ export class DockerOrchestrator extends EventEmitter {
       const container = this.docker.getContainer(containerName);
       const info = await container.inspect();
       const portBindings = info.HostConfig?.PortBindings as
-        | Record<string, Array<{ HostIp?: string; HostPort?: string }> | null>
+        | Record<string, { HostIp?: string; HostPort?: string }[] | null>
         | undefined;
       const binding = portBindings?.[`${TOWN_RELAY_PORT}/tcp`]?.[0];
       if (binding?.HostPort) {
@@ -297,7 +294,7 @@ export class DockerOrchestrator extends EventEmitter {
       const container = this.docker.getContainer(containerName);
       const info = await container.inspect();
       const portBindings = info.HostConfig?.PortBindings as
-        | Record<string, Array<{ HostIp?: string; HostPort?: string }> | null>
+        | Record<string, { HostIp?: string; HostPort?: string }[] | null>
         | undefined;
       const binding = portBindings?.[`${port}/tcp`]?.[0];
       if (binding?.HostPort) {
@@ -394,7 +391,6 @@ export class DockerOrchestrator extends EventEmitter {
   > {
     const containers = await this.docker.listContainers({ all: true });
     const nodeTypes = ['town', 'mill', 'dvm'] as const;
-    type NodeType = (typeof nodeTypes)[number];
     const allTypes = ['connector', ...nodeTypes] as const;
 
     // Collect all containers that belong to this townhouse instance
@@ -482,10 +478,7 @@ export class DockerOrchestrator extends EventEmitter {
     // Pull the relay ator sidecar when the operator opted in. Built locally
     // by docker/townhouse-ator-sidecar — pull may 404, which is fine; the
     // operator must have built it before `townhouse up` (see README).
-    if (
-      profiles.includes('town') &&
-      this.config.transport.relayHiddenService
-    ) {
+    if (profiles.includes('town') && this.config.transport.relayHiddenService) {
       imagesToPull.add(normalizeImageTag(RELAY_ATOR_SIDECAR_IMAGE));
     }
 

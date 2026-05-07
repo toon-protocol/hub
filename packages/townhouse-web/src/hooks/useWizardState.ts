@@ -35,7 +35,9 @@ export function useWizardState(
   const [state, setState] = useState<WizardStatePayload | null>(null);
   const [status, setStatus] = useState<WizardStateStatus>('loading');
 
-  const pollRef = useRef<() => void>(() => {});
+  const pollRef = useRef<() => void>(() => {
+    /* placeholder until first effect runs */
+  });
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -95,7 +97,9 @@ export function useWizardState(
     return () => {
       mountedRef.current = false;
       clearInterval(timer);
-      pollRef.current = () => {};
+      pollRef.current = () => {
+        /* cleared on unmount */
+      };
       // Abort any in-flight fetch
       activeController?.abort();
     };

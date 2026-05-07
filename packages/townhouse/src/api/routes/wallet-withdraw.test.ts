@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import type * as ViemModule from 'viem';
 import { registerWalletWithdrawRoutes } from './wallet-withdraw.js';
 import type { ApiDeps } from '../types.js';
 import type { DockerOrchestrator } from '../../docker/orchestrator.js';
@@ -22,6 +23,7 @@ class MockOrchestrator {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class
 class MockConnector {}
 
 // EVM mock helpers
@@ -30,7 +32,7 @@ const MOCK_CHAIN_ID = 31337;
 
 // Mock viem so we never hit real network
 vi.mock('viem', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('viem')>();
+  const actual = await importOriginal<typeof ViemModule>();
   return {
     ...actual,
     createWalletClient: vi.fn(() => ({
@@ -312,13 +314,11 @@ describe('POST /api/wallet/withdraw', () => {
     // throwing from the viem walletClient mock.
     const viem = await import('viem');
     vi.mocked(viem.createWalletClient).mockReturnValueOnce({
-      sendTransaction: vi
-        .fn()
-        .mockRejectedValueOnce(
-          Object.assign(new TypeError('fetch failed'), {
-            cause: { code: 'ECONNREFUSED' },
-          })
-        ),
+      sendTransaction: vi.fn().mockRejectedValueOnce(
+        Object.assign(new TypeError('fetch failed'), {
+          cause: { code: 'ECONNREFUSED' },
+        })
+      ),
       writeContract: vi.fn(),
     } as unknown as ReturnType<typeof viem.createWalletClient>);
 

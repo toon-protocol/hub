@@ -150,13 +150,22 @@ export function validateConfig(raw: unknown): TownhouseConfig {
     assertNumber(hs['port'], 'config.transport.hiddenService.port');
     assertPort(hs['port'] as number, 'config.transport.hiddenService.port');
     if (hs['externalUrl'] !== undefined) {
-      assertString(hs['externalUrl'], 'config.transport.hiddenService.externalUrl');
+      assertString(
+        hs['externalUrl'],
+        'config.transport.hiddenService.externalUrl'
+      );
     }
     if (hs['startupTimeoutMs'] !== undefined) {
-      assertNumber(hs['startupTimeoutMs'], 'config.transport.hiddenService.startupTimeoutMs');
+      assertNumber(
+        hs['startupTimeoutMs'],
+        'config.transport.hiddenService.startupTimeoutMs'
+      );
     }
     if (hs['stopTimeoutMs'] !== undefined) {
-      assertNumber(hs['stopTimeoutMs'], 'config.transport.hiddenService.stopTimeoutMs');
+      assertNumber(
+        hs['stopTimeoutMs'],
+        'config.transport.hiddenService.stopTimeoutMs'
+      );
     }
     if (transport['mode'] !== 'ator') {
       throw new ConfigValidationError(
@@ -176,7 +185,10 @@ export function validateConfig(raw: unknown): TownhouseConfig {
     const hs = transport['relayHiddenService'] as Record<string, unknown>;
     assertString(hs['dir'], 'config.transport.relayHiddenService.dir');
     assertNumber(hs['port'], 'config.transport.relayHiddenService.port');
-    assertPort(hs['port'] as number, 'config.transport.relayHiddenService.port');
+    assertPort(
+      hs['port'] as number,
+      'config.transport.relayHiddenService.port'
+    );
     if (hs['externalUrl'] !== undefined) {
       assertString(
         hs['externalUrl'],

@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type {
-  WsRelayEventsMessage,
-  NostrEventPayload,
-} from '@toon-protocol/townhouse';
+import type { NostrEventPayload } from '@toon-protocol/townhouse';
 
 export type RelayStreamStatus = 'connecting' | 'open' | 'degraded' | 'closed';
 
@@ -142,13 +139,13 @@ export function useRelayEventStream(
         armHeartbeat(socket);
         setStatus((prev) => (prev === 'open' ? prev : 'open'));
         try {
-          type RawMsg = {
+          interface RawMsg {
             type: string;
             nodeId?: string;
             payload?: NostrEventPayload;
             messages?: RawMsg[];
             connected?: boolean;
-          };
+          }
           const parsed = JSON.parse(String(event.data)) as RawMsg;
 
           function applyMsg(msg: RawMsg) {

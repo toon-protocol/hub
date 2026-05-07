@@ -150,9 +150,7 @@ describe('dev-fixtures Mill config shape validation', () => {
 
   it('mill-01 swap pair is EVM↔Solana', () => {
     const cfg = loadFixture('mill-01.config.json');
-    const pairs = cfg['swapPairs'] as Array<
-      Record<string, Record<string, string>>
-    >;
+    const pairs = cfg['swapPairs'] as Record<string, Record<string, string>>[];
     const pair = pairs[0];
     expect(pair['from']['chain']).toContain('evm');
     expect(pair['to']['chain']).toContain('solana');
@@ -160,9 +158,7 @@ describe('dev-fixtures Mill config shape validation', () => {
 
   it('mill-02 swap pair is EVM↔Mina', () => {
     const cfg = loadFixture('mill-02.config.json');
-    const pairs = cfg['swapPairs'] as Array<
-      Record<string, Record<string, string>>
-    >;
+    const pairs = cfg['swapPairs'] as Record<string, Record<string, string>>[];
     const pair = pairs[0];
     expect(pair['from']['chain']).toContain('evm');
     expect(pair['to']['chain']).toContain('mina');

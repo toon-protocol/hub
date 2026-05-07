@@ -50,7 +50,9 @@ export function useDvmJobsRecent(options: UseDvmJobsRecentOptions): {
 
   const [data, setData] = useState<DvmJobsRecent | null>(null);
   const [status, setStatus] = useState<DvmJobsStatus>('loading');
-  const pollRef = useRef<() => Promise<void>>(async () => {});
+  const pollRef = useRef<() => Promise<void>>(async () => {
+    /* placeholder until first effect runs */
+  });
 
   useEffect(() => {
     // Reset state on URL change so a card switching to a different nodeId

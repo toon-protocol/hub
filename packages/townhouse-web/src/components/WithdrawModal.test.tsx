@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { axe } from '../test-setup';
 import { WithdrawModal } from './WithdrawModal';
 import type { WalletBalanceEntry } from '@toon-protocol/townhouse';

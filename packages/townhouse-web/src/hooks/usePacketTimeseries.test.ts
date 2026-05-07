@@ -2,7 +2,7 @@
  * usePacketTimeseries hook tests (AC: #10 — story 21.10, Task 10.2).
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { usePacketTimeseries } from './usePacketTimeseries';
 

@@ -60,11 +60,11 @@ const NODES_STUB = [
  * route handler. This avoids the unroute/route race during the 5 s polling
  * window where a poll could land on the catch-all 404 fallback.
  */
-type TransportScenario = {
+interface TransportScenario {
   current: object;
   patchAssertions?: (body: unknown) => void;
   patchResponse?: object;
-};
+}
 
 async function stubBasicAPIs(page: Page, scenario: TransportScenario) {
   await page.route('**/api/nodes', async (route) => {

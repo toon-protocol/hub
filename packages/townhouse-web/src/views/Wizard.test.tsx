@@ -1,6 +1,7 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
+import type * as ReactRouterDom from 'react-router-dom';
 import { axe } from '../test-setup';
 import { WizardView } from './Wizard';
 
@@ -24,7 +25,7 @@ vi.mock('@/hooks/useWizardProgress', () => ({
 // Mock react-router-dom navigate
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>();
+  const actual = await importOriginal<typeof ReactRouterDom>();
   return {
     ...actual,
     useNavigate: () => mockNavigate,
