@@ -31,7 +31,8 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.27.0",
     "recharts": "^2.15.4",
-    "tailwind-merge": "^2.5.0"
+    "tailwind-merge": "^2.5.0",
+    "viem": "^2.0.0"
   },
   "devDependencies": {
     "@axe-core/react": "^4.9.0",

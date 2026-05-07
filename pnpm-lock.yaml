@@ -893,6 +893,9 @@ importers:
       tailwind-merge:
         specifier: ^2.5.0
         version: 2.6.1
+      viem:
+        specifier: ^2.0.0
+        version: 2.47.2(typescript@5.9.3)
     devDependencies:
       '@axe-core/react':
         specifier: ^4.9.0
