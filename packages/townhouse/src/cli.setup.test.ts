@@ -276,7 +276,7 @@ nodes:
 wallet:
   encrypted_path: ${join(dir, 'wallet.enc')}
 connector:
-  image: ghcr.io/toon-protocol/connector:3.4.0
+  image: ghcr.io/toon-protocol/connector:3.4.1
   adminPort: 9401
 transport:
   mode: direct
