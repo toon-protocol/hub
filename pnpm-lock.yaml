@@ -863,6 +863,12 @@ importers:
 
   packages/townhouse-web:
     dependencies:
+      '@scure/bip39':
+        specifier: ^2.0.0
+        version: 2.0.1
+      '@toon-protocol/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
