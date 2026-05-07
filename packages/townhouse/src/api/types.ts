@@ -9,7 +9,48 @@ import type { ConnectorAdminClient } from '../connector/index.js';
 import type { TownhouseConfig } from '../config/schema.js';
 import type { TransportProbe } from '../connector/transport-probe.js';
 import type { MillHealthResponse } from '@toon-protocol/mill';
-import type { DvmHealthResponse } from '@toon-protocol/sdk';
+
+// DvmHealthResponse is intentionally inlined here (rather than imported from
+// @toon-protocol/sdk) to keep townhouse off the sdk dependency graph — the
+// package is a thin host orchestrator and pulling sdk just for a response
+// shape blows up the install size and breaks the architectural boundary
+// asserted by package-structure.test.ts. Keep this in sync with the
+// canonical definition at packages/sdk/src/dvm-health.ts.
+
+/** Per-kind job count for jobsRecent.byKind */
+export interface DvmJobsByKindEntry {
+  kind: number;
+  count: number;
+}
+
+/** Per-status job counts for the sliding window */
+export interface DvmJobsByStatus {
+  processing: number;
+  success: number;
+  error: number;
+  partial: number;
+}
+
+/** Windowed recent-jobs telemetry (default window: 5 min) */
+export interface DvmJobsRecent {
+  total: number;
+  byKind: DvmJobsByKindEntry[];
+  byStatus: DvmJobsByStatus;
+}
+
+/** Response shape for GET /health on the DVM BLS server (port 3400). */
+export interface DvmHealthResponse {
+  status: 'starting' | 'ok' | 'stopping' | 'stopped' | 'error';
+  version: string;
+  nodePubkey: string;
+  uptimeSec: number;
+  /** Registered handler event kinds (e.g. [5094]). */
+  handlerKinds: number[];
+  /** Per-kind pricing in string-encoded bigint (e.g. { "5094": "10" }). */
+  kindPricing: Record<string, string>;
+  basePricePerByte: string;
+  jobsRecent: DvmJobsRecent;
+}
 
 /** Node types supported by Townhouse */
 export type NodeType = 'town' | 'mill' | 'dvm';
@@ -149,9 +190,6 @@ export interface PacketTimeseriesPayload {
 
 /** Re-export for consumers that need the full Mill health shape */
 export type { MillHealthResponse };
-
-/** Re-export DvmHealthResponse so consumers don't need a direct SDK import */
-export type { DvmHealthResponse };
 
 /** Minimal common health shape; superset emitted by Town containers. */
 export interface TownHealthPayload {

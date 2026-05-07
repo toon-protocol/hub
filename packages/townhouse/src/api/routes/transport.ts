@@ -201,9 +201,21 @@ export function registerTransportRoutes(
       const priorProbeUrl =
         prevMode === 'ator' ? (prevSocksProxy ?? DEFAULT_ATOR_PROXY) : '';
 
+      // Snapshot the full prior transport block so a failed flip can restore
+      // exactly what the operator had — not just mode + socksProxy.
+      // hiddenService / externalUrl / relayHiddenService are operator-managed
+      // fields that the YAML may have set up independently (story 7e28ea9);
+      // the PATCH must preserve them across mode flips, otherwise toggling
+      // direct→ator→direct would silently strip the hidden-service setup.
+      const priorTransport = { ...deps.config.transport };
+
       try {
-        // Mutate in-memory config
+        // Mutate in-memory config — carry forward all non-mode fields, then
+        // override mode and socksProxy per the request.
+        const { mode: _droppedMode, socksProxy: _droppedProxy, ...carryOver } =
+          priorTransport;
         deps.config.transport = {
+          ...carryOver,
           mode: newMode,
           ...(newMode === 'ator' ? { socksProxy: newSocksProxy } : {}),
         };
@@ -212,11 +224,9 @@ export function registerTransportRoutes(
         try {
           validateConfig(deps.config);
         } catch (validationError) {
-          // Roll back in-memory edit
-          deps.config.transport = {
-            mode: prevMode,
-            socksProxy: prevSocksProxy,
-          };
+          // Roll back in-memory edit (restore the FULL prior block — preserves
+          // hiddenService/externalUrl/relayHiddenService).
+          deps.config.transport = priorTransport;
           return reply.status(500).send({
             error: 'config_validation_error',
             message:
@@ -230,10 +240,7 @@ export function registerTransportRoutes(
         try {
           await saveConfig(deps.configPath, deps.config);
         } catch (saveError) {
-          deps.config.transport = {
-            mode: prevMode,
-            socksProxy: prevSocksProxy,
-          };
+          deps.config.transport = priorTransport;
           return reply.status(500).send({
             error: 'config_save_failed',
             message:
@@ -253,10 +260,7 @@ export function registerTransportRoutes(
           await deps.orchestrator.regenerateConnectorConfig(activeNodes);
         } catch (restartError) {
           // Rollback: restore in-memory config and persist the restoration
-          deps.config.transport = {
-            mode: prevMode,
-            socksProxy: prevSocksProxy,
-          };
+          deps.config.transport = priorTransport;
           try {
             await saveConfig(deps.configPath, deps.config);
           } catch {

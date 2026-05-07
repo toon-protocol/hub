@@ -200,7 +200,15 @@ describe('PATCH /api/transport', () => {
 
   it('happy-path Direct→ATOR: regenerate called once, probe started', async () => {
     const { app, deps, orchestrator, probe } = buildDeps();
-    deps.config.transport = { mode: 'direct' };
+    // The validator (config/validator.ts:216-227) requires either
+    // externalUrl or hiddenService when mode='ator', so the operator's
+    // YAML must have set one of them up before flipping. We mirror the
+    // post-`townhouse-hs-init.sh` operator state: hiddenService present in
+    // direct mode and carried forward by the route on flip.
+    deps.config.transport = {
+      mode: 'direct',
+      hiddenService: { dir: '/var/lib/townhouse/hs/connector', port: 3000 },
+    };
     registerTransportRoutes(app, deps);
     await app.ready();
 
@@ -214,6 +222,13 @@ describe('PATCH /api/transport', () => {
     expect(body.mode).toBe('ator');
     expect(body.restartTriggered).toBe(true);
     expect(body.restartedAt).toBeTypeOf('number');
+
+    // The route must preserve hiddenService across the flip — otherwise the
+    // operator's keypair config would be silently stripped.
+    expect(deps.config.transport.hiddenService).toEqual({
+      dir: '/var/lib/townhouse/hs/connector',
+      port: 3000,
+    });
 
     expect(orchestrator.calls).toContain('regenerateConnectorConfig(town)');
     expect(probe.calls).toContain('start');
@@ -281,7 +296,10 @@ describe('PATCH /api/transport', () => {
 
   it('rollback on regenerate failure: config restored, response 500', async () => {
     const { app, deps, orchestrator } = buildDeps();
-    deps.config.transport = { mode: 'direct' };
+    deps.config.transport = {
+      mode: 'direct',
+      hiddenService: { dir: '/var/lib/townhouse/hs/connector', port: 3000 },
+    };
     orchestrator.shouldFail = true;
     registerTransportRoutes(app, deps);
     await app.ready();
@@ -294,8 +312,12 @@ describe('PATCH /api/transport', () => {
     expect(res.statusCode).toBe(500);
     expect(res.json().error).toBe('connector_restart_failed');
 
-    // Config should be rolled back to direct
+    // Config should be rolled back to direct, and hiddenService retained.
     expect(deps.config.transport.mode).toBe('direct');
+    expect(deps.config.transport.hiddenService).toEqual({
+      dir: '/var/lib/townhouse/hs/connector',
+      port: 3000,
+    });
     // saveConfig called twice: once for the flip, once for the rollback
     expect(mockSaveConfig).toHaveBeenCalledTimes(2);
   });

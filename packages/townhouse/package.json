@@ -56,7 +56,6 @@
     "@scure/bip39": "^2.0.0",
     "@toon-format/toon": "^1.4.0",
     "@toon-protocol/mill": "workspace:^",
-    "@toon-protocol/sdk": "workspace:*",
     "dockerode": "^4.0.0",
     "fastify": "^5.0.0",
     "nostr-tools": "^2.23.1",

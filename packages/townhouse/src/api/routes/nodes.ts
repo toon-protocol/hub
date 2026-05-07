@@ -22,8 +22,8 @@ import type {
   MillSwapsRecentPayload,
   JobsRecentPayload,
   DepositAddressesPayload,
+  DvmHealthResponse,
 } from '../types.js';
-import type { DvmHealthResponse } from '@toon-protocol/sdk';
 import type { NodeType, NodeState } from '../types.js';
 import { CONTAINER_PREFIX } from '../../constants.js';
 
