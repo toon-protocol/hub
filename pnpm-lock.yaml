@@ -400,6 +400,9 @@ importers:
 
   packages/faucet:
     dependencies:
+      '@noble/curves':
+        specifier: ^1.8.0
+        version: 1.9.7
       cors:
         specifier: ^2.8.5
         version: 2.8.6
@@ -854,6 +857,9 @@ importers:
       '@axe-core/react':
         specifier: ^4.9.0
         version: 4.11.2
+      '@playwright/test':
+        specifier: ^1.58.2
+        version: 1.58.2
       '@storybook/addon-a11y':
         specifier: 8.6.18
         version: 8.6.18(storybook@8.6.18)
