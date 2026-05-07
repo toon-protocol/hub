@@ -212,8 +212,11 @@ export function registerTransportRoutes(
       try {
         // Mutate in-memory config — carry forward all non-mode fields, then
         // override mode and socksProxy per the request.
-        const { mode: _droppedMode, socksProxy: _droppedProxy, ...carryOver } =
-          priorTransport;
+        const {
+          mode: _droppedMode,
+          socksProxy: _droppedProxy,
+          ...carryOver
+        } = priorTransport;
         deps.config.transport = {
           ...carryOver,
           mode: newMode,
