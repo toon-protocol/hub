@@ -27,7 +27,7 @@ nodes:
 wallet:
   encrypted_path: /tmp/wallet.enc
 connector:
-  image: ghcr.io/toon-protocol/connector:3.3.0
+  image: ghcr.io/toon-protocol/connector:3.4.1
   adminPort: 9401
 transport:
   mode: direct
@@ -103,11 +103,21 @@ describe('loadConfig', () => {
   it('TOWNHOUSE_TRANSPORT_MODE env var overrides YAML value', () => {
     const dir = makeTempDir();
     const configPath = join(dir, 'config.yaml');
-    writeFileSync(configPath, VALID_YAML, 'utf-8');
+    // Add externalUrl to the YAML so the validator accepts mode='ator'
+    // without requiring hiddenService. The base VALID_YAML has mode='direct'
+    // and no externalUrl, which is fine for direct but not for ator (the
+    // validator rejects mode='ator' that has neither externalUrl nor
+    // hiddenService — see config/validator.ts).
+    const yamlWithExternalUrl = VALID_YAML.replace(
+      'transport:\n  mode: direct',
+      'transport:\n  mode: direct\n  externalUrl: wss://test.anyone/btp'
+    );
+    writeFileSync(configPath, yamlWithExternalUrl, 'utf-8');
 
     setEnv('TOWNHOUSE_TRANSPORT_MODE', 'ator');
     const config = loadConfig(configPath);
     expect(config.transport.mode).toBe('ator');
+    expect(config.transport.externalUrl).toBe('wss://test.anyone/btp');
 
     rmSync(dir, { recursive: true, force: true });
   });
@@ -236,7 +246,7 @@ nodes:
 wallet:
   encrypted_path: /tmp/wallet.enc
 connector:
-  image: ghcr.io/toon-protocol/connector:3.3.0
+  image: ghcr.io/toon-protocol/connector:3.4.1
   adminPort: 9401
 transport:
   mode: direct

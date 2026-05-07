@@ -4,6 +4,20 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { main, CliHelpRequested } from './cli.js';
+import { DEFAULT_CONNECTOR_IMAGE } from './constants.js';
+import { WalletManager, encryptWallet, saveWallet } from './wallet/index.js';
+
+const WALLET_TEST_PASSWORD = 'townhouse-test-pw';
+
+/** Create an encrypted wallet at the given path for use in `up` tests. */
+async function seedWallet(
+  walletPath: string,
+  password = WALLET_TEST_PASSWORD
+): Promise<void> {
+  const wm = new WalletManager({ encryptedPath: walletPath });
+  const { mnemonic } = await wm.generate();
+  await saveWallet(walletPath, encryptWallet(mnemonic, password));
+}
 
 /**
  * Mock dockerode for all CLI tests.
@@ -79,7 +93,8 @@ function makeTempDir(): string {
 /** Standard config YAML with specific nodes enabled */
 function makeConfig(
   enabled: { town?: boolean; mill?: boolean; dvm?: boolean } = {},
-  walletPath = '/tmp/wallet.enc'
+  walletPath = '/tmp/wallet.enc',
+  apiPort = 0
 ): string {
   return `
 nodes:
@@ -95,12 +110,12 @@ nodes:
 wallet:
   encrypted_path: ${walletPath}
 connector:
-  image: ghcr.io/toon-protocol/connector:3.3.0
+  image: ghcr.io/toon-protocol/connector:3.4.1
   adminPort: 9401
 transport:
   mode: direct
 api:
-  port: 9400
+  port: ${apiPort}
   host: 127.0.0.1
 logging:
   level: info
@@ -223,10 +238,18 @@ describe('CLI', () => {
 
     it('up with enabled nodes starts orchestration', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '-c', configPath]);
         const output = consoleSpy.mock.calls
@@ -236,6 +259,29 @@ describe('CLI', () => {
         expect(output).toContain('town');
         expect(output).toContain('started successfully');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('up fails fast when wallet is absent (AC-2)', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+
+      try {
+        // Config exists but wallet doesn't — should fail fast
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+
+        await main(['up', '-c', configPath]);
+
+        const errorOutput = consoleErrorSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(errorOutput).toContain('Wallet not found');
+        expect(errorOutput).toContain('townhouse setup');
+        expect(process.exitCode).toBe(1);
+      } finally {
+        process.exitCode = 0;
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -253,15 +299,16 @@ describe('CLI', () => {
 
       // Seed a wallet so dry-run exercises the full API wiring path.
       const wm = new WalletManager({ encryptedPath: walletPath });
-      const { mnemonic } = wm.generate();
+      const { mnemonic } = await wm.generate();
       await saveWallet(walletPath, encryptWallet(mnemonic, 'test-pw'));
       wm.lock();
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = 'test-pw';
 
       try {
+        // Use port 9400 explicitly so the dry-run log matches the expected pattern
         writeFileSync(
           configPath,
-          makeConfig({ town: true }, walletPath),
+          makeConfig({ town: true }, walletPath, 9400),
           'utf-8'
         );
 
@@ -345,14 +392,12 @@ describe('CLI', () => {
         expect(config.nodes.town.enabled).toBe(false);
         expect(config.nodes.mill.enabled).toBe(false);
         expect(config.nodes.dvm.enabled).toBe(false);
-        expect(config.connector.image).toBe(
-          'ghcr.io/toon-protocol/connector:3.3.0'
-        );
+        expect(config.connector.image).toBe(DEFAULT_CONNECTOR_IMAGE);
         expect(config.api.port).toBe(9400);
         expect(config.api.host).toBe('127.0.0.1');
         expect(config.transport.mode).toBe('direct');
         expect(config.logging.level).toBe('info');
-        expect(config.wallet.encrypted_path).toContain('.townhouse');
+        expect(config.wallet.encrypted_path).toBe(join(dir, 'wallet.enc'));
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -381,24 +426,48 @@ describe('CLI', () => {
       const dir = makeTempDir();
       const configPath = join(dir, 'config.yaml');
 
-      // Mock global fetch for admin client
+      // Mock global fetch for admin client (paths mirror connector source-of-truth)
       const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/metrics')) {
+        if (url.includes('/admin/metrics.json')) {
           return {
             ok: true,
             json: async () => ({
-              packetsForwarded: 100,
-              packetsRejected: 5,
-              bytesSent: 2000,
+              uptimeSeconds: 60,
+              aggregate: {
+                packetsForwarded: 100,
+                packetsRejected: 5,
+                bytesSent: 2000,
+              },
+              peers: [
+                {
+                  peerId: 'town',
+                  connected: true,
+                  packetsForwarded: 80,
+                  packetsRejected: 1,
+                  bytesSent: 1500,
+                  lastPacketAt: '2026-04-29T00:00:00.000Z',
+                },
+              ],
+              timestamp: '2026-04-29T00:00:00.000Z',
             }),
           };
         }
-        if (url.includes('/peers')) {
+        if (url.includes('/admin/peers')) {
           return {
             ok: true,
-            json: async () => [
-              { id: 'town', connected: true, packetsForwarded: 80 },
-            ],
+            json: async () => ({
+              nodeId: 'townhouse-canary',
+              peerCount: 1,
+              connectedCount: 1,
+              peers: [
+                {
+                  id: 'town',
+                  connected: true,
+                  ilpAddresses: ['g.toon.town'],
+                  routeCount: 1,
+                },
+              ],
+            }),
           };
         }
         return { ok: true, json: async () => ({}) };
@@ -452,23 +521,60 @@ describe('CLI', () => {
       const configPath = join(dir, 'config.yaml');
 
       const fetchMock = vi.fn().mockImplementation(async (url: string) => {
-        if (url.includes('/metrics')) {
+        if (url.includes('/admin/metrics.json')) {
           return {
             ok: true,
             json: async () => ({
-              packetsForwarded: 250,
-              packetsRejected: 3,
-              bytesSent: 8000,
+              uptimeSeconds: 60,
+              aggregate: {
+                packetsForwarded: 250,
+                packetsRejected: 3,
+                bytesSent: 8000,
+              },
+              peers: [
+                {
+                  peerId: 'town',
+                  connected: true,
+                  packetsForwarded: 200,
+                  packetsRejected: 1,
+                  bytesSent: 5000,
+                  lastPacketAt: '2026-04-29T00:00:00.000Z',
+                },
+                {
+                  peerId: 'mill',
+                  connected: false,
+                  packetsForwarded: 50,
+                  packetsRejected: 2,
+                  bytesSent: 3000,
+                  lastPacketAt: null,
+                },
+              ],
+              timestamp: '2026-04-29T00:00:00.000Z',
             }),
           };
         }
-        if (url.includes('/peers')) {
+        if (url.includes('/admin/peers')) {
           return {
             ok: true,
-            json: async () => [
-              { id: 'town', connected: true, packetsForwarded: 200 },
-              { id: 'mill', connected: false, packetsForwarded: 50 },
-            ],
+            json: async () => ({
+              nodeId: 'townhouse-canary',
+              peerCount: 2,
+              connectedCount: 1,
+              peers: [
+                {
+                  id: 'town',
+                  connected: true,
+                  ilpAddresses: ['g.toon.town'],
+                  routeCount: 1,
+                },
+                {
+                  id: 'mill',
+                  connected: false,
+                  ilpAddresses: ['g.toon.mill'],
+                  routeCount: 1,
+                },
+              ],
+            }),
           };
         }
         return { ok: true, json: async () => ({}) };
@@ -487,6 +593,88 @@ describe('CLI', () => {
         expect(output).toContain('250');
         expect(output).toContain('Active peers');
         expect(output).toContain('1/2');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('prints Hidden Services block with both .anyone URLs when ATOR HS configured', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValue(new Error('fetch failed: ECONNREFUSED'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        const cfg = `
+nodes:
+  town:
+    enabled: true
+    feePerEvent: 1000
+  mill:
+    enabled: false
+  dvm:
+    enabled: false
+wallet:
+  encrypted_path: /tmp/wallet.enc
+connector:
+  image: ghcr.io/toon-protocol/connector:3.4.1
+  adminPort: 9401
+transport:
+  mode: ator
+  socksProxy: socks5h://ator-sidecar:9050
+  externalUrl: wss://abc.anyone/btp
+  hiddenService:
+    dir: /var/lib/townhouse/hs/connector
+    port: 3000
+    externalUrl: wss://abc.anyone/btp
+  relayHiddenService:
+    dir: /var/lib/townhouse/hs/relay
+    port: 7100
+    externalUrl: wss://xyz.anyone:7100
+api:
+  port: 0
+  host: 127.0.0.1
+logging:
+  level: info
+`;
+        writeFileSync(configPath, cfg, 'utf-8');
+        await main(['status', '-c', configPath]);
+
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('Hidden Services');
+        expect(output).toContain('Connector (BTP):');
+        expect(output).toContain('wss://abc.anyone/btp');
+        expect(output).toContain('Relay (Nostr):');
+        expect(output).toContain('wss://xyz.anyone:7100');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does NOT print Hidden Services block in direct mode', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValue(new Error('fetch failed: ECONNREFUSED'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['status', '-c', configPath]);
+
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).not.toContain('Hidden Services');
       } finally {
         vi.unstubAllGlobals();
         rmSync(dir, { recursive: true, force: true });
@@ -539,10 +727,18 @@ describe('CLI', () => {
   describe('--town, --mill, --dvm flags (Story 21.2, T-007, T-010)', () => {
     it('parses --town flag and starts town node', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '--town', '-c', configPath]);
 
@@ -552,16 +748,25 @@ describe('CLI', () => {
         expect(output).toContain('town');
         expect(output).toContain('Starting nodes');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
 
     it('parses --mill flag and starts mill node', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ mill: true }), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ mill: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '--mill', '-c', configPath]);
 
@@ -570,16 +775,25 @@ describe('CLI', () => {
           .join('\n');
         expect(output).toContain('mill');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
 
     it('parses --dvm flag and starts dvm node', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ dvm: true }), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ dvm: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '--dvm', '-c', configPath]);
 
@@ -588,18 +802,23 @@ describe('CLI', () => {
           .join('\n');
         expect(output).toContain('dvm');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
 
     it('parses combined --town --mill flags', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
+
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
 
       try {
         writeFileSync(
           configPath,
-          makeConfig({ town: true, mill: true }),
+          makeConfig({ town: true, mill: true }, walletPath),
           'utf-8'
         );
 
@@ -611,18 +830,23 @@ describe('CLI', () => {
         expect(output).toContain('town');
         expect(output).toContain('mill');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
 
     it('defaults to all enabled nodes when no flags provided', async () => {
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
+
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
 
       try {
         writeFileSync(
           configPath,
-          makeConfig({ town: true, mill: true }),
+          makeConfig({ town: true, mill: true }, walletPath),
           'utf-8'
         );
 
@@ -635,6 +859,7 @@ describe('CLI', () => {
         expect(output).toContain('town');
         expect(output).toContain('mill');
       } finally {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -647,10 +872,18 @@ describe('CLI', () => {
       const processOnSpy = vi.spyOn(process, 'on');
 
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '--town', '-c', configPath]);
 
@@ -660,6 +893,7 @@ describe('CLI', () => {
         );
       } finally {
         processOnSpy.mockRestore();
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -671,10 +905,18 @@ describe('CLI', () => {
         .mockImplementation((() => {}) as never);
 
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true }, walletPath),
+          'utf-8'
+        );
 
         await main(['up', '--town', '-c', configPath]);
 
@@ -694,6 +936,7 @@ describe('CLI', () => {
       } finally {
         processOnSpy.mockRestore();
         processExitSpy.mockRestore();
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });
@@ -717,16 +960,25 @@ describe('CLI', () => {
         );
 
       const dir = makeTempDir();
+      const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
 
+      await seedWallet(walletPath);
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_TEST_PASSWORD;
+
       try {
-        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        writeFileSync(
+          configPath,
+          makeConfig({ town: true }, walletPath),
+          'utf-8'
+        );
 
         await expect(main(['up', '--town', '-c', configPath])).rejects.toThrow(
           /docker.*not available/i
         );
       } finally {
         DockerOrchestrator.prototype.up = originalUp;
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
         rmSync(dir, { recursive: true, force: true });
       }
     });

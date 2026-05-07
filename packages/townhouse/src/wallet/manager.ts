@@ -36,6 +36,23 @@ import type {
   DerivedNodeKeys,
   NodeKeyInfo,
 } from './types.js';
+import { deriveMillKeys } from '@toon-protocol/mill';
+
+const BASE58_ALPHABET =
+  '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function base58Encode(bytes: Uint8Array): string {
+  let zeros = 0;
+  for (let i = 0; i < bytes.length && bytes[i] === 0; i++) zeros++;
+  let value = 0n;
+  for (const byte of bytes) value = value * 256n + BigInt(byte);
+  let result = '';
+  while (value > 0n) {
+    result = BASE58_ALPHABET[Number(value % 58n)] + result;
+    value = value / 58n;
+  }
+  for (let i = 0; i < zeros; i++) result = '1' + result;
+  return result || '1';
+}
 
 /** Map node type to account index */
 const NODE_ACCOUNT_INDEX: Record<NodeType, number> = {
@@ -65,9 +82,9 @@ export class WalletManager {
    * Generate a new 12-word BIP-39 mnemonic and derive all node keys.
    * Returns the mnemonic (for one-time display) and the derived state.
    */
-  generate(): { mnemonic: string; state: WalletState } {
+  async generate(): Promise<{ mnemonic: string; state: WalletState }> {
     const mnemonic = generateMnemonic(wordlist, 128); // 128 bits = 12 words
-    const state = this.deriveAllKeys(mnemonic);
+    const state = await this.deriveAllKeys(mnemonic);
     this.state = state;
     return { mnemonic, state };
   }
@@ -76,13 +93,13 @@ export class WalletManager {
    * Import an existing mnemonic (12 or 24 words) and derive all node keys.
    * Throws if mnemonic is invalid (wrong checksum, wrong word count, etc).
    */
-  fromMnemonic(mnemonic: string): WalletState {
+  async fromMnemonic(mnemonic: string): Promise<WalletState> {
     if (!validateMnemonic(mnemonic, wordlist)) {
       throw new Error(
         'Invalid BIP-39 mnemonic: checksum or word list validation failed'
       );
     }
-    const state = this.deriveAllKeys(mnemonic);
+    const state = await this.deriveAllKeys(mnemonic);
     this.state = state;
     return state;
   }
@@ -114,13 +131,18 @@ export class WalletManager {
     const types: NodeType[] = ['town', 'mill', 'dvm'];
     return types.map((nodeType) => {
       const keys = state.keys[nodeType];
-      return {
+      const info: NodeKeyInfo = {
         nodeType,
         nostrPubkey: keys.nostrPubkey,
         evmAddress: keys.evmAddress,
         nostrDerivationPath: keys.nostrDerivationPath,
         evmDerivationPath: keys.evmDerivationPath,
       };
+      if (nodeType === 'mill') {
+        if (keys.solanaAddress) info.solanaAddress = keys.solanaAddress;
+        if (keys.minaAddress) info.minaAddress = keys.minaAddress;
+      }
+      return info;
     });
   }
 
@@ -150,13 +172,37 @@ export class WalletManager {
   /**
    * Derive keys for all node types from a mnemonic.
    */
-  private deriveAllKeys(mnemonic: string): WalletState {
+  private async deriveAllKeys(mnemonic: string): Promise<WalletState> {
     let seed: Uint8Array | undefined;
     try {
       seed = mnemonicToSeedSync(mnemonic);
+      const millBaseKeys = this.deriveNodeKeys(seed, 'mill');
+
+      // Derive Solana and Mina addresses for the mill node using the same
+      // account index as the WalletManager (ACCOUNT_INDEX_MILL = 1). These
+      // public addresses are exposed by GET /nodes/mill/deposit-addresses.
+      let solanaAddress: string | undefined;
+      let minaAddress: string | undefined;
+      try {
+        const millChainKeys = await deriveMillKeys({
+          mnemonic,
+          chains: ['solana', 'mina'],
+          accountIndex: ACCOUNT_INDEX_MILL,
+        });
+        if (millChainKeys.solana) {
+          solanaAddress = base58Encode(millChainKeys.solana.publicKey);
+        }
+        if (millChainKeys.mina) {
+          minaAddress = millChainKeys.mina.publicKey;
+        }
+      } catch {
+        // deriveMillKeys failure (e.g., unsupported platform) should not
+        // prevent wallet init — addresses are optional at derivation time.
+      }
+
       const keys: DerivedNodeKeys = {
         town: this.deriveNodeKeys(seed, 'town'),
-        mill: this.deriveNodeKeys(seed, 'mill'),
+        mill: { ...millBaseKeys, solanaAddress, minaAddress },
         dvm: this.deriveNodeKeys(seed, 'dvm'),
       };
       return { keys };

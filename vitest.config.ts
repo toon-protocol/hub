@@ -17,6 +17,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // townhouse-web React-hook tests need jsdom (document, window, etc.).
+    // Routing per-glob keeps the rest of the suite on the fast 'node' env.
+    environmentMatchGlobs: [['packages/townhouse-web/**', 'jsdom']],
+    setupFiles: ['./packages/townhouse-web/src/test-setup.ts'],
     testTimeout: 120_000,
     pool: 'forks',
     poolOptions: {

@@ -1,15 +1,69 @@
 /**
- * Unit Tests: ConnectorAdminClient (Story 21.3)
+ * Unit Tests: ConnectorAdminClient
  *
  * Test IDs map to test-design-epic-21.md scenario T-020.
  *
- * These tests verify:
- * - AC #4: Connector admin API endpoint exposed for dashboard metrics
+ * Verifies the client speaks the connector's source-of-truth contract:
+ *   - GET /health on healthCheckPort → HealthStatus
+ *   - GET /admin/peers on adminApi.port → wrapped peers envelope
+ *   - GET /admin/metrics.json on adminApi.port → AdminMetricsJsonResponse
+ *
+ * The dedicated stub canary (`./contract-canary.test.ts`) covers shape-drift
+ * with URL-bound assertions; this file covers happy-path + transport-layer
+ * failure modes (timeout, ECONNREFUSED, non-2xx).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { ConnectorAdminClient } from './admin-client.js';
+
+const HEALTHY_BODY = {
+  status: 'healthy',
+  uptime: 120,
+  peersConnected: 2,
+  totalPeers: 3,
+  timestamp: '2026-04-29T00:00:00.000Z',
+};
+
+const METRICS_BODY = {
+  uptimeSeconds: 120,
+  aggregate: {
+    packetsForwarded: 1500,
+    packetsRejected: 12,
+    bytesSent: 45000,
+  },
+  peers: [
+    {
+      peerId: 'town',
+      connected: true,
+      packetsForwarded: 800,
+      packetsRejected: 5,
+      bytesSent: 25000,
+      lastPacketAt: '2026-04-29T00:00:00.000Z',
+    },
+  ],
+  timestamp: '2026-04-29T00:00:00.000Z',
+};
+
+const PEERS_BODY = {
+  nodeId: 'townhouse-canary',
+  peerCount: 2,
+  connectedCount: 2,
+  peers: [
+    {
+      id: 'town',
+      connected: true,
+      ilpAddresses: ['g.toon.town'],
+      routeCount: 1,
+    },
+    {
+      id: 'mill',
+      connected: true,
+      ilpAddresses: ['g.toon.mill'],
+      routeCount: 1,
+    },
+  ],
+};
 
 describe('ConnectorAdminClient', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
@@ -26,17 +80,16 @@ describe('ConnectorAdminClient', () => {
   // ── T-020: Connector admin API endpoint accessible from host ──
 
   describe('getHealth() (T-020)', () => {
-    it('returns health status from connector admin API', async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => ({ status: 'healthy', uptime: 120 }),
-      });
+    it('returns the connector HealthStatus on the healthCheckPort', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => HEALTHY_BODY });
 
       const client = new ConnectorAdminClient('http://localhost:9401');
       const health = await client.getHealth();
 
       expect(health.status).toBe('healthy');
       expect(health.uptime).toBe(120);
+      expect(health.peersConnected).toBe(2);
+      expect(health.totalPeers).toBe(3);
       expect(fetchMock).toHaveBeenCalledWith(
         'http://localhost:9401/health',
         expect.objectContaining({ signal: expect.any(AbortSignal) })
@@ -75,24 +128,19 @@ describe('ConnectorAdminClient', () => {
   });
 
   describe('getMetrics() (T-020)', () => {
-    it('returns metrics from connector admin API', async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          packetsForwarded: 1500,
-          packetsRejected: 12,
-          bytesSent: 45000,
-        }),
-      });
+    it('returns AdminMetricsJsonResponse from /admin/metrics.json', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => METRICS_BODY });
 
-      const client = new ConnectorAdminClient('http://localhost:9401');
+      const client = new ConnectorAdminClient('http://localhost:9402');
       const metrics = await client.getMetrics();
 
-      expect(metrics.packetsForwarded).toBe(1500);
-      expect(metrics.packetsRejected).toBe(12);
-      expect(metrics.bytesSent).toBe(45000);
+      expect(metrics.aggregate.packetsForwarded).toBe(1500);
+      expect(metrics.aggregate.packetsRejected).toBe(12);
+      expect(metrics.aggregate.bytesSent).toBe(45000);
+      expect(metrics.peers).toHaveLength(1);
+      expect(metrics.peers[0]?.peerId).toBe('town');
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:9401/metrics',
+        'http://localhost:9402/admin/metrics.json',
         expect.objectContaining({ signal: expect.any(AbortSignal) })
       );
     });
@@ -100,38 +148,33 @@ describe('ConnectorAdminClient', () => {
     it('throws when connector is not running', async () => {
       fetchMock.mockRejectedValue(new Error('fetch failed: ECONNREFUSED'));
 
-      const client = new ConnectorAdminClient('http://localhost:9401');
+      const client = new ConnectorAdminClient('http://localhost:9402');
 
       await expect(client.getMetrics()).rejects.toThrow(/connection refused/i);
     });
   });
 
   describe('getPeers() (T-020)', () => {
-    it('returns peer status list from connector admin API', async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => [
-          { id: 'town', connected: true, packetsForwarded: 800 },
-          { id: 'mill', connected: true, packetsForwarded: 700 },
-        ],
-      });
+    it('unwraps the peers array from /admin/peers', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => PEERS_BODY });
 
-      const client = new ConnectorAdminClient('http://localhost:9401');
+      const client = new ConnectorAdminClient('http://localhost:9402');
       const peers = await client.getPeers();
 
       expect(peers).toHaveLength(2);
       expect(peers[0]).toMatchObject({
         id: 'town',
         connected: true,
-        packetsForwarded: 800,
+        ilpAddresses: ['g.toon.town'],
+        routeCount: 1,
       });
       expect(peers[1]).toMatchObject({
         id: 'mill',
         connected: true,
-        packetsForwarded: 700,
+        routeCount: 1,
       });
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost:9401/peers',
+        'http://localhost:9402/admin/peers',
         expect.objectContaining({ signal: expect.any(AbortSignal) })
       );
     });
@@ -139,10 +182,15 @@ describe('ConnectorAdminClient', () => {
     it('returns empty array when no peers are connected', async () => {
       fetchMock.mockResolvedValue({
         ok: true,
-        json: async () => [],
+        json: async () => ({
+          nodeId: 'townhouse-canary',
+          peerCount: 0,
+          connectedCount: 0,
+          peers: [],
+        }),
       });
 
-      const client = new ConnectorAdminClient('http://localhost:9401');
+      const client = new ConnectorAdminClient('http://localhost:9402');
       const peers = await client.getPeers();
 
       expect(peers).toHaveLength(0);
@@ -151,7 +199,7 @@ describe('ConnectorAdminClient', () => {
     it('throws when connector is not running', async () => {
       fetchMock.mockRejectedValue(new Error('fetch failed: ECONNREFUSED'));
 
-      const client = new ConnectorAdminClient('http://localhost:9401');
+      const client = new ConnectorAdminClient('http://localhost:9402');
 
       await expect(client.getPeers()).rejects.toThrow(/connection refused/i);
     });
@@ -159,10 +207,7 @@ describe('ConnectorAdminClient', () => {
 
   describe('constructor', () => {
     it('accepts base URL without trailing slash', async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => ({ status: 'healthy', uptime: 10 }),
-      });
+      fetchMock.mockResolvedValue({ ok: true, json: async () => HEALTHY_BODY });
 
       const client = new ConnectorAdminClient('http://localhost:9401');
       await client.getHealth();
@@ -174,10 +219,7 @@ describe('ConnectorAdminClient', () => {
     });
 
     it('strips trailing slash from base URL', async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => ({ status: 'healthy', uptime: 10 }),
-      });
+      fetchMock.mockResolvedValue({ ok: true, json: async () => HEALTHY_BODY });
 
       const client = new ConnectorAdminClient('http://localhost:9401/');
       await client.getHealth();

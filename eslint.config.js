@@ -35,8 +35,14 @@ export default tseslint.config(
   {
     files: [
       '**/*.test.ts',
+      '**/*.test.tsx',
+      '**/*.stories.ts',
+      '**/*.stories.tsx',
+      '**/test-setup.ts',
       '**/__integration__/**',
+      '**/__tests__/**',
       '**/tests/**',
+      '**/e2e/**',
       '**/examples/**',
       'docker/src/**',
     ],
@@ -57,6 +63,7 @@ export default tseslint.config(
       '**/*.cjs',
       '**/*.mjs',
       'archive/**',
+      '.cache/**',
       '.claude/**',
       'packages/memvid-node/index.d.ts',
     ],

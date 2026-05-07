@@ -97,6 +97,35 @@ describe('Mill Node Dockerfile (Story 21.6)', () => {
     });
   });
 
+  // ── Story 21.6.1, AC #2 (Finding #11): Dockerfile LABELs in runtime stage ──
+  // LABELs declared before the first FROM are silently dropped by Docker —
+  // they never appear on the produced image. They must live in the runtime
+  // stage (after the second `FROM node:20-alpine`).
+  describe('LABEL placement (Story 21.6.1, Finding #11)', () => {
+    const builderFromIdx = dockerfile.search(
+      /^FROM node:20-alpine AS builder/m
+    );
+    const runtimeFromIdx = dockerfile.search(/^FROM node:20-alpine\s*$/m);
+    const beforeBuilder = dockerfile.slice(0, builderFromIdx);
+    const runtimeSection = dockerfile.slice(runtimeFromIdx);
+
+    it('[P0] should NOT declare LABELs before the first FROM', () => {
+      expect(beforeBuilder).not.toMatch(/^LABEL\s+/m);
+    });
+
+    it('[P0] should declare LABEL maintainer in the runtime stage', () => {
+      expect(runtimeSection).toMatch(/^LABEL\s+maintainer\s*=/m);
+    });
+
+    it('[P0] should declare LABEL version in the runtime stage', () => {
+      expect(runtimeSection).toMatch(/^LABEL\s+version\s*=/m);
+    });
+
+    it('[P0] should declare LABEL description in the runtime stage', () => {
+      expect(runtimeSection).toMatch(/^LABEL\s+description\s*=/m);
+    });
+  });
+
   // ── T-042: Multi-stage build with minimal final image ──
   describe('T-042: Runtime image minimization', () => {
     it('[P1] should run as non-root user toon', () => {
@@ -249,14 +278,45 @@ describe('Mill Entrypoint Adapter (Story 21.6)', () => {
     });
   });
 
-  // ── Startup banner ──
+  // ── Startup logging (Story 21.6.1, Finding #12) ──
+  // The ASCII "Mill Ready" banner was replaced with a structured JSON line
+  // emitted via logJson('info', 'mill_ready', {...}).
   describe('Startup logging', () => {
-    it('[P2] should log Mill Ready banner with pubkey, evmAddress, blsPort, swapPairs', () => {
-      expect(entrypoint).toMatch(/Mill Ready/);
+    it('[P2] should emit structured mill_ready event with pubkey, evmAddress, blsPort, swapPairCount', () => {
+      expect(entrypoint).toMatch(/['"]mill_ready['"]/);
       expect(entrypoint).toMatch(/pubkey/);
       expect(entrypoint).toMatch(/evmAddress/);
       expect(entrypoint).toMatch(/blsPort/);
-      expect(entrypoint).toMatch(/swapPairs/);
+      expect(entrypoint).toMatch(/swapPairCount/);
+    });
+
+    it('[P2] should expose a logJson helper writing JSON-per-line', () => {
+      expect(entrypoint).toMatch(/function\s+logJson/);
+      expect(entrypoint).toMatch(/JSON\.stringify/);
+      expect(entrypoint).toMatch(/scope:\s*['"]mill-entrypoint['"]/);
+    });
+
+    it('[P2] should not emit the legacy ASCII "Mill Ready" banner', () => {
+      expect(entrypoint).not.toMatch(/Mill Ready/);
+      expect(entrypoint).not.toMatch(/╔/);
+    });
+  });
+
+  // ── Process lifecycle (Story 21.6.1, Finding #13) ──
+  describe('SIGQUIT handling (Finding #13)', () => {
+    it('[P1] should register SIGQUIT alongside SIGTERM and SIGINT', () => {
+      expect(entrypoint).toMatch(/process\.on\(\s*['"]SIGTERM['"]/);
+      expect(entrypoint).toMatch(/process\.on\(\s*['"]SIGINT['"]/);
+      expect(entrypoint).toMatch(/process\.on\(\s*['"]SIGQUIT['"]/);
+    });
+  });
+
+  // ── Sensitive env cleanup (Story 21.6.1, Finding #10) ──
+  describe('MILL_CONFIG_JSON cleanup (Finding #10)', () => {
+    it('[P0] should delete process.env.MILL_CONFIG_JSON in loadMillConfig', () => {
+      expect(entrypoint).toMatch(
+        /delete\s+process\.env\[['"]MILL_CONFIG_JSON['"]\]/
+      );
     });
   });
 });

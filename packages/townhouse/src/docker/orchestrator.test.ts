@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DockerOrchestrator } from './orchestrator.js';
 import type { TownhouseConfig } from '../config/schema.js';
 import { getDefaultConfig } from '../config/defaults.js';
+import { DEFAULT_CONNECTOR_IMAGE } from '../constants.js';
 
 /**
  * Build a TownhouseConfig with selected nodes enabled.
@@ -444,7 +445,7 @@ describe('DockerOrchestrator', () => {
       // Should pull normalized connector image + town image
       // normalizeImageTag ensures explicit :latest tag when already present
       expect(mockDocker.docker.pull).toHaveBeenCalledWith(
-        'ghcr.io/toon-protocol/connector:3.3.0'
+        DEFAULT_CONNECTOR_IMAGE
       );
       expect(mockDocker.docker.pull).toHaveBeenCalledWith('toon:town');
       expect(mockDocker.docker.pull).toHaveBeenCalledTimes(2);
@@ -494,7 +495,7 @@ describe('DockerOrchestrator', () => {
 
     it('skips pull if image already exists locally', async () => {
       mockDocker.docker.listImages.mockResolvedValue([
-        { RepoTags: ['ghcr.io/toon-protocol/connector:3.3.0'] },
+        { RepoTags: [DEFAULT_CONNECTOR_IMAGE] },
         { RepoTags: ['toon:town'] },
       ]);
 
@@ -779,6 +780,248 @@ describe('DockerOrchestrator', () => {
             'CONNECTOR_URL=ws://townhouse-connector:3000',
           ]),
         })
+      );
+    });
+
+    it('emits KIND_PRICING_<kind> env vars when kindPricing is set', async () => {
+      const config = configWithNodes(['dvm']);
+      config.nodes.dvm.kindPricing = { '5094': 5, '5250': 10000 };
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['dvm']);
+
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-dvm',
+          Env: expect.arrayContaining([
+            'KIND_PRICING_5094=5',
+            'KIND_PRICING_5250=10000',
+            'CONNECTOR_URL=ws://townhouse-connector:3000',
+          ]),
+        })
+      );
+    });
+
+    it('emits both FEE_PER_JOB and KIND_PRICING_<kind> when both are set', async () => {
+      const config = configWithNodes(['dvm']);
+      config.nodes.dvm.feePerJob = 1000;
+      config.nodes.dvm.kindPricing = { '5094': 5 };
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['dvm']);
+
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-dvm',
+          Env: expect.arrayContaining([
+            'FEE_PER_JOB=1000',
+            'KIND_PRICING_5094=5',
+          ]),
+        })
+      );
+    });
+
+    it('passes TURBO_TOKEN from host env to dvm container', async () => {
+      const original = process.env['TURBO_TOKEN'];
+      process.env['TURBO_TOKEN'] = 'test-jwk-json';
+      try {
+        const config = configWithNodes(['dvm']);
+        const orchestrator = new DockerOrchestrator(
+          mockDocker.docker as any,
+          config
+        );
+        await orchestrator.up(['dvm']);
+
+        expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: 'townhouse-dvm',
+            Env: expect.arrayContaining(['TURBO_TOKEN=test-jwk-json']),
+          })
+        );
+      } finally {
+        if (original === undefined) {
+          delete process.env['TURBO_TOKEN'];
+        } else {
+          process.env['TURBO_TOKEN'] = original;
+        }
+      }
+    });
+
+    it('omits TURBO_TOKEN env when host env is unset', async () => {
+      const original = process.env['TURBO_TOKEN'];
+      delete process.env['TURBO_TOKEN'];
+      try {
+        const config = configWithNodes(['dvm']);
+        const orchestrator = new DockerOrchestrator(
+          mockDocker.docker as any,
+          config
+        );
+        await orchestrator.up(['dvm']);
+
+        const dvmCall = mockDocker.docker.createContainer.mock.calls.find(
+          (c: any[]) => c[0]?.name === 'townhouse-dvm'
+        );
+        expect(dvmCall).toBeDefined();
+        const env: string[] = dvmCall?.[0]?.Env ?? [];
+        expect(env.some((e) => e.startsWith('TURBO_TOKEN='))).toBe(false);
+      } finally {
+        if (original !== undefined) {
+          process.env['TURBO_TOKEN'] = original;
+        }
+      }
+    });
+
+    it('does NOT create relay ator sidecar when relayHiddenService is unset', async () => {
+      const config = configWithNodes(['town']);
+      // transport.relayHiddenService intentionally undefined
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['town']);
+
+      expect(mockDocker.docker.createContainer).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-ator-sidecar-relay',
+        })
+      );
+    });
+
+    it('does NOT include TOON_EXTERNAL_RELAY_URL env on town when relayHiddenService is unset', async () => {
+      const config = configWithNodes(['town']);
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['town']);
+
+      const townCall = mockDocker.docker.createContainer.mock.calls.find(
+        (c: any[]) => c[0]?.name === 'townhouse-town'
+      );
+      expect(townCall).toBeDefined();
+      const townEnv: string[] = townCall?.[0]?.Env ?? [];
+      expect(
+        townEnv.some((e) => e.startsWith('TOON_EXTERNAL_RELAY_URL='))
+      ).toBe(false);
+    });
+
+    it('creates relay ator sidecar with correct env when relayHiddenService is set', async () => {
+      const config = configWithNodes(['town']);
+      config.transport.relayHiddenService = {
+        dir: '/var/lib/townhouse/hs/relay',
+        port: 7100,
+        externalUrl: 'wss://abc123.anyone',
+      };
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['town']);
+
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-ator-sidecar-relay',
+          Image: 'toon:townhouse-ator-sidecar',
+          Env: expect.arrayContaining([
+            'HS_TARGET_HOST=townhouse-town',
+            'HS_TARGET_PORT=7100',
+            'HS_PORT=7100',
+            'SOCKS_PORT=9051',
+          ]),
+          HostConfig: expect.objectContaining({
+            NetworkMode: 'townhouse-net',
+            Binds: expect.arrayContaining([
+              '/var/lib/townhouse/hs/relay:/var/lib/anon/hs:rw',
+            ]),
+          }),
+        })
+      );
+    });
+
+    it('passes TOON_EXTERNAL_RELAY_URL to town when relayHiddenService.externalUrl is set', async () => {
+      const config = configWithNodes(['town']);
+      config.transport.relayHiddenService = {
+        dir: '/var/lib/townhouse/hs/relay',
+        port: 7100,
+        externalUrl: 'wss://abc123.anyone',
+      };
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['town']);
+
+      expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-town',
+          Env: expect.arrayContaining([
+            'TOON_EXTERNAL_RELAY_URL=wss://abc123.anyone',
+          ]),
+        })
+      );
+    });
+
+    it('does NOT create relay sidecar when town profile is absent (mill-only)', async () => {
+      const config = configWithNodes(['mill']);
+      config.transport.relayHiddenService = {
+        dir: '/var/lib/townhouse/hs/relay',
+        port: 7100,
+        externalUrl: 'wss://abc123.anyone',
+      };
+
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.up(['mill']);
+
+      expect(mockDocker.docker.createContainer).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'townhouse-ator-sidecar-relay',
+        })
+      );
+    });
+
+    it('down() stops the relay ator sidecar alongside other townhouse containers', async () => {
+      const stopped: string[] = [];
+
+      mockDocker.docker.listContainers.mockResolvedValue([
+        { Names: ['/townhouse-connector'], State: 'running' },
+        { Names: ['/townhouse-town'], State: 'running' },
+        { Names: ['/townhouse-ator-sidecar-relay'], State: 'running' },
+      ]);
+      mockDocker.docker.getContainer.mockImplementation((name: string) => ({
+        start: vi.fn().mockResolvedValue(undefined),
+        stop: vi.fn().mockImplementation(async () => {
+          stopped.push(name);
+        }),
+        remove: vi.fn().mockResolvedValue(undefined),
+        inspect: vi.fn().mockResolvedValue({
+          State: { Health: { Status: 'healthy' }, Running: true },
+        }),
+      }));
+
+      const config = configWithNodes(['town']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+      );
+      await orchestrator.down();
+
+      expect(stopped).toContain('townhouse-ator-sidecar-relay');
+      // sidecar is stopped before the connector (parallel "node" group)
+      expect(stopped.indexOf('townhouse-ator-sidecar-relay')).toBeLessThan(
+        stopped.indexOf('townhouse-connector')
       );
     });
 

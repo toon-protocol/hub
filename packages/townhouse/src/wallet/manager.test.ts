@@ -1,5 +1,5 @@
 /**
- * Unit Tests: WalletManager (Story 21.4)
+ * Unit Tests: WalletManager (Story 21.4 + 21.11 extension)
  *
  * Test IDs map to test-design-epic-21.md scenarios T-023, T-024, T-029, T-030, T-031, T-034, T-035.
  *
@@ -7,6 +7,7 @@
  * - AC #1: WalletManager implementing HD key derivation
  * - AC #3: Per-node HD derivation following BIP-44 paths
  * - AC #4: Nostr keypair + EVM address derived per node
+ * - AC-4 (21.11): Mill NodeKeyInfo extended with solanaAddress + minaAddress
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -30,16 +31,16 @@ describe('WalletManager', () => {
   // ── T-023: BIP-39 mnemonic generation ──
 
   describe('generate()', () => {
-    it('produces a valid 12-word BIP-39 mnemonic', () => {
-      const result = manager.generate();
+    it('produces a valid 12-word BIP-39 mnemonic', async () => {
+      const result = await manager.generate();
 
       expect(result.mnemonic).toBeDefined();
       const words = result.mnemonic.split(' ');
       expect(words).toHaveLength(12);
     });
 
-    it('produces a WalletState with keys for all node types', () => {
-      const result = manager.generate();
+    it('produces a WalletState with keys for all node types', async () => {
+      const result = await manager.generate();
 
       expect(result.state).toBeDefined();
       expect(result.state.keys.town).toBeDefined();
@@ -47,8 +48,8 @@ describe('WalletManager', () => {
       expect(result.state.keys.dvm).toBeDefined();
     });
 
-    it('produces different keys per node type', () => {
-      const { state } = manager.generate();
+    it('produces different keys per node type', async () => {
+      const { state } = await manager.generate();
       expect(state.keys.town.nostrPubkey).not.toBe(state.keys.mill.nostrPubkey);
       expect(state.keys.mill.nostrPubkey).not.toBe(state.keys.dvm.nostrPubkey);
       expect(state.keys.town.evmAddress).not.toBe(state.keys.mill.evmAddress);
@@ -58,15 +59,15 @@ describe('WalletManager', () => {
   // ── T-035: Import existing mnemonic (12 or 24 words) ──
 
   describe('fromMnemonic()', () => {
-    it('accepts a valid 12-word mnemonic', () => {
-      const state = manager.fromMnemonic(TEST_MNEMONIC_12);
+    it('accepts a valid 12-word mnemonic', async () => {
+      const state = await manager.fromMnemonic(TEST_MNEMONIC_12);
       expect(state).toBeDefined();
       expect(state.keys.town.nostrPubkey).toBeDefined();
       expect(state.keys.town.nostrPubkey.length).toBe(64);
     });
 
-    it('accepts a valid 24-word mnemonic', () => {
-      const state = manager.fromMnemonic(TEST_MNEMONIC_24);
+    it('accepts a valid 24-word mnemonic', async () => {
+      const state = await manager.fromMnemonic(TEST_MNEMONIC_24);
       expect(state).toBeDefined();
       expect(state.keys.town.nostrPubkey).toBeDefined();
       expect(state.keys.town.nostrPubkey.length).toBe(64);
@@ -74,26 +75,26 @@ describe('WalletManager', () => {
 
     // ── T-034: Invalid mnemonic rejected ──
 
-    it('rejects an invalid mnemonic (wrong checksum)', () => {
-      expect(() => manager.fromMnemonic(INVALID_MNEMONIC)).toThrow(
+    it('rejects an invalid mnemonic (wrong checksum)', async () => {
+      await expect(manager.fromMnemonic(INVALID_MNEMONIC)).rejects.toThrow(
         /invalid.*mnemonic/i
       );
     });
 
-    it('rejects a mnemonic with non-BIP39 words', () => {
-      expect(() =>
+    it('rejects a mnemonic with non-BIP39 words', async () => {
+      await expect(
         manager.fromMnemonic(
           'xyzzy plugh xyzzy plugh xyzzy plugh xyzzy plugh xyzzy plugh xyzzy plugh'
         )
-      ).toThrow(/invalid.*mnemonic/i);
+      ).rejects.toThrow(/invalid.*mnemonic/i);
     });
   });
 
   // ── T-024: Per-node HD derivation produces distinct keys ──
 
   describe('getNodeKeys()', () => {
-    it('produces distinct Nostr pubkeys for each node type', () => {
-      manager.fromMnemonic(TEST_MNEMONIC_12);
+    it('produces distinct Nostr pubkeys for each node type', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
 
       const townKeys = manager.getNodeKeys('town');
       const millKeys = manager.getNodeKeys('mill');
@@ -109,8 +110,8 @@ describe('WalletManager', () => {
       expect(millKeys.nostrPubkey).not.toBe(dvmKeys.nostrPubkey);
     });
 
-    it('produces distinct EVM addresses for each node type', () => {
-      manager.fromMnemonic(TEST_MNEMONIC_12);
+    it('produces distinct EVM addresses for each node type', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
 
       const townKeys = manager.getNodeKeys('town');
       const millKeys = manager.getNodeKeys('mill');
@@ -125,16 +126,16 @@ describe('WalletManager', () => {
       expect(millKeys.evmAddress).not.toBe(dvmKeys.evmAddress);
     });
 
-    it('includes derivation paths in returned key info', () => {
-      manager.fromMnemonic(TEST_MNEMONIC_12);
+    it('includes derivation paths in returned key info', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
 
       const townKeys = manager.getNodeKeys('town');
       expect(townKeys.nostrDerivationPath).toBe("m/44'/1237'/0'/0/0");
       expect(townKeys.evmDerivationPath).toBe("m/44'/60'/0'/0/0");
     });
 
-    it('returns correct key material types', () => {
-      manager.fromMnemonic(TEST_MNEMONIC_12);
+    it('returns correct key material types', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
 
       const keys = manager.getNodeKeys('town');
       expect(keys.nostrSecretKey).toBeInstanceOf(Uint8Array);
@@ -146,30 +147,55 @@ describe('WalletManager', () => {
     it('throws if wallet not initialized', () => {
       expect(() => manager.getNodeKeys('town')).toThrow(/not initialized/i);
     });
+
+    it('mill NodeKeys includes solanaAddress and minaAddress (AC-4 21.11)', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
+      const millKeys = manager.getNodeKeys('mill');
+      expect(typeof millKeys.solanaAddress).toBe('string');
+      expect(millKeys.solanaAddress!.length).toBeGreaterThan(20);
+      expect(typeof millKeys.minaAddress).toBe('string');
+      expect(millKeys.minaAddress!.length).toBeGreaterThan(20);
+      // town and dvm should NOT have these fields
+      const townKeys = manager.getNodeKeys('town');
+      expect(townKeys.solanaAddress).toBeUndefined();
+      expect(townKeys.minaAddress).toBeUndefined();
+    });
   });
 
   // ── T-029: Deterministic derivation ──
 
   describe('deterministic derivation', () => {
-    it('same mnemonic produces same keys on repeated calls', () => {
+    it('same mnemonic produces same keys on repeated calls', async () => {
       const manager1 = new WalletManager({ encryptedPath: '/tmp/test1.enc' });
-      manager1.fromMnemonic(TEST_MNEMONIC_12);
+      await manager1.fromMnemonic(TEST_MNEMONIC_12);
       const keys1 = manager1.getNodeKeys('town');
 
       const manager2 = new WalletManager({ encryptedPath: '/tmp/test2.enc' });
-      manager2.fromMnemonic(TEST_MNEMONIC_12);
+      await manager2.fromMnemonic(TEST_MNEMONIC_12);
       const keys2 = manager2.getNodeKeys('town');
 
       expect(keys1.nostrPubkey).toBe(keys2.nostrPubkey);
       expect(keys1.evmAddress).toBe(keys2.evmAddress);
+    });
+
+    it('mill solanaAddress is deterministic from mnemonic (AC-4 21.11)', async () => {
+      const manager1 = new WalletManager({ encryptedPath: '/tmp/test1.enc' });
+      await manager1.fromMnemonic(TEST_MNEMONIC_12);
+
+      const manager2 = new WalletManager({ encryptedPath: '/tmp/test2.enc' });
+      await manager2.fromMnemonic(TEST_MNEMONIC_12);
+
+      expect(manager1.getNodeKeys('mill').solanaAddress).toBe(
+        manager2.getNodeKeys('mill').solanaAddress
+      );
     });
   });
 
   // ── T-030: lock() zeros key material ──
 
   describe('lock()', () => {
-    it('zeros all in-memory key material', () => {
-      manager.fromMnemonic(TEST_MNEMONIC_12);
+    it('zeros all in-memory key material', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
 
       const townKeys = manager.getNodeKeys('town');
       const secretRef = townKeys.nostrSecretKey;
@@ -186,14 +212,14 @@ describe('WalletManager', () => {
       expect(evmRef.every((b) => b === 0)).toBe(true);
     });
 
-    it('makes getNodeKeys() throw after lock', () => {
-      manager.fromMnemonic(TEST_MNEMONIC_12);
+    it('makes getNodeKeys() throw after lock', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
       manager.lock();
       expect(() => manager.getNodeKeys('town')).toThrow(/not initialized/i);
     });
 
-    it('is safe to call multiple times', () => {
-      manager.fromMnemonic(TEST_MNEMONIC_12);
+    it('is safe to call multiple times', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
       manager.lock();
       manager.lock(); // Should not throw
     });
@@ -202,8 +228,8 @@ describe('WalletManager', () => {
   // ── getAllKeys() ──
 
   describe('getAllKeys()', () => {
-    it('returns key info for all three node types', () => {
-      manager.fromMnemonic(TEST_MNEMONIC_12);
+    it('returns key info for all three node types', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
 
       const allKeys = manager.getAllKeys();
 
@@ -214,8 +240,8 @@ describe('WalletManager', () => {
       expect(nodeTypes).toContain('dvm');
     });
 
-    it('each key info contains nostrPubkey and evmAddress but not secrets', () => {
-      manager.fromMnemonic(TEST_MNEMONIC_12);
+    it('each key info contains nostrPubkey and evmAddress but not secrets', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
 
       const allKeys = manager.getAllKeys();
 
@@ -234,6 +260,18 @@ describe('WalletManager', () => {
       }
     });
 
+    it('mill NodeKeyInfo includes solanaAddress and minaAddress (AC-4 21.11)', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
+      const allKeys = manager.getAllKeys();
+      const millInfo = allKeys.find((k) => k.nodeType === 'mill')!;
+      expect(typeof millInfo.solanaAddress).toBe('string');
+      expect(typeof millInfo.minaAddress).toBe('string');
+      // town and dvm should NOT have these fields
+      const townInfo = allKeys.find((k) => k.nodeType === 'town')!;
+      expect(townInfo.solanaAddress).toBeUndefined();
+      expect(townInfo.minaAddress).toBeUndefined();
+    });
+
     it('throws if wallet not initialized', () => {
       expect(() => manager.getAllKeys()).toThrow(/not initialized/i);
     });
@@ -242,8 +280,8 @@ describe('WalletManager', () => {
   // ── Derivation paths ──
 
   describe('derivation paths', () => {
-    it('uses correct BIP-44 paths per node type', () => {
-      manager.fromMnemonic(TEST_MNEMONIC_12);
+    it('uses correct BIP-44 paths per node type', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
 
       const town = manager.getNodeKeys('town');
       expect(town.nostrDerivationPath).toBe("m/44'/1237'/0'/0/0");

@@ -7,12 +7,30 @@
  */
 
 import { EventEmitter } from 'node:events';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type Docker from 'dockerode';
 import type { TownhouseConfig } from '../config/schema.js';
 import { ConnectorConfigGenerator } from '../connector/config-generator.js';
-import { CONTAINER_PREFIX } from '../constants.js';
-import type { NodeType, HealthCheckOptions } from './types.js';
+import {
+  CONTAINER_PREFIX,
+  TOWN_HEALTH_PORT,
+  MILL_HEALTH_PORT,
+  DVM_HEALTH_PORT,
+} from '../constants.js';
+import type { NodeType, HealthCheckOptions, BandwidthStats } from './types.js';
 import type { WalletManager } from '../wallet/index.js';
+
+/** Nostr relay WebSocket port on Town containers (fixed by Dockerfile) */
+const TOWN_RELAY_PORT = 7100;
+
+/** Container stats cache TTL in milliseconds */
+const STATS_CACHE_TTL_MS = 5_000;
+
+interface CachedStats {
+  data: BandwidthStats | null;
+  cachedAt: number;
+}
 
 /** Docker bridge network name */
 const NETWORK_NAME = 'townhouse-net';
@@ -29,6 +47,16 @@ const MAX_START_RETRIES = 3;
 
 /** Internal connector port (Docker-internal, not exposed to host) */
 const CONNECTOR_INTERNAL_PORT = 3000;
+
+/** Default ator sidecar image tag for relay hidden service publication. */
+const RELAY_ATOR_SIDECAR_IMAGE = 'toon:townhouse-ator-sidecar';
+
+/**
+ * SOCKS port for the relay-side ator sidecar. Distinct from the connector
+ * HS sidecar's 9050 so the two can coexist on the same Docker network if
+ * both transports are enabled.
+ */
+const RELAY_ATOR_SOCKS_PORT = 9051;
 
 /**
  * Normalize a Docker image reference to include an explicit tag.
@@ -61,6 +89,7 @@ export class DockerOrchestrator extends EventEmitter {
   private readonly configGenerator: ConnectorConfigGenerator;
   private readonly walletManager: WalletManager | undefined;
   private activeNodes: NodeType[] = [];
+  private readonly statsCache = new Map<string, CachedStats>();
 
   constructor(
     docker: Docker,
@@ -90,6 +119,13 @@ export class DockerOrchestrator extends EventEmitter {
 
     // Start all node containers in parallel
     await Promise.all(profiles.map((type) => this.startNode(type)));
+
+    // Optional: bring up the relay-side ator sidecar after town is started.
+    // It forwards inbound HS traffic to the town container's relay WS port,
+    // so it must be created after the town container exists in DNS.
+    if (profiles.includes('town') && this.config.transport.relayHiddenService) {
+      await this.startRelayAtorSidecar();
+    }
   }
 
   /**
@@ -103,21 +139,35 @@ export class DockerOrchestrator extends EventEmitter {
 
     this.emit('connectorRestarting', { reason: 'peer list updated' });
 
-    // Stop and remove existing connector
+    // Stop and remove existing connector.
+    // Use separate try-catch blocks so a failed stop() (e.g. container in
+    // Created/exited state) still allows remove() to run and clear the name.
     const connectorName = `${CONTAINER_PREFIX}connector`;
+    const existingContainer = this.docker.getContainer(connectorName);
     try {
-      const container = this.docker.getContainer(connectorName);
-      await container.stop({ t: 5 });
-      await container.remove();
+      await existingContainer.stop({ t: 5 });
     } catch {
-      // Container may not exist — proceed with creation
+      /* not running */
+    }
+    try {
+      await existingContainer.remove();
+    } catch {
+      /* may not exist */
     }
 
-    // Start new connector with updated config
-    await this.startConnector();
-    await this.waitForHealth(connectorName);
+    // Ensure the network exists — regenerate can be called independently of
+    // up() (e.g. fee change), so we cannot assume ensureNetwork() already ran.
+    await this.ensureNetwork();
 
-    this.emit('connectorRestarted', { peers: activeNodes });
+    // Start new connector with updated config. Always emit connectorRestarted in
+    // a finally block so WS clients clear the restarting state even when the
+    // connector fails to start (prevents isRestarting stuck indefinitely in UI).
+    try {
+      await this.startConnector();
+      await this.waitForHealth(connectorName);
+    } finally {
+      this.emit('connectorRestarted', { peers: activeNodes });
+    }
   }
 
   /**
@@ -186,35 +236,198 @@ export class DockerOrchestrator extends EventEmitter {
   }
 
   /**
+   * Resolve the Nostr relay WebSocket URL for a Town node instance.
+   *
+   * Inspects the container's port bindings to get the host-bound port for
+   * the relay WebSocket (7100/tcp). Falls back to the Docker-internal URL
+   * when the server is running inside the Docker network or bindings are absent.
+   *
+   * @param nodeId - The `NodeInfo.id` value (e.g. 'town', 'dev-town-01')
+   */
+  async getNodeRelayEndpoint(nodeId: string): Promise<string> {
+    const containerName = `${CONTAINER_PREFIX}${nodeId}`;
+    try {
+      const container = this.docker.getContainer(containerName);
+      const info = await container.inspect();
+      const portBindings = info.HostConfig?.PortBindings as
+        | Record<string, { HostIp?: string; HostPort?: string }[] | null>
+        | undefined;
+      const binding = portBindings?.[`${TOWN_RELAY_PORT}/tcp`]?.[0];
+      if (binding?.HostPort) {
+        const host =
+          binding.HostIp && binding.HostIp !== '0.0.0.0'
+            ? binding.HostIp
+            : '127.0.0.1';
+        // nosemgrep: javascript.lang.security.detect-insecure-websocket -- operator-controlled host, not user input
+        return `ws://${host}:${binding.HostPort}`;
+      }
+    } catch {
+      // Container not found or inspect failed — fall through to Docker-internal fallback
+    }
+    // Docker-internal fallback (server running inside Docker network)
+    // nosemgrep: javascript.lang.security.detect-insecure-websocket -- Docker-internal, TLS unnecessary
+    return `ws://${containerName}:${TOWN_RELAY_PORT}`;
+  }
+
+  /**
+   * Resolve the BLS health HTTP URL for a node instance.
+   *
+   * Inspects the container's port bindings to find the host-bound port for the
+   * node's health endpoint. Falls back to Docker-internal URL when running
+   * inside the Docker network or when bindings are absent.
+   *
+   * @param nodeId - The `NodeInfo.id` value (e.g. 'mill', 'dev-mill-01')
+   * @param type - Node type (determines which internal port to use)
+   */
+  async getNodeHealthEndpoint(
+    nodeId: string,
+    type: 'town' | 'mill' | 'dvm'
+  ): Promise<string> {
+    const port =
+      type === 'town'
+        ? TOWN_HEALTH_PORT
+        : type === 'mill'
+          ? MILL_HEALTH_PORT
+          : DVM_HEALTH_PORT;
+    const containerName = `${CONTAINER_PREFIX}${nodeId}`;
+    try {
+      const container = this.docker.getContainer(containerName);
+      const info = await container.inspect();
+      const portBindings = info.HostConfig?.PortBindings as
+        | Record<string, { HostIp?: string; HostPort?: string }[] | null>
+        | undefined;
+      const binding = portBindings?.[`${port}/tcp`]?.[0];
+      if (binding?.HostPort) {
+        const host =
+          binding.HostIp && binding.HostIp !== '0.0.0.0'
+            ? binding.HostIp
+            : '127.0.0.1';
+        return `http://${host}:${binding.HostPort}`;
+      }
+    } catch {
+      // Container not found or inspect failed — fall through to Docker-internal fallback
+    }
+    return `http://${containerName}:${port}`;
+  }
+
+  /**
+   * Fetch network I/O stats for a container.
+   * Results are cached for 5 seconds to avoid per-request Docker API overhead.
+   *
+   * @param containerName - Full container name (e.g. 'townhouse-town')
+   * @returns Bandwidth stats or null when container is not running
+   */
+  async getContainerStats(
+    containerName: string
+  ): Promise<BandwidthStats | null> {
+    const cached = this.statsCache.get(containerName);
+    if (cached && Date.now() - cached.cachedAt < STATS_CACHE_TTL_MS) {
+      return cached.data;
+    }
+
+    try {
+      const container = this.docker.getContainer(containerName);
+      const stats = (await container.stats({
+        stream: false,
+      })) as unknown as Record<string, unknown>;
+
+      const networks = stats['networks'] as
+        | Record<string, { rx_bytes?: number; tx_bytes?: number }>
+        | undefined;
+
+      if (!networks) {
+        const result: BandwidthStats = {
+          bytesIn: 0,
+          bytesOut: 0,
+          sampleAt: Date.now(),
+        };
+        this.statsCache.set(containerName, {
+          data: result,
+          cachedAt: Date.now(),
+        });
+        return result;
+      }
+
+      let bytesIn = 0;
+      let bytesOut = 0;
+      for (const iface of Object.values(networks)) {
+        bytesIn += iface.rx_bytes ?? 0;
+        bytesOut += iface.tx_bytes ?? 0;
+      }
+
+      const result: BandwidthStats = {
+        bytesIn,
+        bytesOut,
+        sampleAt: Date.now(),
+      };
+      this.statsCache.set(containerName, {
+        data: result,
+        cachedAt: Date.now(),
+      });
+      return result;
+    } catch {
+      // Container not running or stats unavailable
+      this.statsCache.set(containerName, { data: null, cachedAt: Date.now() });
+      return null;
+    }
+  }
+
+  /**
    * Return status for all townhouse containers.
+   *
+   * Discovers both single-instance (townhouse-<type>) and multi-instance
+   * (townhouse-<prefix>-<type>-<n>) containers. Multi-instance containers
+   * are returned with a `name` matching their instance suffix so callers
+   * can build per-instance NodeInfo entries (e.g. "dev-town-01").
    */
   async status(): Promise<
     {
       name: string;
+      type: 'connector' | 'town' | 'mill' | 'dvm';
       state: string;
       health?: string;
       startedAt?: string;
     }[]
   > {
     const containers = await this.docker.listContainers({ all: true });
-    const allTypes = ['connector', 'town', 'mill', 'dvm'] as const;
+    const nodeTypes = ['town', 'mill', 'dvm'] as const;
+    const allTypes = ['connector', ...nodeTypes] as const;
+
+    // Collect all containers that belong to this townhouse instance
+    const matching: {
+      containerName: string;
+      type: (typeof allTypes)[number];
+      info: (typeof containers)[number];
+    }[] = [];
+
+    for (const c of containers) {
+      for (const rawName of c.Names) {
+        const name = rawName.startsWith('/') ? rawName.slice(1) : rawName;
+        if (!name.startsWith(CONTAINER_PREFIX)) continue;
+        const suffix = name.slice(CONTAINER_PREFIX.length); // e.g. "town", "dev-town-01"
+        for (const type of allTypes) {
+          if (
+            suffix === type ||
+            suffix.endsWith(`-${type}`) ||
+            suffix.includes(`-${type}-`)
+          ) {
+            matching.push({ containerName: name, type, info: c });
+            break;
+          }
+        }
+      }
+    }
 
     const results: {
       name: string;
+      type: (typeof allTypes)[number];
       state: string;
       health?: string;
       startedAt?: string;
     }[] = [];
-    for (const type of allTypes) {
-      const containerName = `${CONTAINER_PREFIX}${type}`;
-      const info = containers.find((c) =>
-        c.Names.some((n) => n === `/${containerName}` || n === containerName)
-      );
-      if (!info) {
-        results.push({ name: type, state: 'stopped' });
-        continue;
-      }
 
+    for (const { containerName, type, info } of matching) {
+      const suffix = containerName.slice(CONTAINER_PREFIX.length); // e.g. "town", "dev-town-01"
       let health: string | undefined;
       let startedAt: string | undefined;
       try {
@@ -225,14 +438,22 @@ export class DockerOrchestrator extends EventEmitter {
       } catch {
         // Inspect may fail if container is being removed — skip health and startedAt
       }
-
       results.push({
-        name: type,
+        name: suffix, // "town" for single-instance, "dev-town-01" for multi
+        type,
         state: info.State ?? 'stopped',
         ...(health !== undefined ? { health } : {}),
         ...(startedAt !== undefined ? { startedAt } : {}),
       });
     }
+
+    // Ensure every type has at least one entry (stopped placeholder)
+    for (const type of allTypes) {
+      if (!results.some((r) => r.type === type)) {
+        results.push({ name: type, type, state: 'stopped' });
+      }
+    }
+
     return results;
   }
 
@@ -252,6 +473,13 @@ export class DockerOrchestrator extends EventEmitter {
       const nodeConfig = this.config.nodes[type];
       const image = nodeConfig.image ?? DEFAULT_NODE_IMAGES[type];
       imagesToPull.add(normalizeImageTag(image));
+    }
+
+    // Pull the relay ator sidecar when the operator opted in. Built locally
+    // by docker/townhouse-ator-sidecar — pull may 404, which is fine; the
+    // operator must have built it before `townhouse up` (see README).
+    if (profiles.includes('town') && this.config.transport.relayHiddenService) {
+      imagesToPull.add(normalizeImageTag(RELAY_ATOR_SIDECAR_IMAGE));
     }
 
     // Check which images exist locally
@@ -363,10 +591,30 @@ export class DockerOrchestrator extends EventEmitter {
 
   /**
    * Start the connector container — always runs first.
+   *
+   * The connector image at 3.3.x reads its config from a YAML file pointed
+   * to by the `CONFIG_FILE` env var (default `./config.yaml`). We write the
+   * generated YAML to `<configDir>/connector.yaml` (sibling to wallet.enc),
+   * mount it as `/config/connector.yaml`, and set CONFIG_FILE accordingly.
+   *
+   * (Env-var-based config was set on the container historically but the
+   * connector image silently ignored them — see the YAML fix landing with
+   * this comment block.)
    */
   private async startConnector(): Promise<void> {
     const name = `${CONTAINER_PREFIX}connector`;
     const env = this.buildConnectorEnv();
+    env.push('CONFIG_FILE=/config/connector.yaml');
+
+    // Write the YAML config beside the wallet so it's stable across restarts.
+    const configDir = dirname(this.config.wallet.encrypted_path);
+    mkdirSync(configDir, { recursive: true, mode: 0o700 });
+    const yamlPath = join(configDir, 'connector.yaml');
+    const runtimeConfig = this.configGenerator.generate(this.activeNodes);
+    writeFileSync(yamlPath, this.configGenerator.toYaml(runtimeConfig), {
+      encoding: 'utf-8',
+      mode: 0o600,
+    });
 
     this.emit('containerState', { name, state: 'creating' });
 
@@ -380,6 +628,7 @@ export class DockerOrchestrator extends EventEmitter {
       },
       HostConfig: {
         NetworkMode: NETWORK_NAME,
+        Binds: [`${yamlPath}:/config/connector.yaml:ro`],
         PortBindings: {
           [`${this.config.connector.adminPort}/tcp`]: [
             {
@@ -449,6 +698,44 @@ export class DockerOrchestrator extends EventEmitter {
    */
   private async waitForHealth(containerName: string): Promise<void> {
     await this.healthCheck(containerName);
+  }
+
+  /**
+   * Start the relay-side ator sidecar that publishes a v3 hidden service
+   * forwarding inbound traffic to the town container's Nostr WebSocket port.
+   *
+   * The keypair directory is mounted read-write because the sidecar's
+   * entrypoint writes the `hostname` file on first boot (see
+   * docker/townhouse-ator-sidecar/Dockerfile). The town container picks up
+   * the resulting .anyone URL via the operator-set externalUrl field.
+   */
+  private async startRelayAtorSidecar(): Promise<void> {
+    const hsConfig = this.config.transport.relayHiddenService;
+    if (!hsConfig) return;
+
+    const name = `${CONTAINER_PREFIX}ator-sidecar-relay`;
+    const env = [
+      `HS_TARGET_HOST=${CONTAINER_PREFIX}town`,
+      `HS_TARGET_PORT=${TOWN_RELAY_PORT}`,
+      `HS_PORT=${hsConfig.port}`,
+      `SOCKS_PORT=${RELAY_ATOR_SOCKS_PORT}`,
+    ];
+
+    this.emit('containerState', { name, state: 'creating' });
+
+    const container = await this.docker.createContainer({
+      name,
+      Image: RELAY_ATOR_SIDECAR_IMAGE,
+      Env: env,
+      HostConfig: {
+        NetworkMode: NETWORK_NAME,
+        Binds: [`${hsConfig.dir}:/var/lib/anon/hs:rw`],
+      },
+    });
+
+    this.emit('containerState', { name, state: 'starting' });
+    await container.start();
+    this.emit('containerState', { name, state: 'running' });
   }
 
   /**
@@ -526,6 +813,16 @@ export class DockerOrchestrator extends EventEmitter {
         if (feePerEvent !== undefined) {
           env.push(`FEE_PER_EVENT=${feePerEvent}`);
         }
+        // When the operator opts into a relay hidden service, the .anyone URL
+        // is advertised via packages/town/src/cli.ts which reads
+        // TOON_EXTERNAL_RELAY_URL into config.externalRelayUrl. We deliberately
+        // do NOT set config.ator.enabled — that would bind the relay to
+        // 127.0.0.1 inside the container, which the sidecar (reaching town via
+        // Docker DNS) cannot then forward to.
+        const relayHs = this.config.transport.relayHiddenService;
+        if (relayHs?.externalUrl) {
+          env.push(`TOON_EXTERNAL_RELAY_URL=${relayHs.externalUrl}`);
+        }
         break;
       }
       case 'mill': {
@@ -539,6 +836,19 @@ export class DockerOrchestrator extends EventEmitter {
         const feePerJob = this.config.nodes.dvm.feePerJob;
         if (feePerJob !== undefined) {
           env.push(`FEE_PER_JOB=${feePerJob}`);
+        }
+        const kindPricing = this.config.nodes.dvm.kindPricing;
+        if (kindPricing) {
+          for (const [kind, value] of Object.entries(kindPricing)) {
+            env.push(`KIND_PRICING_${kind}=${value}`);
+          }
+        }
+        // Arweave DVM (kind:5094) requires TURBO_TOKEN for authenticated
+        // uploads. Without it, the entrypoint installs a stub adapter that
+        // throws on first upload — dev-mode capped paths don't apply here.
+        const turboToken = process.env['TURBO_TOKEN'];
+        if (turboToken) {
+          env.push(`TURBO_TOKEN=${turboToken}`);
         }
         break;
       }

@@ -22,7 +22,9 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:canary": "vitest run --config vitest.integration.config.ts src/__integration__/connector-image-contract.test.ts"
   },
   "keywords": [
     "toon",
@@ -52,9 +54,12 @@
     "@noble/hashes": "^1.7.0",
     "@scure/bip32": "^2.0.0",
     "@scure/bip39": "^2.0.0",
-    "fastify": "^5.0.0",
+    "@toon-format/toon": "^1.4.0",
+    "@toon-protocol/mill": "workspace:^",
     "dockerode": "^4.0.0",
+    "fastify": "^5.0.0",
     "nostr-tools": "^2.23.1",
+    "viem": "^2.0.0",
     "yaml": "^2.7.0"
   },
   "devDependencies": {

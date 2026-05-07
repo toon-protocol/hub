@@ -66,6 +66,32 @@ function validateNodeConfig(
   if (raw['feePerJob'] !== undefined) {
     assertNumber(raw['feePerJob'], `${path}.feePerJob`);
   }
+  if (raw['kindPricing'] !== undefined) {
+    assertObject(raw['kindPricing'], `${path}.kindPricing`);
+    for (const [k, v] of Object.entries(
+      raw['kindPricing'] as Record<string, unknown>
+    )) {
+      // Keys must be positive-integer strings — prevents prototype-key
+      // pollution (`__proto__`, `constructor`) and env-var key injection
+      // (newlines / spaces) when the orchestrator emits KIND_PRICING_<k>.
+      if (!/^[0-9]+$/.test(k)) {
+        throw new ConfigValidationError(
+          `${path}.kindPricing has invalid key "${k}" — must be a positive-integer string`
+        );
+      }
+      assertNumber(v, `${path}.kindPricing.${k}`);
+      if (!Number.isInteger(v as number) || (v as number) < 0) {
+        throw new ConfigValidationError(
+          `${path}.kindPricing.${k} must be a non-negative integer`
+        );
+      }
+      if ((v as number) > Number.MAX_SAFE_INTEGER) {
+        throw new ConfigValidationError(
+          `${path}.kindPricing.${k} exceeds Number.MAX_SAFE_INTEGER`
+        );
+      }
+    }
+  }
   if (raw['image'] !== undefined) {
     assertString(raw['image'], `${path}.image`);
   }
@@ -111,6 +137,94 @@ export function validateConfig(raw: unknown): TownhouseConfig {
   if (transport['socksProxy'] !== undefined) {
     assertString(transport['socksProxy'], 'config.transport.socksProxy');
   }
+  if (transport['externalUrl'] !== undefined) {
+    assertString(transport['externalUrl'], 'config.transport.externalUrl');
+  }
+  // hiddenService is optional and only meaningful when mode='ator'. We
+  // validate the inner shape unconditionally if present (a hiddenService
+  // block under mode='direct' is operator confusion, not silent acceptance).
+  if (transport['hiddenService'] !== undefined) {
+    assertObject(transport['hiddenService'], 'config.transport.hiddenService');
+    const hs = transport['hiddenService'] as Record<string, unknown>;
+    assertString(hs['dir'], 'config.transport.hiddenService.dir');
+    assertNumber(hs['port'], 'config.transport.hiddenService.port');
+    assertPort(hs['port'] as number, 'config.transport.hiddenService.port');
+    if (hs['externalUrl'] !== undefined) {
+      assertString(
+        hs['externalUrl'],
+        'config.transport.hiddenService.externalUrl'
+      );
+    }
+    if (hs['startupTimeoutMs'] !== undefined) {
+      assertNumber(
+        hs['startupTimeoutMs'],
+        'config.transport.hiddenService.startupTimeoutMs'
+      );
+    }
+    if (hs['stopTimeoutMs'] !== undefined) {
+      assertNumber(
+        hs['stopTimeoutMs'],
+        'config.transport.hiddenService.stopTimeoutMs'
+      );
+    }
+    if (transport['mode'] !== 'ator') {
+      throw new ConfigValidationError(
+        'config.transport.hiddenService is only valid when config.transport.mode is "ator"'
+      );
+    }
+  }
+  // relayHiddenService is the second optional HS — when set, the orchestrator
+  // launches a parallel sidecar that forwards inbound .anyone traffic to the
+  // town container's port 7100 so external Nostr clients can read the relay
+  // without routing through ILP/BTP. Reuses HiddenServiceConfig shape.
+  if (transport['relayHiddenService'] !== undefined) {
+    assertObject(
+      transport['relayHiddenService'],
+      'config.transport.relayHiddenService'
+    );
+    const hs = transport['relayHiddenService'] as Record<string, unknown>;
+    assertString(hs['dir'], 'config.transport.relayHiddenService.dir');
+    assertNumber(hs['port'], 'config.transport.relayHiddenService.port');
+    assertPort(
+      hs['port'] as number,
+      'config.transport.relayHiddenService.port'
+    );
+    if (hs['externalUrl'] !== undefined) {
+      assertString(
+        hs['externalUrl'],
+        'config.transport.relayHiddenService.externalUrl'
+      );
+    }
+    if (hs['startupTimeoutMs'] !== undefined) {
+      assertNumber(
+        hs['startupTimeoutMs'],
+        'config.transport.relayHiddenService.startupTimeoutMs'
+      );
+    }
+    if (hs['stopTimeoutMs'] !== undefined) {
+      assertNumber(
+        hs['stopTimeoutMs'],
+        'config.transport.relayHiddenService.stopTimeoutMs'
+      );
+    }
+  }
+
+  // mode='ator' requires SOMETHING to advertise: either explicit externalUrl
+  // OR hiddenService (which makes externalUrl='auto' implicit). Without one
+  // of these, the connector's socks5 transport rejects with "missing
+  // required field: transport.externalUrl" and the connector fails to boot.
+  if (
+    transport['mode'] === 'ator' &&
+    transport['externalUrl'] === undefined &&
+    transport['hiddenService'] === undefined
+  ) {
+    throw new ConfigValidationError(
+      'config.transport.mode="ator" requires either config.transport.externalUrl ' +
+        '(operator-managed anon binary) or config.transport.hiddenService ' +
+        '(connector-managed anon binary). Without one of these, the underlying ' +
+        'connector will reject the manifest at boot.'
+    );
+  }
 
   // api
   assertObject(raw['api'], 'config.api');
@@ -141,7 +255,7 @@ export function validateConfig(raw: unknown): TownhouseConfig {
       },
       dvm: {
         enabled: dvm['enabled'] as boolean,
-        ...pickOptional(dvm, ['feePerJob', 'image']),
+        ...pickOptional(dvm, ['feePerJob', 'kindPricing', 'image']),
       },
     },
     wallet: { encrypted_path: wallet['encrypted_path'] as string },
@@ -153,6 +267,31 @@ export function validateConfig(raw: unknown): TownhouseConfig {
       mode: transport['mode'] as 'ator' | 'direct',
       ...(transport['socksProxy'] !== undefined
         ? { socksProxy: transport['socksProxy'] as string }
+        : {}),
+      ...(transport['externalUrl'] !== undefined
+        ? { externalUrl: transport['externalUrl'] as string }
+        : {}),
+      ...(transport['hiddenService'] !== undefined
+        ? {
+            hiddenService: transport['hiddenService'] as {
+              dir: string;
+              port: number;
+              externalUrl?: string;
+              startupTimeoutMs?: number;
+              stopTimeoutMs?: number;
+            },
+          }
+        : {}),
+      ...(transport['relayHiddenService'] !== undefined
+        ? {
+            relayHiddenService: transport['relayHiddenService'] as {
+              dir: string;
+              port: number;
+              externalUrl?: string;
+              startupTimeoutMs?: number;
+              stopTimeoutMs?: number;
+            },
+          }
         : {}),
     },
     api: {

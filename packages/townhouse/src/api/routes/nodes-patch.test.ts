@@ -68,9 +68,14 @@ class MockWalletManager {
 class MockConnectorAdminClient {
   async getMetrics() {
     return {
-      packetsForwarded: 100,
-      packetsRejected: 10,
-      bytesSent: 5000,
+      uptimeSeconds: 60,
+      aggregate: {
+        packetsForwarded: 100,
+        packetsRejected: 10,
+        bytesSent: 5000,
+      },
+      peers: [],
+      timestamp: new Date().toISOString(),
     };
   }
 }
@@ -293,5 +298,97 @@ describe('Config Patch Routes', () => {
 
       await testApp.close();
     });
+  });
+});
+
+// ── kindPricing tests (AC-7, Story 21.12) ────────────────────────────────────
+
+describe('PATCH /nodes/dvm/config — kindPricing support', () => {
+  let app: FastifyInstance;
+  let deps: ApiDeps;
+  let mock: MockDockerOrchestrator;
+
+  beforeEach(async () => {
+    const config = getDefaultConfig();
+    config.nodes.dvm.enabled = true;
+    mock = new MockDockerOrchestrator({ town: true, mill: true, dvm: true });
+    deps = {
+      configPath: '/tmp/test-config.yaml',
+      config,
+      orchestrator: mock as unknown as DockerOrchestrator,
+      wallet: {} as unknown as WalletManager,
+      connectorAdmin: {} as unknown as ConnectorAdminClient,
+    };
+    app = Fastify();
+    registerConfigPatchRoutes(app, deps);
+    resetConfigMutex();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    resetConfigMutex();
+  });
+
+  it('PATCH dvm with kindPricing succeeds and returns kindPricing', async () => {
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/nodes/dvm/config',
+      payload: { kindPricing: { '5094': 5 } },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as { kindPricing: Record<string, number> };
+    expect(body.kindPricing).toEqual({ '5094': 5 });
+  });
+
+  it('PATCH dvm with both feePerJob + kindPricing succeeds', async () => {
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/nodes/dvm/config',
+      payload: { feePerJob: 100, kindPricing: { '5094': 5, '5250': 10000 } },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as {
+      feePerJob: number;
+      kindPricing: Record<string, number>;
+    };
+    expect(body.feePerJob).toBe(100);
+    expect(body.kindPricing).toEqual({ '5094': 5, '5250': 10000 });
+    expect(mock.getCalls()).toContain('regenerateConnectorConfig');
+  });
+
+  it('PATCH dvm with kindPricing triggers regenerateConnectorConfig', async () => {
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/nodes/dvm/config',
+      payload: { kindPricing: { '5094': 5 } },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mock.getCalls()).toContain('regenerateConnectorConfig');
+  });
+
+  it('PATCH town with kindPricing returns 400', async () => {
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/nodes/town/config',
+      payload: { kindPricing: { '5094': 5 } },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = response.json() as { error: string; message: string };
+    expect(body.error).toBe('invalid_field');
+    expect(body.message).toContain('kindPricing not supported for type=town');
+  });
+
+  it('PATCH dvm with negative kindPricing value returns 400', async () => {
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/nodes/dvm/config',
+      payload: { kindPricing: { '5094': -1 } },
+    });
+
+    expect(response.statusCode).toBe(400);
   });
 });

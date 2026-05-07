@@ -8,4 +8,5 @@ export type {
   ContainerSpec,
   OrchestratorEvents,
   HealthCheckOptions,
+  BandwidthStats,
 } from './types.js';

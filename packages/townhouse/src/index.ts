@@ -34,16 +34,20 @@ export type {
 export {
   ConnectorConfigGenerator,
   ConnectorAdminClient,
+  TransportProbe,
+  DEFAULT_ATOR_PROXY,
 } from './connector/index.js';
 export type {
   ConnectorRuntimeConfig,
   PeerEntry,
   HealthResponse,
   MetricsResponse,
+  MetricsPeerEntry,
   PeerStatus,
+  PeersResponse,
 } from './connector/index.js';
 
-export { WalletManager } from './wallet/index.js';
+export { WalletManager, encryptWallet, decryptWallet } from './wallet/index.js';
 export type {
   WalletManagerConfig,
   WalletState,
@@ -53,5 +57,51 @@ export type {
   EncryptedWallet,
 } from './wallet/index.js';
 
-export { createApiServer } from './api/index.js';
-export type { ApiServer, ApiDeps } from './api/index.js';
+export { createApiServer, createWizardApiServer } from './api/index.js';
+export type {
+  ApiServer,
+  ApiDeps,
+  NodeState,
+  NodeInfo,
+  NodeDetail,
+  MetricsPayload,
+  WsMessage,
+  WsMetricsMessage,
+  WsNodeStateMessage,
+  WsHeartbeatMessage,
+  WsBatchMessage,
+  WsRelayEventsMessage,
+  WsConnectorRestartingMessage,
+  WsConnectorRestartedMessage,
+  NostrEventPayload,
+  BandwidthPayload,
+  PacketTimeseriesPayload,
+  TimeseriesBucket,
+  NodeHealthPayload,
+  TownHealthPayload,
+  DvmHealthResponse,
+  MillHealthResponse,
+  MillSwapsRecentPayload,
+  JobsRecentPayload,
+  JobsByKindEntry,
+  DepositAddressesPayload,
+  DepositAddressEntry,
+  SwapByPairEntry,
+  WalletBalanceEntry,
+  WalletBalancesPayload,
+  WithdrawRequest,
+  WithdrawResponse,
+  WithdrawSuccessResponse,
+  WithdrawDryRunResponse,
+  RevealRequest,
+  RevealResponse,
+  TransactionReceiptPayload,
+  WizardStatePayload,
+  WizardInitRequest,
+  WizardProgressMessage,
+  TransportStatusPayload,
+  TransportPatchRequest,
+  TransportPatchResponse,
+} from './api/index.js';
+export type { BandwidthStats } from './docker/index.js';
+export type { PacketLogEntry, PacketLogFilter } from './connector/types.js';

@@ -15,20 +15,45 @@ import { getDefaultConfig } from '../../config/defaults.js';
 class MockDockerOrchestrator {
   private containerState: Map<
     string,
-    { name: string; state: string; startedAt?: string }
+    {
+      name: string;
+      type: 'connector' | 'town' | 'mill' | 'dvm';
+      state: string;
+      startedAt?: string;
+    }
   >;
 
   constructor(
-    initialState?: { name: string; state: string; startedAt?: string }[]
+    initialState?: {
+      name: string;
+      type?: 'connector' | 'town' | 'mill' | 'dvm';
+      state: string;
+      startedAt?: string;
+    }[]
   ) {
     this.containerState = new Map();
     (
       initialState ?? [
-        { name: 'town', state: 'running', startedAt: new Date().toISOString() },
-        { name: 'mill', state: 'running', startedAt: new Date().toISOString() },
-        { name: 'dvm', state: 'stopped' },
+        {
+          name: 'town',
+          type: 'town' as const,
+          state: 'running',
+          startedAt: new Date().toISOString(),
+        },
+        {
+          name: 'mill',
+          type: 'mill' as const,
+          state: 'running',
+          startedAt: new Date().toISOString(),
+        },
+        { name: 'dvm', type: 'dvm' as const, state: 'stopped' },
       ]
-    ).forEach((c) => this.containerState.set(c.name, c));
+    ).forEach((c) =>
+      this.containerState.set(c.name, {
+        ...c,
+        type: c.type ?? (c.name as 'connector' | 'town' | 'mill' | 'dvm'),
+      })
+    );
   }
 
   on(_event: string, _callback: (data: unknown) => void): this {
@@ -66,9 +91,14 @@ class MockConnectorAdminClient {
       throw new Error('Connector unavailable');
     }
     return {
-      packetsForwarded: 100,
-      packetsRejected: 10,
-      bytesSent: 5000,
+      uptimeSeconds: 60,
+      aggregate: {
+        packetsForwarded: 100,
+        packetsRejected: 10,
+        bytesSent: 5000,
+      },
+      peers: [],
+      timestamp: new Date().toISOString(),
     };
   }
 }

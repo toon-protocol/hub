@@ -42,9 +42,9 @@ const TEST_MNEMONIC =
 
 describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
   describe('Town node (account index 0)', () => {
-    it('derives deterministic Nostr pubkey for Town', () => {
+    it('derives deterministic Nostr pubkey for Town', async () => {
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const townKeys = manager.getNodeKeys('town');
 
@@ -57,9 +57,9 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
       );
     });
 
-    it('derives deterministic EVM address for Town', () => {
+    it('derives deterministic EVM address for Town', async () => {
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const townKeys = manager.getNodeKeys('town');
 
@@ -73,9 +73,9 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
       );
     });
 
-    it("Town Nostr derivation path is m/44'/1237'/0'/0/0", () => {
+    it("Town Nostr derivation path is m/44'/1237'/0'/0/0", async () => {
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const townKeys = manager.getNodeKeys('town');
       expect(townKeys.nostrDerivationPath).toBe("m/44'/1237'/0'/0/0");
@@ -83,9 +83,9 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
   });
 
   describe('Mill node (account index 1)', () => {
-    it('derives a different Nostr pubkey than Town', () => {
+    it('derives a different Nostr pubkey than Town', async () => {
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const townKeys = manager.getNodeKeys('town');
       const millKeys = manager.getNodeKeys('mill');
@@ -94,9 +94,9 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
       expect(millKeys.nostrPubkey).not.toBe(townKeys.nostrPubkey);
     });
 
-    it('derives a different EVM address than Town', () => {
+    it('derives a different EVM address than Town', async () => {
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const townKeys = manager.getNodeKeys('town');
       const millKeys = manager.getNodeKeys('mill');
@@ -107,9 +107,9 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
       );
     });
 
-    it("Mill Nostr derivation path is m/44'/1237'/1'/0/0", () => {
+    it("Mill Nostr derivation path is m/44'/1237'/1'/0/0", async () => {
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const millKeys = manager.getNodeKeys('mill');
       expect(millKeys.nostrDerivationPath).toBe("m/44'/1237'/1'/0/0");
@@ -117,9 +117,9 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
   });
 
   describe('DVM node (account index 2)', () => {
-    it('derives a different Nostr pubkey than Town and Mill', () => {
+    it('derives a different Nostr pubkey than Town and Mill', async () => {
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const townKeys = manager.getNodeKeys('town');
       const millKeys = manager.getNodeKeys('mill');
@@ -130,9 +130,9 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
       expect(dvmKeys.nostrPubkey).not.toBe(millKeys.nostrPubkey);
     });
 
-    it('derives a different EVM address than Town and Mill', () => {
+    it('derives a different EVM address than Town and Mill', async () => {
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const townKeys = manager.getNodeKeys('town');
       const millKeys = manager.getNodeKeys('mill');
@@ -147,9 +147,9 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
       );
     });
 
-    it("DVM Nostr derivation path is m/44'/1237'/2'/0/0", () => {
+    it("DVM Nostr derivation path is m/44'/1237'/2'/0/0", async () => {
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const dvmKeys = manager.getNodeKeys('dvm');
       expect(dvmKeys.nostrDerivationPath).toBe("m/44'/1237'/2'/0/0");
@@ -159,9 +159,9 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
   // ── Cross-version consistency: exact golden values ──
 
   describe('exact golden values (cross-version consistency)', () => {
-    it('all derivations are reproducible from the test mnemonic', () => {
+    it('all derivations are reproducible from the test mnemonic', async () => {
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const town = manager.getNodeKeys('town');
       const mill = manager.getNodeKeys('mill');
@@ -200,7 +200,7 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
   // ── T-025: No collision with existing SDK/Mill paths ──
 
   describe('Path collision analysis (T-025)', () => {
-    it('Townhouse Town (account 0) path matches SDK KeyDerivation path — this is intentional', () => {
+    it('Townhouse Town (account 0) path matches SDK KeyDerivation path — this is intentional', async () => {
       /**
        * DOCUMENTED INTENTIONAL PATH SHARING:
        * SDK KeyDerivation.deriveFullIdentity() uses m/44'/1237'/0'/0/0 for Nostr.
@@ -212,20 +212,20 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
        * 3. A Townhouse operator's seed is never the same as a client user's seed
        */
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const townKeys = manager.getNodeKeys('town');
       expect(townKeys.nostrDerivationPath).toBe("m/44'/1237'/0'/0/0");
     });
 
-    it('Townhouse Mill (account 1) does NOT collide with Mill deriveMillKeys (account 2)', () => {
+    it('Townhouse Mill (account 1) does NOT collide with Mill deriveMillKeys (account 2)', async () => {
       /**
        * Mill's deriveMillKeys() uses account index 2 (configurable) for SWAP operational keys.
        * Townhouse Mill identity uses account index 1 for NODE IDENTITY keys.
        * These are different account indices — no collision.
        */
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const millKeys = manager.getNodeKeys('mill');
       // Townhouse Mill is at account index 1
@@ -234,7 +234,7 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
       expect(millKeys.nostrDerivationPath).not.toContain("/2'/");
     });
 
-    it('Townhouse DVM (account 2) path is for node identity, not Mill swap operations', () => {
+    it('Townhouse DVM (account 2) path is for node identity, not Mill swap operations', async () => {
       /**
        * Even though Townhouse DVM uses account index 2 (same as Mill swap keys),
        * this is different because:
@@ -242,7 +242,7 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
        * 2. These are node IDENTITY keys (signing, peering), not swap operational keys
        */
       const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
-      manager.fromMnemonic(TEST_MNEMONIC);
+      await manager.fromMnemonic(TEST_MNEMONIC);
 
       const dvmKeys = manager.getNodeKeys('dvm');
       expect(dvmKeys.nostrDerivationPath).toBe("m/44'/1237'/2'/0/0");

@@ -1,6 +1,7 @@
 import type { TownhouseConfig } from './schema.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_CONNECTOR_IMAGE } from '../constants.js';
 
 /**
  * Sensible default configuration. All nodes disabled by default —
@@ -17,7 +18,7 @@ export function getDefaultConfig(): TownhouseConfig {
       encrypted_path: join(homedir(), '.townhouse', 'wallet.enc'),
     },
     connector: {
-      image: 'ghcr.io/toon-protocol/connector:3.3.0',
+      image: DEFAULT_CONNECTOR_IMAGE,
       adminPort: 9401,
     },
     transport: {

@@ -1,0 +1,166 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`AddressBlock > renders without crashing (snapshot) 1`] = `
+<div>
+  <div
+    class="shadow-border rounded-md p-3 flex flex-col gap-2"
+  >
+    <div
+      class="flex items-center gap-2"
+    >
+      <svg
+        aria-hidden="true"
+        class="inline-block flex-shrink-0"
+        fill="none"
+        height="16"
+        viewBox="0 0 16 16"
+        width="16"
+      >
+        <polygon
+          points="8,1 14.5,8 8,11.5 1.5,8"
+          stroke="currentColor"
+          stroke-linejoin="round"
+          stroke-width="1.2"
+        />
+        <polygon
+          points="8,11.5 14.5,8 8,15"
+          stroke="currentColor"
+          stroke-linejoin="round"
+          stroke-width="1.2"
+        />
+      </svg>
+      <svg
+        aria-hidden="true"
+        class="inline-block flex-shrink-0"
+        fill="none"
+        height="16"
+        viewBox="0 0 16 16"
+        width="16"
+      >
+        <circle
+          cx="8"
+          cy="8"
+          r="7"
+          stroke="currentColor"
+          stroke-width="1.2"
+        />
+        <text
+          dominant-baseline="central"
+          fill="currentColor"
+          font-family="Geist Mono, monospace"
+          font-size="8"
+          font-weight="600"
+          text-anchor="middle"
+          x="8"
+          y="8"
+        >
+          E
+        </text>
+      </svg>
+      <code
+        aria-label="ETH address: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+        class="font-geist-mono text-xs text-ink min-w-0 flex-1 truncate"
+        title="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+      >
+        0xf39F…2266
+      </code>
+      <button
+        aria-label="Copy ETH address"
+        class="font-geist-sans text-xs text-ink/50 hover:text-ink shrink-0"
+        type="button"
+      >
+        Copy
+      </button>
+    </div>
+    <div
+      class="flex items-center justify-between gap-2"
+    >
+      <span
+        aria-label="Derivation path: m/44'/60'/0'/0/0"
+        class="font-geist-mono text-xs text-ink/50"
+      >
+        <span>
+          <span>
+            m
+          </span>
+          <span>
+            /
+            44'
+          </span>
+          <span>
+            /
+            60'
+          </span>
+          <span>
+            /
+            <span
+              class="text-type-town"
+            >
+              0
+            </span>
+            '
+          </span>
+          <span>
+            /
+            0
+          </span>
+          <span>
+            /
+            0
+          </span>
+        </span>
+      </span>
+      <div
+        aria-label="ETH balance: 1"
+        class="flex flex-col gap-0.5"
+        role="group"
+      >
+        <div
+          aria-hidden="true"
+          class="flex items-baseline gap-1.5"
+        >
+          <span
+            class="font-geist-mono tabular-nums font-semibold text-ink text-xl"
+          >
+            1
+          </span>
+        </div>
+        <span
+          aria-hidden="true"
+          class="font-geist-sans text-ink/60 text-xs"
+        >
+          ETH
+        </span>
+      </div>
+    </div>
+    <details>
+      <summary
+        class="font-geist-sans text-xs text-ink/50 hover:text-ink cursor-pointer"
+      >
+        QR
+      </summary>
+      <div
+        class="mt-2 flex flex-col items-start gap-1"
+      >
+        <div
+          class="shadow-border rounded p-2 inline-flex"
+        >
+          <svg
+            aria-label="Deposit address QR code: 0xf39F…2266"
+            data-testid="qr-code"
+          >
+            <title>
+              0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+            </title>
+          </svg>
+        </div>
+        <span
+          class="font-geist-mono text-xs text-ink/50 break-all"
+        >
+          0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+        </span>
+      </div>
+    </details>
+  </div>
+</div>
+`;

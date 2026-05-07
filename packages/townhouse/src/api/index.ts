@@ -3,6 +3,7 @@
  */
 
 export { createApiServer } from './server.js';
+export { createWizardApiServer } from './wizard-server.js';
 export type {
   ApiServer,
   ApiDeps,
@@ -16,6 +17,38 @@ export type {
   WsNodeStateMessage,
   WsHeartbeatMessage,
   WsBatchMessage,
+  WsRelayEventsMessage,
+  WsConnectorRestartingMessage,
+  WsConnectorRestartedMessage,
+  NostrEventPayload,
+  BandwidthPayload,
+  PacketTimeseriesPayload,
+  TimeseriesBucket,
+  NodeHealthPayload,
+  TownHealthPayload,
+  DvmHealthResponse,
+  MillHealthResponse,
+  MillSwapsRecentPayload,
+  JobsRecentPayload,
+  JobsByKindEntry,
+  DepositAddressesPayload,
+  DepositAddressEntry,
+  SwapByPairEntry,
+  WalletBalanceEntry,
+  WalletBalancesPayload,
+  WithdrawRequest,
+  WithdrawResponse,
+  WithdrawSuccessResponse,
+  WithdrawDryRunResponse,
+  RevealRequest,
+  RevealResponse,
+  TransactionReceiptPayload,
+  WizardStatePayload,
+  WizardInitRequest,
+  WizardProgressMessage,
+  TransportStatusPayload,
+  TransportPatchRequest,
+  TransportPatchResponse,
 } from './types.js';
 
 export {
