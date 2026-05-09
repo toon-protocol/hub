@@ -1,0 +1,406 @@
+# Townhouse Dev Stack — Docker Compose (Story 21.8.0, D21-009)
+#
+# Full contributor dev topology: 1 standalone connector + 2 Town + 2 Mill + 1 DVM
+# + 3 chain devnets + 1 SOCKS5 proxy.
+#
+# This file is intentionally separate from docker-compose-townhouse.yml.
+# Production describes one operator's actual node. This file describes a
+# contributor's rig with enough instances to exercise every dashboard view.
+# See story 21.8.0 Dev Notes for the full rationale.
+#
+# Canonical path (npm tarball): packages/townhouse/compose/townhouse-dev.yml
+#   Ships verbatim inside @toon-protocol/townhouse dist/compose/townhouse-dev.yml
+#   (Story 45.2 — no digest substitution; uses local toon:* image tags).
+#
+# Legacy path (backward-compat): docker-compose-townhouse-dev.yml (repo root)
+#   Used by scripts/townhouse-dev-infra.sh and existing CI. Preserved until
+#   a follow-up story routes the script through the package-local copy.
+#
+# Usage:
+#   ./scripts/townhouse-dev-infra.sh up      # Build, start, wait for health (reads root path)
+#   ./scripts/townhouse-dev-infra.sh down    # Stop containers, remove .env.townhouse-dev
+#   ./scripts/townhouse-dev-infra.sh down-v  # Same + remove volumes
+#   ./scripts/townhouse-dev-infra.sh status  # Show container state
+#
+# Port allocation — 28xxx range (no collision with SDK E2E 18xxx/19xxx or
+# production Townhouse 3xxx/7100/9401). See CLAUDE.md "Townhouse Dev Stack (28xxx)".
+#
+# All host bindings use 127.0.0.1 — never 0.0.0.0 (developer machine).
+#
+# Connector image tag must match DEFAULT_CONNECTOR_IMAGE in
+# packages/townhouse/src/constants.ts — keep both in sync when bumping.
+
+networks:
+  townhouse-dev-net:
+    driver: bridge
+
+volumes:
+  townhouse-dev-connector-data:
+  townhouse-dev-town-01-data:
+  townhouse-dev-town-02-data:
+  townhouse-dev-mill-01-data:
+  townhouse-dev-mill-02-data:
+  townhouse-dev-dvm-01-data:
+
+services:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Connector — standalone connector for all 5 child peers
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  townhouse-dev-connector:
+    # Image tag must match DEFAULT_CONNECTOR_IMAGE in packages/townhouse/src/constants.ts
+    image: ghcr.io/toon-protocol/connector:3.4.1
+    container_name: townhouse-dev-connector
+    networks:
+      - townhouse-dev-net
+    ports:
+      - '127.0.0.1:28080:9401'
+    environment:
+      CONFIG_FILE: /config/connector.yaml
+    volumes:
+      - ./docker/configs/townhouse-dev-connector.yaml:/config/connector.yaml:ro
+      - townhouse-dev-connector-data:/data
+    restart: unless-stopped
+    healthcheck:
+      # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal health probe
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:9401/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Anvil — Local Ethereum (chain-id 31337) with auto-deployed contracts
+  # Copied from docker-compose-sdk-e2e.yml, ports shifted to 28xxx range
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  townhouse-dev-anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    container_name: townhouse-dev-anvil
+    entrypoint: []
+    command:
+      - sh
+      - -c
+      - |
+        echo "Starting Anvil..."
+        anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --accounts 10 --balance 10000 &
+        ANVIL_PID=$$!
+
+        echo "Waiting for Anvil to be ready..."
+        until cast client --rpc-url http://localhost:8545 2>/dev/null | grep -q 'anvil'; do
+          sleep 1
+        done
+
+        echo "Deploying contracts..."
+        cd /contracts
+        forge script script/DeployLocal.s.sol:DeployLocalScript --rpc-url http://localhost:8545 --broadcast --skip-simulation || echo "Deployment failed (non-fatal)"
+
+        echo "Funding test accounts with Mock USDC..."
+        DEPLOYER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+        TOKEN=0x5FbDB2315678afecb367f032d93F642f64180aa3
+        AMOUNT=10000000000000000000000
+        for ADDR in \
+          0x70997970C51812dc3A010C7d01b50e0d17dc79C8 \
+          0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65 \
+          0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc \
+          0x976EA74026E726554dB657fA54763abd0C3a0aa9 \
+          0x14dC79964da2C08b23698B3D3cc7Ca32193d9955 \
+          0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f \
+          0xa0Ee7A142d267C1f36714E4a8F75612F20a79720; do
+          cast send --rpc-url http://localhost:8545 --private-key $$DEPLOYER_KEY \
+            $$TOKEN "transfer(address,uint256)" $$ADDR $$AMOUNT 2>/dev/null \
+            && echo "Funded $$ADDR" || echo "Fund $$ADDR failed (non-fatal)"
+        done
+
+        echo "Anvil ready with contracts deployed!"
+        wait $$ANVIL_PID
+    volumes:
+      - ./contracts/evm:/contracts
+    ports:
+      - '127.0.0.1:28545:8545'
+    networks:
+      - townhouse-dev-net
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "cast client --rpc-url http://localhost:8545 2>&1 | grep -q 'anvil' || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Solana Test Validator — ports shifted to 28xxx range
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  townhouse-dev-solana:
+    image: ghcr.io/beeman/solana-test-validator:latest
+    container_name: townhouse-dev-solana
+    entrypoint: []
+    command:
+      - sh
+      - /entrypoint.sh
+    volumes:
+      - ./infra/solana/entrypoint.sh:/entrypoint.sh:ro
+      - ./contracts/solana:/programs:ro
+    tmpfs:
+      - /tmp/test-ledger
+    ports:
+      - '127.0.0.1:28899:8899'   # RPC
+      - '127.0.0.1:28900:8900'   # WebSocket
+    networks:
+      - townhouse-dev-net
+    security_opt:
+      - seccomp=unconfined
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'solana cluster-version --url http://localhost:8899 >/dev/null 2>&1']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Mina Lightnet — ports shifted to 28xxx range
+  # NOTE: Requires 4-8 GB RAM (see SDK E2E notes)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  townhouse-dev-mina:
+    image: o1labs/mina-local-network:compatible-latest-lightnet
+    container_name: townhouse-dev-mina
+    environment:
+      NETWORK_TYPE: single-node
+      PROOF_LEVEL: none
+      LOG_LEVEL: Info
+      RUN_ARCHIVE_NODE: 'false'
+      SLOT_TIME: '20000'
+    ports:
+      - '127.0.0.1:28085:3101'   # GraphQL (direct to daemon)
+      - '127.0.0.1:28181:8181'   # Accounts Manager
+    networks:
+      - townhouse-dev-net
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -sf -X POST -H "Content-Type: application/json" -d "{\"query\":\"{syncStatus}\"}" http://localhost:3101/graphql | grep -q SYNCED || exit 1',
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # SOCKS5 Proxy — optional; required for ATOR transport testing (story 21.15)
+  # Connector defaults to TRANSPORT_MODE: direct; proxy only needed for ATOR mode.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  townhouse-dev-socks5:
+    image: serjs/go-socks5-proxy:latest
+    container_name: townhouse-dev-socks5
+    ports:
+      - '127.0.0.1:28050:1080'
+    networks:
+      - townhouse-dev-net
+    restart: unless-stopped
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Town 01 — Nostr relay node (instance 1 of 2)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  townhouse-dev-town-01:
+    image: toon:town
+    container_name: townhouse-dev-town-01
+    networks:
+      - townhouse-dev-net
+    depends_on:
+      townhouse-dev-connector:
+        condition: service_healthy
+    expose:
+      - '3000'
+    ports:
+      - '127.0.0.1:28100:3100'   # BLS health
+      - '127.0.0.1:28700:7100'   # Nostr relay WebSocket
+    environment:
+      # nosemgrep: detect-insecure-websocket -- Docker-internal, TLS unnecessary
+      CONNECTOR_URL: ws://townhouse-dev-connector:3000
+      CONNECTOR_ADMIN_URL: http://townhouse-dev-connector:9401
+      FEE_PER_EVENT: '0'
+      NODE_NOSTR_PUBKEY: ''
+      NODE_EVM_ADDRESS: ''
+      # Interpolated from TOWN_01_SECRET_KEY exported by townhouse-dev-infra.sh.
+      NODE_NOSTR_SECRET_KEY: '${TOWN_01_SECRET_KEY:?TOWN_01_SECRET_KEY required — source scripts/townhouse-dev-infra.sh first}'
+    volumes:
+      - townhouse-dev-town-01-data:/data
+    healthcheck:
+      # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal health probe
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3100/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Town 02 — Nostr relay node (instance 2 of 2)
+  # Story 21.10 exercises degraded state via `docker pause townhouse-dev-town-02`
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  townhouse-dev-town-02:
+    image: toon:town
+    container_name: townhouse-dev-town-02
+    networks:
+      - townhouse-dev-net
+    depends_on:
+      townhouse-dev-connector:
+        condition: service_healthy
+    expose:
+      - '3000'
+    ports:
+      - '127.0.0.1:28110:3100'   # BLS health
+      - '127.0.0.1:28710:7100'   # Nostr relay WebSocket
+    environment:
+      # nosemgrep: detect-insecure-websocket -- Docker-internal, TLS unnecessary
+      CONNECTOR_URL: ws://townhouse-dev-connector:3000
+      CONNECTOR_ADMIN_URL: http://townhouse-dev-connector:9401
+      FEE_PER_EVENT: '0'
+      NODE_NOSTR_PUBKEY: ''
+      NODE_EVM_ADDRESS: ''
+      # Interpolated from TOWN_02_SECRET_KEY exported by townhouse-dev-infra.sh.
+      NODE_NOSTR_SECRET_KEY: '${TOWN_02_SECRET_KEY:?TOWN_02_SECRET_KEY required — source scripts/townhouse-dev-infra.sh first}'
+    volumes:
+      - townhouse-dev-town-02-data:/data
+    healthcheck:
+      # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal health probe
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3100/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Mill 01 — EVM↔Solana swap peer (story 21.11 AC names this exact container)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  townhouse-dev-mill-01:
+    image: toon:mill
+    container_name: townhouse-dev-mill-01
+    networks:
+      - townhouse-dev-net
+    depends_on:
+      townhouse-dev-connector:
+        condition: service_healthy
+      townhouse-dev-anvil:
+        condition: service_healthy
+      townhouse-dev-solana:
+        condition: service_healthy
+    expose:
+      - '3000'
+    ports:
+      - '127.0.0.1:28200:3200'   # BLS health
+    environment:
+      # nosemgrep: detect-insecure-websocket -- Docker-internal, TLS unnecessary
+      CONNECTOR_URL: ws://townhouse-dev-connector:3000
+      FEE_BASIS_POINTS: '0'
+      NODE_NOSTR_PUBKEY: ''
+      NODE_EVM_ADDRESS: ''
+      # MILL_MNEMONIC takes priority over NODE_NOSTR_SECRET_KEY for BIP-32 swap key derivation.
+      # Interpolated from MILL_01_MNEMONIC exported by townhouse-dev-infra.sh.
+      MILL_MNEMONIC: '${MILL_01_MNEMONIC:?MILL_01_MNEMONIC required — source scripts/townhouse-dev-infra.sh first}'
+      # Kept for backward-compat; ignored when MILL_MNEMONIC is set.
+      NODE_NOSTR_SECRET_KEY: '${MILL_01_SECRET_KEY:?MILL_01_SECRET_KEY required — source scripts/townhouse-dev-infra.sh first}'
+      MILL_CONFIG_PATH: /config/mill.config.json
+      MILL_RELAYS: ws://townhouse-dev-town-01:7100,ws://townhouse-dev-town-02:7100
+    volumes:
+      - ./docker/dev-fixtures/mill-01.config.json:/config/mill.config.json:ro
+      - townhouse-dev-mill-01-data:/data
+    healthcheck:
+      # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal health probe
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3200/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Mill 02 — EVM↔Mina swap peer (story 21.11 AC names this exact container)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  townhouse-dev-mill-02:
+    image: toon:mill
+    container_name: townhouse-dev-mill-02
+    networks:
+      - townhouse-dev-net
+    depends_on:
+      townhouse-dev-connector:
+        condition: service_healthy
+      townhouse-dev-anvil:
+        condition: service_healthy
+      townhouse-dev-mina:
+        condition: service_healthy
+    expose:
+      - '3000'
+    ports:
+      - '127.0.0.1:28210:3200'   # BLS health
+    environment:
+      # nosemgrep: detect-insecure-websocket -- Docker-internal, TLS unnecessary
+      CONNECTOR_URL: ws://townhouse-dev-connector:3000
+      FEE_BASIS_POINTS: '0'
+      NODE_NOSTR_PUBKEY: ''
+      NODE_EVM_ADDRESS: ''
+      # MILL_MNEMONIC takes priority over NODE_NOSTR_SECRET_KEY for BIP-32 swap key derivation.
+      # Interpolated from MILL_02_MNEMONIC exported by townhouse-dev-infra.sh.
+      MILL_MNEMONIC: '${MILL_02_MNEMONIC:?MILL_02_MNEMONIC required — source scripts/townhouse-dev-infra.sh first}'
+      # Kept for backward-compat; ignored when MILL_MNEMONIC is set.
+      NODE_NOSTR_SECRET_KEY: '${MILL_02_SECRET_KEY:?MILL_02_SECRET_KEY required — source scripts/townhouse-dev-infra.sh first}'
+      MILL_CONFIG_PATH: /config/mill.config.json
+      MILL_RELAYS: ws://townhouse-dev-town-01:7100,ws://townhouse-dev-town-02:7100
+    volumes:
+      - ./docker/dev-fixtures/mill-02.config.json:/config/mill.config.json:ro
+      - townhouse-dev-mill-02-data:/data
+    healthcheck:
+      # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal health probe
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3200/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # DVM 01 — data vending machine (story 21.12 AC names this exact container)
+  # TURBO_TOKEN: pass through from host env; absence is non-fatal (disabled-upload mode)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  townhouse-dev-dvm-01:
+    image: toon:dvm
+    container_name: townhouse-dev-dvm-01
+    networks:
+      - townhouse-dev-net
+    depends_on:
+      townhouse-dev-connector:
+        condition: service_healthy
+    expose:
+      - '3300'
+    ports:
+      - '127.0.0.1:28400:3400'   # BLS health
+    environment:
+      # nosemgrep: detect-insecure-websocket -- Docker-internal, TLS unnecessary
+      CONNECTOR_URL: ws://townhouse-dev-connector:3000
+      FEE_PER_JOB: '0'
+      NODE_NOSTR_PUBKEY: ''
+      NODE_EVM_ADDRESS: ''
+      # Interpolated from DVM_01_SECRET_KEY exported by townhouse-dev-infra.sh.
+      NODE_NOSTR_SECRET_KEY: '${DVM_01_SECRET_KEY:?DVM_01_SECRET_KEY required — source scripts/townhouse-dev-infra.sh first}'
+      # TURBO_TOKEN may legitimately be unset for non-Turbo dev paths — empty string is intended.
+      TURBO_TOKEN: '${TURBO_TOKEN:-}'
+    volumes:
+      - townhouse-dev-dvm-01-data:/data
+    healthcheck:
+      # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal health probe
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3400/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped

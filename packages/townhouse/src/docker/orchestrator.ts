@@ -482,20 +482,20 @@ export class DockerOrchestrator extends EventEmitter {
       imagesToPull.add(normalizeImageTag(RELAY_ATOR_SIDECAR_IMAGE));
     }
 
-    // Check which images exist locally
+    // Check which images exist locally. Match against both RepoTags (tag-form
+    // refs) and RepoDigests (digest-form refs); since DEFAULT_CONNECTOR_IMAGE
+    // flipped to digest form (Story 45.2), RepoTags alone never matches it
+    // and we'd re-pull on every up().
     const existingImages = await this.docker.listImages();
-    const existingTags = new Set<string>();
+    const existingRefs = new Set<string>();
     for (const img of existingImages) {
-      if (img.RepoTags) {
-        for (const tag of img.RepoTags) {
-          existingTags.add(tag);
-        }
-      }
+      for (const tag of img.RepoTags ?? []) existingRefs.add(tag);
+      for (const digest of img.RepoDigests ?? []) existingRefs.add(digest);
     }
 
     // Pull missing images
     for (const image of imagesToPull) {
-      if (existingTags.has(image)) {
+      if (existingRefs.has(image)) {
         continue;
       }
 

@@ -1,0 +1,12 @@
+# Fixture: dev compose for unit tests (verbatim — uses local toon:* image tags).
+networks:
+  townhouse-dev-net:
+    driver: bridge
+services:
+  townhouse-dev-connector:
+    image: ghcr.io/toon-protocol/connector:3.4.1
+    container_name: townhouse-dev-connector
+    networks:
+      - townhouse-dev-net
+    ports:
+      - '127.0.0.1:28080:9401'

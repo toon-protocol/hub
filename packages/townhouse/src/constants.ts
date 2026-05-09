@@ -12,13 +12,19 @@ export const CONTAINER_PREFIX = 'townhouse-';
 export const NODE_BTP_PORT = 3000;
 
 /**
- * Default connector Docker image tag — single source of truth for the workspace.
+ * Default connector Docker image — digest-pinned per CONNECTOR_RELEASE_CONTRACT.md.
  *
- * To bump: update this constant, run `pnpm --filter @toon-protocol/townhouse test contract-canary`,
- * then `pnpm --filter @toon-protocol/townhouse test:canary`. See packages/sdk/CONNECTOR_MIGRATION.md
- * for the full checklist and breaking-changes history.
+ * To bump: capture a new digest by running the Story 45.1 publish workflow
+ * against the desired connector tag, copy the resulting image-manifest.json
+ * connector entry's digest, and update this constant + the contract canary
+ * fixture. See packages/sdk/CONNECTOR_RELEASE_CONTRACT.md for the full bump
+ * checklist + breaking-changes history.
+ *
+ * To read the human-readable tag for log output, consult dist/image-manifest.json:
+ *   manifest.images.connector.tag
  */
-export const DEFAULT_CONNECTOR_IMAGE = 'ghcr.io/toon-protocol/connector:3.4.1';
+export const DEFAULT_CONNECTOR_IMAGE =
+  'ghcr.io/toon-protocol/connector@sha256:4a24ccb0997d7b025997e670546032f6a84cd18a77c490509016b85e181a344e';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).

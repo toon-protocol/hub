@@ -1,0 +1,276 @@
+# Townhouse — Hidden Service mode (HS) operator compose template
+#
+# THIS IS A BUILD-TIME TEMPLATE. Do not use it directly.
+# The digest placeholders (${TOON_*_DIGEST}) are substituted by
+# scripts/render-compose-template.mjs during `pnpm build` (when
+# dist/image-manifest.json is present) to produce the fully-resolved
+# dist/compose/townhouse-hs.yml that ships inside the npm tarball.
+#
+# Resolved copy location at runtime: ~/.townhouse/compose/townhouse-hs.yml
+#   - Written by materializeComposeTemplate('hs') in packages/townhouse/src/compose-loader.ts
+#   - File mode: 0o600 (operator-secret — may embed private keys at deploy time)
+#
+# Story ownership:
+#   - Placeholder substitution: Story 45.2 (this file)
+#   - Boot sequence (townhouse hs up): Story 45.4
+#
+# Architecture (HS-mode v1, Epic 45):
+#   - Apex connector: standalone, anon HS publishing in-process (connector v3.5.x)
+#   - townhouse-api: containerized host API — owns /var/run/docker.sock, calls
+#     connector admin API, manages lifecycle for lazy-provisioned peers
+#   - town/mill/dvm: lazy-provisioned via Docker Compose profiles (Epic 46)
+#     Story 45.4 boots only connector + townhouse-api at apex install
+#
+# Digest placeholders (substituted at build time from dist/image-manifest.json):
+#   ${TOON_TOWNHOUSE_API_DIGEST} → @sha256:<hex>
+#   ${TOON_TOWN_DIGEST}         → @sha256:<hex>
+#   ${TOON_MILL_DIGEST}         → @sha256:<hex>
+#   ${TOON_DVM_DIGEST}          → @sha256:<hex>
+#   ${TOON_CONNECTOR_DIGEST}    → @sha256:<hex>
+#
+# Scope guard (Story 45.2 does NOT include):
+#   - ator-sidecar / ator-sidecar-relay (connector v3.5.x does HS publishing in-process)
+#   - anvil / solana / faucet (dev-stack concerns, not operator-facing)
+#   - build: directives (all images are digest-pinned GHCR pulls)
+#
+# Port allocation (HS-mode binds canonical ports — single-tenant operator box):
+#   127.0.0.1:9401   connector admin
+#   127.0.0.1:28090  townhouse-api Fastify
+#   127.0.0.1:7100,3100  town (relay WS, BLS health) — profile gated
+#   127.0.0.1:3200   mill BLS health — profile gated
+#   127.0.0.1:3400   dvm BLS health — profile gated
+#
+#   These collide with the contributor dev stack's 28xxx-namespaced bindings
+#   (28080:9401, 28100:3100, 28110:3100, 28200:3200, 28210:3200, 28400:3400,
+#   28700:7100, 28710:7100). HS-mode and the contributor dev stack
+#   (scripts/townhouse-dev-infra.sh) MUST NOT run concurrently on the same
+#   machine. If you need to run multiple townhouse instances on a multi-tenant
+#   box, open an enhancement issue — the canonical ports here are intentional
+#   for the apex operator path (Story 45.4 `townhouse hs up`).
+
+networks:
+  townhouse-hs-net:
+    driver: bridge
+
+volumes:
+  # Named volume for the connector's .anyone keypair + HS state.
+  # Survives `docker compose down`; delete to rotate the .anyone address.
+  townhouse-hs-anon:
+  townhouse-hs-town-data:
+  townhouse-hs-mill-data:
+  townhouse-hs-dvm-data:
+
+services:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Apex connector — terminates inbound BTP, publishes .anyone HS
+  #
+  # The connector image embeds @anyone-protocol/anyone-client v1.1.x+
+  # which handles HS publishing in-process (no sidecar required for v3.5.x+).
+  # Config file written by `townhouse hs up` (Story 45.4) on first-run.
+  #
+  # NFR7: connector MUST NOT mount /var/run/docker.sock.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  connector:
+    image: ghcr.io/toon-protocol/connector${TOON_CONNECTOR_DIGEST}
+    container_name: townhouse-hs-connector
+    hostname: connector
+    networks:
+      - townhouse-hs-net
+    ports:
+      # Admin API on host loopback only (NFR9). Operator uses for status.
+      - '127.0.0.1:9401:9401'
+    volumes:
+      # Rendered connector config (Story 45.4 writes this on first-run).
+      - ~/.townhouse/connector.yaml:/config/connector.yaml:ro
+      # .anyone keypair + HS state (persists across down/up cycles).
+      - townhouse-hs-anon:/var/lib/anon/hs
+    environment:
+      CONFIG_FILE: /config/connector.yaml
+    healthcheck:
+      # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal probe
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:9401/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Townhouse API — containerized host API (NEW in HS-mode v1)
+  #
+  # Owns /var/run/docker.sock (the only service that may). Provides:
+  #   - Fastify REST API for operator dashboard / CLI
+  #   - Calls connector admin API (/admin/hs-hostname, /admin/peers, etc.)
+  #   - Manages lifecycle for lazy-provisioned peer containers (Epic 46)
+  #
+  # Planning doc §4 anchor: "host-side townhouse-api owns dockerode and
+  # runs on the townhouse-hs-net so it can reach connector via Docker DNS".
+  # Port D21-008: Fastify host API on 127.0.0.1:28090.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  townhouse-api:
+    image: ghcr.io/toon-protocol/townhouse-api${TOON_TOWNHOUSE_API_DIGEST}
+    container_name: townhouse-hs-api
+    networks:
+      - townhouse-hs-net
+    depends_on:
+      connector:
+        condition: service_healthy
+    ports:
+      # Fastify host API — loopback only (NFR9).
+      - '127.0.0.1:28090:28090'
+    volumes:
+      # Docker socket — townhouse-api is the sole orchestration surface.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Operator home — wallet, config, compose files, snapshots (RW).
+      - ~/.townhouse:/.townhouse:rw
+    environment:
+      # Override entrypoint default '/config/config.yaml' so the API reads from
+      # the mounted operator-home dir (where Story 45.4 writes config.yaml).
+      TOWNHOUSE_CONFIG: /.townhouse/config.yaml
+      # Wallet decryption password — operator must export TOWNHOUSE_WALLET_PASSWORD
+      # in the shell that runs `docker compose up`. Compose interpolates the value
+      # at up time; the container exits immediately if it is unset (intended).
+      TOWNHOUSE_WALLET_PASSWORD: '${TOWNHOUSE_WALLET_PASSWORD:?TOWNHOUSE_WALLET_PASSWORD must be exported before docker compose up}'
+    healthcheck:
+      # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal probe
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:28090/api/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Town — Nostr relay node (profile: town)
+  # Lazy-provisioned via Epic 46: `townhouse node add town`
+  #
+  # SECURITY TODO (Epic 46): the per-node secrets below use `${VAR:-}` empty
+  # defaults, which silently start the container with a zero/empty key when
+  # the operator forgets to export the env var. Story 45.2 review (R2-MINOR)
+  # recommends switching to `${VAR:?msg}` (fail-fast) once Epic 46 boots
+  # these profiles — keeping the empty default for now lets `docker compose
+  # config` validation pass without injecting per-node secrets, matching
+  # Story 45.4's apex-only boot semantic (only connector + townhouse-api
+  # start at first run).
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  town:
+    image: ghcr.io/toon-protocol/town${TOON_TOWN_DIGEST}
+    container_name: townhouse-hs-town
+    profiles: [town]
+    networks:
+      - townhouse-hs-net
+    depends_on:
+      connector:
+        condition: service_healthy
+    expose: ['3000']
+    ports:
+      - '127.0.0.1:7100:7100'
+      - '127.0.0.1:3100:3100'
+    environment:
+      # nosemgrep: detect-insecure-websocket -- Docker-internal
+      CONNECTOR_URL: ws://connector:3000
+      ILP_ADDRESS: g.townhouse.town
+      NODE_ID: town
+      PARENT_PEER_ID: apex
+      FEE_PER_EVENT: '0'
+      # Chain RPC — operator sets EVM_RPC_URL in ~/.townhouse/env or via CLI.
+      TOON_RPC_URL: ${EVM_RPC_URL:-}
+      NODE_NOSTR_PUBKEY: ''
+      NODE_EVM_ADDRESS: ''
+      # Derived from HD wallet at runtime (Story 45.4 / Epic 46).
+      NODE_NOSTR_SECRET_KEY: '${TOWN_SECRET_KEY:-}'
+      SETTLEMENT_PRIVATE_KEY: '${TOWN_SETTLEMENT_PRIVATE_KEY:-}'
+      PARENT_EVM_ADDRESS: '${APEX_EVM_ADDRESS:-}'
+      TOON_CONNECTOR_LOG_LEVEL: '${TOON_CONNECTOR_LOG_LEVEL:-warn}'
+    volumes:
+      - townhouse-hs-town-data:/data
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3100/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Mill — multi-chain swap node (profile: mill)
+  # Lazy-provisioned via Epic 46: `townhouse node add mill`
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  mill:
+    image: ghcr.io/toon-protocol/mill${TOON_MILL_DIGEST}
+    container_name: townhouse-hs-mill
+    profiles: [mill]
+    networks:
+      - townhouse-hs-net
+    depends_on:
+      connector:
+        condition: service_healthy
+    expose: ['3000']
+    ports:
+      - '127.0.0.1:3200:3200'
+    environment:
+      # nosemgrep: detect-insecure-websocket -- Docker-internal
+      CONNECTOR_URL: ws://connector:3000
+      FEE_BASIS_POINTS: '0'
+      SETTLEMENT_RPC_URL: ${EVM_RPC_URL:-}
+      SETTLEMENT_CHAIN_ID: ${EVM_CHAIN_ID:-}
+      SETTLEMENT_TOKEN_ADDRESS: ${EVM_USDC_ADDRESS:-}
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-}
+      SOLANA_USDC_MINT: ${SOLANA_USDC_MINT:-}
+      NODE_NOSTR_PUBKEY: ''
+      NODE_EVM_ADDRESS: ''
+      # Derived from HD wallet at runtime (Story 45.4 / Epic 46).
+      MILL_MNEMONIC: '${MILL_MNEMONIC:-}'
+      NODE_NOSTR_SECRET_KEY: '${MILL_SECRET_KEY:-}'
+      MILL_CONFIG_PATH: /config/mill.config.json
+      MILL_RELAYS: ${MILL_RELAYS:-}
+      SETTLEMENT_PRIVATE_KEY: '${MILL_SETTLEMENT_PRIVATE_KEY:-}'
+      PARENT_EVM_ADDRESS: '${APEX_EVM_ADDRESS:-}'
+      TOON_CONNECTOR_LOG_LEVEL: '${TOON_CONNECTOR_LOG_LEVEL:-warn}'
+    volumes:
+      # Operator-managed mill config (Epic 46 provisions this on `townhouse node add mill`).
+      - ~/.townhouse/mill.config.json:/config/mill.config.json:ro
+      - townhouse-hs-mill-data:/data
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3200/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # DVM — Arweave upload DVM (profile: dvm)
+  # Lazy-provisioned via Epic 46: `townhouse node add dvm`
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  dvm:
+    image: ghcr.io/toon-protocol/dvm${TOON_DVM_DIGEST}
+    container_name: townhouse-hs-dvm
+    profiles: [dvm]
+    networks:
+      - townhouse-hs-net
+    depends_on:
+      connector:
+        condition: service_healthy
+    expose: ['3300']
+    ports:
+      - '127.0.0.1:3400:3400'
+    environment:
+      # nosemgrep: detect-insecure-websocket -- Docker-internal
+      CONNECTOR_URL: ws://connector:3000
+      FEE_PER_JOB: '0'
+      DVM_KIND: '5094'
+      NODE_NOSTR_PUBKEY: ''
+      NODE_EVM_ADDRESS: ''
+      # Derived from HD wallet at runtime (Story 45.4 / Epic 46).
+      NODE_NOSTR_SECRET_KEY: '${DVM_SECRET_KEY:-}'
+      TURBO_TOKEN: ${TURBO_TOKEN:-}
+    volumes:
+      - townhouse-hs-dvm-data:/data
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3400/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped

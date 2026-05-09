@@ -63,6 +63,13 @@ export type {
   EncryptedWallet,
 } from './wallet/index.js';
 
+export {
+  loadComposeTemplate,
+  materializeComposeTemplate,
+  ComposeLoaderError,
+} from './compose-loader.js';
+export type { ComposeProfile, ComposeLoaderOptions } from './compose-loader.js';
+
 export { createApiServer, createWizardApiServer } from './api/index.js';
 export type {
   ApiServer,
