@@ -47,7 +47,13 @@ export type {
   PeersResponse,
 } from './connector/index.js';
 
-export { WalletManager, encryptWallet, decryptWallet, loadWallet, saveWallet } from './wallet/index.js';
+export {
+  WalletManager,
+  encryptWallet,
+  decryptWallet,
+  loadWallet,
+  saveWallet,
+} from './wallet/index.js';
 export type {
   WalletManagerConfig,
   WalletState,
