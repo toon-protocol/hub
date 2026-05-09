@@ -112,6 +112,9 @@ importers:
       '@toon-protocol/town':
         specifier: workspace:*
         version: link:../packages/town
+      '@toon-protocol/townhouse':
+        specifier: workspace:*
+        version: link:../packages/townhouse
       hono:
         specifier: ^4.11.10
         version: 4.12.7
@@ -122,6 +125,9 @@ importers:
         specifier: ^8.18.0
         version: 8.19.0
     devDependencies:
+      '@types/dockerode':
+        specifier: ^3.3.0
+        version: 3.3.47
       '@types/node':
         specifier: ^20.11.0
         version: 20.19.32
