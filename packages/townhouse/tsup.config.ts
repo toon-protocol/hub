@@ -6,9 +6,11 @@ import { join } from 'node:path';
 // a manifest entry valid — used by this hook AND by scripts/render-compose-template.mjs
 // (the CI-side renderer that runs after download-artifact). Round-2 review
 // flagged that the previous duplicate substitution arrays had drifted error
-// contracts; consolidating here closes that gap.
+// contracts; consolidating here closes that gap. The helper lives INSIDE
+// packages/townhouse/ so it's within the Docker build context for
+// Dockerfile.townhouse-api (a sibling-of-package path is not).
 // @ts-expect-error — JS module, no type declarations.
-import { getImageDigest } from '../../scripts/lib/image-manifest-digest.mjs';
+import { getImageDigest } from './scripts/get-image-digest.mjs';
 
 export default defineConfig({
   entry: ['src/index.ts', 'src/cli.ts'],
