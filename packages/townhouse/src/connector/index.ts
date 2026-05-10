@@ -12,6 +12,7 @@ export type {
   ConnectorRuntimeConfig,
   PeerEntry,
   HealthResponse,
+  HsHostnameResponse,
   MetricsResponse,
   MetricsPeerEntry,
   PeerStatus,

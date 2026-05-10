@@ -7,11 +7,15 @@
  */
 
 import { EventEmitter } from 'node:events';
+import { execFile, spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 import type Docker from 'dockerode';
 import type { TownhouseConfig } from '../config/schema.js';
 import { ConnectorConfigGenerator } from '../connector/config-generator.js';
+import { ConnectorAdminClient } from '../connector/admin-client.js';
+import type { ComposeProfile } from '../compose-loader.js';
 import {
   CONTAINER_PREFIX,
   TOWN_HEALTH_PORT,
@@ -20,6 +24,106 @@ import {
 } from '../constants.js';
 import type { NodeType, HealthCheckOptions, BandwidthStats } from './types.js';
 import type { WalletManager } from '../wallet/index.js';
+
+// Reserved for parity with prior dev-path implementations that used
+// promisify(execFile). HS path uses runDockerCompose (spawn-based) so the
+// operator's TTY sees `docker pull` progress (Story 45.3 AC #10).
+void promisify;
+void execFile;
+
+interface RunDockerOptions {
+  timeout?: number;
+  maxBuffer?: number;
+  inheritStdio?: boolean;
+}
+
+/**
+ * Run `docker <args>` as a child process and resolve with captured stderr/stdout.
+ *
+ * `inheritStdio: true` pipes the child's stdout straight to the parent's TTY so
+ * the operator sees `docker pull` progress during a multi-minute first-time
+ * pull (Story 45.3 AC #10). Stderr is always captured so we can surface
+ * compose failure diagnostics through the `containerState` event channel.
+ */
+function runDockerCompose(
+  file: string,
+  args: readonly string[],
+  options: RunDockerOptions = {}
+): Promise<{ stdout: string; stderr: string }> {
+  const {
+    timeout,
+    maxBuffer = 16 * 1024 * 1024,
+    inheritStdio = false,
+  } = options;
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, Array.from(args), {
+      stdio: inheritStdio
+        ? ['ignore', 'inherit', 'pipe']
+        : ['ignore', 'pipe', 'pipe'],
+    });
+    const stderrChunks: Buffer[] = [];
+    let stderrLen = 0;
+    let timedOut = false;
+    const timer =
+      timeout !== undefined && timeout > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            child.kill('SIGTERM');
+            // Force-kill if SIGTERM is ignored (5 s grace).
+            setTimeout(() => {
+              if (!child.killed) child.kill('SIGKILL');
+            }, 5_000).unref();
+          }, timeout)
+        : null;
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (stderrLen < maxBuffer) {
+        stderrChunks.push(chunk);
+        stderrLen += chunk.length;
+      }
+    });
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      if (timer) clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', (code, signal) => {
+      if (timer) clearTimeout(timer);
+      const stderr = Buffer.concat(stderrChunks).toString('utf8');
+      if (timedOut) {
+        const err = new Error(
+          `docker subprocess timed out after ${timeout}ms`
+        ) as Error & {
+          stderr?: string;
+          code?: number | string;
+          signal?: NodeJS.Signals | null;
+        };
+        err.stderr = stderr;
+        err.code = 'ETIMEDOUT';
+        err.signal = signal;
+        return reject(err);
+      }
+      if (code === 0) {
+        return resolve({ stdout: '', stderr });
+      }
+      const err = new Error(
+        `docker subprocess exited with ${code !== null ? `code ${code}` : `signal ${signal}`}`
+      ) as Error & {
+        stderr?: string;
+        code?: number | string;
+        signal?: NodeJS.Signals | null;
+      };
+      err.stderr = stderr;
+      if (code !== null) err.code = code;
+      if (signal !== null) err.signal = signal;
+      reject(err);
+    });
+  });
+}
+
+type ExecFileAsyncSignature = (
+  file: string,
+  args: readonly string[],
+  options?: RunDockerOptions
+) => Promise<{ stdout: string; stderr: string }>;
 
 /** Nostr relay WebSocket port on Town containers (fixed by Dockerfile) */
 const TOWN_RELAY_PORT = 7100;
@@ -59,6 +163,32 @@ const RELAY_ATOR_SIDECAR_IMAGE = 'toon:townhouse-ator-sidecar';
 const RELAY_ATOR_SOCKS_PORT = 9051;
 
 /**
+ * Error thrown by DockerOrchestrator HS-path failures (Story 45.3).
+ * Carries the failed-service name + subprocess diagnostics so CLI consumers
+ * (Story 45.4) can render Sally's failure-state copy library (UX-DR5).
+ */
+export class OrchestratorError extends Error {
+  readonly service?: string;
+  readonly exitCode?: number;
+  readonly stderr?: string;
+  constructor(
+    message: string,
+    options: {
+      service?: string;
+      exitCode?: number;
+      stderr?: string;
+      cause?: Error;
+    } = {}
+  ) {
+    super(message, options.cause ? { cause: options.cause } : undefined);
+    this.name = 'OrchestratorError';
+    if (options.service !== undefined) this.service = options.service;
+    if (options.exitCode !== undefined) this.exitCode = options.exitCode;
+    if (options.stderr !== undefined) this.stderr = options.stderr;
+  }
+}
+
+/**
  * Normalize a Docker image reference to include an explicit tag.
  * Docker defaults to `:latest` when no tag is specified, but
  * `listImages()` RepoTags always include the explicit tag.
@@ -90,28 +220,71 @@ export class DockerOrchestrator extends EventEmitter {
   private readonly walletManager: WalletManager | undefined;
   private activeNodes: NodeType[] = [];
   private readonly statsCache = new Map<string, CachedStats>();
+  private readonly profile: ComposeProfile;
+  private readonly composePath: string | undefined;
+  private readonly execFileAsync: ExecFileAsyncSignature;
+  private readonly adminClientFactory: (
+    baseUrl: string,
+    timeoutMs: number
+  ) => ConnectorAdminClient;
 
   constructor(
     docker: Docker,
     config: TownhouseConfig,
-    walletManager?: WalletManager
+    walletManager?: WalletManager,
+    options: {
+      profile?: ComposeProfile;
+      composePath?: string;
+      execFileAsync?: ExecFileAsyncSignature;
+      adminClientFactory?: (
+        baseUrl: string,
+        timeoutMs: number
+      ) => ConnectorAdminClient;
+    } = {}
   ) {
     super();
     this.docker = docker;
     this.config = config;
     this.configGenerator = new ConnectorConfigGenerator(config);
     this.walletManager = walletManager;
+    this.profile = options.profile ?? 'dev';
+    // Trim composePath so a whitespace-only string trips the same validation
+    // as undefined / empty string (otherwise `   ` would slip past the falsy
+    // check below and be passed verbatim to docker).
+    const trimmedComposePath = options.composePath?.trim();
+    this.composePath =
+      trimmedComposePath !== undefined && trimmedComposePath.length > 0
+        ? trimmedComposePath
+        : undefined;
+    this.execFileAsync = options.execFileAsync ?? runDockerCompose;
+    this.adminClientFactory =
+      options.adminClientFactory ??
+      ((url, t) => new ConnectorAdminClient(url, t));
+
+    if (this.profile === 'hs' && !this.composePath) {
+      throw new OrchestratorError(
+        `profile: 'hs' requires a non-empty composePath. Pass options.composePath ` +
+          `pointing at the rendered HS template (typically the composePath ` +
+          `returned by materializeComposeTemplate('hs')).`
+      );
+    }
   }
 
   /**
-   * Orchestrate full startup sequence:
-   * 1. Ensure network exists
-   * 2. Pull images (with progress)
-   * 3. Start connector, wait for health
-   * 4. Start enabled node containers in parallel
+   * Orchestrate full startup sequence. Branches on profile:
+   * - 'dev' (default): dockerode-based, preserves existing dev-stack behavior
+   * - 'hs': docker compose subprocess + HS hostname readiness gate
    */
   async up(profiles: NodeType[]): Promise<void> {
     this.activeNodes = [...profiles];
+    if (this.profile === 'hs') {
+      await this.upHs(profiles);
+    } else {
+      await this.upDev(profiles);
+    }
+  }
+
+  private async upDev(profiles: NodeType[]): Promise<void> {
     await this.ensureNetwork();
     await this.pullImages(profiles);
     await this.startConnector();
@@ -126,6 +299,151 @@ export class DockerOrchestrator extends EventEmitter {
     if (profiles.includes('town') && this.config.transport.relayHiddenService) {
       await this.startRelayAtorSidecar();
     }
+  }
+
+  /**
+   * Narrow `this.composePath` to a definite string. The constructor enforces
+   * this invariant for `profile: 'hs'`; this helper exists so the HS-path
+   * methods don't need a non-null assertion (lint-clean) and so a constructor
+   * regression surfaces as an `OrchestratorError` rather than a `TypeError`.
+   */
+  private requireComposePath(): string {
+    if (!this.composePath) {
+      throw new OrchestratorError(
+        `internal: composePath unset for HS profile (constructor invariant violated)`
+      );
+    }
+    return this.composePath;
+  }
+
+  /** HS-mode startup: shell out to `docker compose up -d`, wait for HS hostname. */
+  private async upHs(profiles: NodeType[]): Promise<void> {
+    const composePath = this.requireComposePath();
+    // Profile flags MUST come BEFORE the subcommand per Docker Compose CLI grammar.
+    // Deterministic order: town → mill → dvm (matches AC #4).
+    const PROFILE_ORDER: NodeType[] = ['town', 'mill', 'dvm'];
+    // Reject unknown profile types up-front rather than silently dropping them
+    // (they would otherwise fail the `PROFILE_ORDER.includes()` check below
+    // and start no containers).
+    for (const p of profiles) {
+      if (!PROFILE_ORDER.includes(p)) {
+        throw new OrchestratorError(
+          `Unknown profile '${String(p)}'. Expected one of: ${PROFILE_ORDER.join(', ')}.`
+        );
+      }
+    }
+    const args = ['compose', '-f', composePath];
+    for (const type of PROFILE_ORDER) {
+      if (profiles.includes(type)) {
+        args.push('--profile', type);
+      }
+    }
+    args.push('up', '-d');
+
+    try {
+      await this.execFileAsync('docker', args, {
+        timeout: 180_000,
+        maxBuffer: 16 * 1024 * 1024,
+        inheritStdio: true,
+      });
+    } catch (err: unknown) {
+      const e = err as NodeJS.ErrnoException & {
+        stderr?: string;
+        stdout?: string;
+        code?: number | string;
+        signal?: string | null;
+      };
+      const stderr = String(e.stderr ?? '');
+      const numericExit = typeof e.code === 'number' ? e.code : undefined;
+      const codeLabel = String(e.code ?? e.signal ?? 'unknown');
+      let message: string;
+      if (e.code === 'ENOENT') {
+        message = `docker CLI not found on PATH (ENOENT): ${stderr.trim().slice(0, 500)}`;
+      } else if (e.code === 'ETIMEDOUT') {
+        message = `docker compose up timed out after 180000ms: ${stderr.trim().slice(0, 500)}`;
+      } else {
+        message = `docker compose up failed (exit ${codeLabel}): ${stderr.trim().slice(0, 500)}`;
+      }
+      this.surfaceComposeFailure(stderr);
+      throw new OrchestratorError(message, {
+        ...(numericExit !== undefined ? { exitCode: numericExit } : {}),
+        stderr,
+        cause: err instanceof Error ? err : undefined,
+      });
+    }
+
+    await this.waitForHsHostname();
+  }
+
+  /**
+   * Parse Docker Compose stderr for failed-service names and emit a
+   * containerState event per failed service so callers see the failure via
+   * the same channel dev-mode uses (AC #6 — "for each failed service
+   * identified, it emits..."). When no pattern matches, emit a single
+   * fallback event with name `'compose-up'`.
+   */
+  private surfaceComposeFailure(stderr: string): void {
+    const patterns = [
+      /failed to start (?:service\s+)?["']([^"']+)["']/gi,
+      /service\s+["']([^"']+)["']\s+failed/gi,
+      /Container\s+townhouse-hs-(\w+)\s+Error/gi,
+    ];
+    const detail = stderr.trim().slice(0, 500);
+    const seen = new Set<string>();
+    for (const pattern of patterns) {
+      for (const match of stderr.matchAll(pattern)) {
+        const name = match[1];
+        if (name && !seen.has(name)) {
+          seen.add(name);
+          this.emit('containerState', { name, state: 'error', detail });
+        }
+      }
+    }
+    if (seen.size === 0) {
+      this.emit('containerState', {
+        name: 'compose-up',
+        state: 'error',
+        detail,
+      });
+    }
+  }
+
+  private async waitForHsHostname(): Promise<void> {
+    const adminUrl = `http://127.0.0.1:${this.config.connector.adminPort}`;
+    const client = this.adminClientFactory(adminUrl, 5_000);
+    const deadline = Date.now() + 120_000;
+    const pollInterval = 2_000;
+    let lastResponse:
+      | { hostname: string | null; publishedAt: string | null }
+      | undefined;
+    while (Date.now() < deadline) {
+      try {
+        lastResponse = await client.getHsHostname();
+        if (
+          lastResponse.hostname !== null &&
+          lastResponse.publishedAt !== null
+        ) {
+          return;
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // 503 anon-disabled is fatal — do NOT keep polling.
+        if (msg.includes('anon-disabled')) {
+          throw new OrchestratorError(
+            `connector is anon-disabled — set anon.enabled: true in the connector config`,
+            { cause: err instanceof Error ? err : undefined }
+          );
+        }
+        // Network errors (ECONNREFUSED, etc.) — retry within budget.
+      }
+      await new Promise((r) => setTimeout(r, pollInterval));
+    }
+    throw new OrchestratorError(
+      `HS hostname publication timeout after 120000ms` +
+        (lastResponse
+          ? ` (last response: ${JSON.stringify(lastResponse)})`
+          : ' (no successful response received)')
+    );
   }
 
   /**
@@ -196,12 +514,19 @@ export class DockerOrchestrator extends EventEmitter {
   }
 
   /**
-   * Graceful shutdown — stops containers in reverse order:
-   * 1. Stop all node containers in parallel
-   * 2. Stop connector
-   * 3. Remove network
+   * Graceful shutdown. Branches on profile:
+   * - 'dev' (default): dockerode-based teardown
+   * - 'hs': docker compose subprocess
    */
   async down(): Promise<void> {
+    if (this.profile === 'hs') {
+      await this.downHs();
+    } else {
+      await this.downDev();
+    }
+  }
+
+  private async downDev(): Promise<void> {
     const containers = await this.docker.listContainers({ all: true });
 
     // Find all townhouse containers
@@ -233,6 +558,41 @@ export class DockerOrchestrator extends EventEmitter {
 
     // Remove network
     await this.removeNetwork();
+  }
+
+  private async downHs(): Promise<void> {
+    const composePath = this.requireComposePath();
+    const args = ['compose', '-f', composePath, 'down'];
+    // NO -v flag — preserves the townhouse-hs-anon volume so the .anyone
+    // address survives `down` (Story 45.4 AC).
+    try {
+      await this.execFileAsync('docker', args, {
+        timeout: 60_000,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+    } catch (err: unknown) {
+      const e = err as NodeJS.ErrnoException & {
+        stderr?: string;
+        code?: number | string;
+        signal?: string | null;
+      };
+      const stderr = String(e.stderr ?? '');
+      const numericExit = typeof e.code === 'number' ? e.code : undefined;
+      const codeLabel = String(e.code ?? e.signal ?? 'unknown');
+      let message: string;
+      if (e.code === 'ENOENT') {
+        message = `docker CLI not found on PATH (ENOENT): ${stderr.trim().slice(0, 500)}`;
+      } else if (e.code === 'ETIMEDOUT') {
+        message = `docker compose down timed out after 60000ms: ${stderr.trim().slice(0, 500)}`;
+      } else {
+        message = `docker compose down failed (exit ${codeLabel}): ${stderr.trim().slice(0, 500)}`;
+      }
+      throw new OrchestratorError(message, {
+        ...(numericExit !== undefined ? { exitCode: numericExit } : {}),
+        stderr,
+        cause: err instanceof Error ? err : undefined,
+      });
+    }
   }
 
   /**

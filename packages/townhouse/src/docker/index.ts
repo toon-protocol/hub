@@ -2,7 +2,7 @@
  * Docker orchestration module — public API (Story 21.2).
  */
 
-export { DockerOrchestrator } from './orchestrator.js';
+export { DockerOrchestrator, OrchestratorError } from './orchestrator.js';
 export type {
   NodeType,
   ContainerSpec,

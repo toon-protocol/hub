@@ -20,6 +20,7 @@
 
 import type {
   HealthResponse,
+  HsHostnameResponse,
   MetricsResponse,
   PeerStatus,
   PeersResponse,
@@ -75,6 +76,83 @@ export class ConnectorAdminClient {
       throw new Error('Connector admin API: invalid health response shape');
     }
     return body as HealthResponse;
+  }
+
+  /**
+   * GET /admin/hs-hostname — returns the connector's published .anyone hidden-service
+   * hostname (Epic 45 / Story 44.1). Returns 200 with {hostname, publishedAt} both
+   * possibly null while bootstrap is in progress, both non-null once anon publishes.
+   * Returns 503 when the connector is anon-disabled (anon.enabled: false in config).
+   *
+   * @throws Error('connector is anon-disabled (HTTP 503)') on 503 — caller can match
+   *   on this exact prefix for actionable diagnostics.
+   * @throws Error on non-200/503 status, network error, or shape-validation failure.
+   */
+  async getHsHostname(): Promise<HsHostnameResponse> {
+    const url = `${this.baseUrl}/admin/hs-hostname`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let body: unknown;
+    try {
+      let response: Response;
+      try {
+        response = await fetch(url, { signal: controller.signal });
+      } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw new Error(
+            `Connector admin API request timeout after ${this.timeoutMs}ms: ${url}`
+          );
+        }
+        const msg = error instanceof Error ? error.message : String(error);
+        throw new Error(`Connector admin API connection refused: ${msg}`);
+      }
+      if (response.status === 503) {
+        throw new Error('connector is anon-disabled (HTTP 503)');
+      }
+      if (!response.ok) {
+        throw new Error(
+          `Connector admin API error: ${response.status} ${response.statusText}`
+        );
+      }
+      // Body read MUST happen inside the AbortSignal-protected try so the
+      // request timeout covers a slow / streaming JSON body. response.json()
+      // can throw SyntaxError on a non-JSON body — re-throw as a shape error
+      // so the readiness loop can disambiguate from network errors.
+      try {
+        body = await response.json();
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Connector admin API: invalid JSON in hs-hostname response: ${msg}`
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    if (typeof body !== 'object' || body === null) {
+      throw new Error(
+        'Connector admin API: invalid hs-hostname response shape'
+      );
+    }
+    const obj = body as Record<string, unknown>;
+    const hostname = obj['hostname'];
+    const publishedAt = obj['publishedAt'];
+    if (
+      (hostname !== null && typeof hostname !== 'string') ||
+      (publishedAt !== null && typeof publishedAt !== 'string')
+    ) {
+      throw new Error(
+        'Connector admin API: invalid hs-hostname response shape'
+      );
+    }
+    // Empty-string hostname is a server-side bug — reject so the readiness
+    // loop keeps polling instead of returning "ready" with an unusable address.
+    if (typeof hostname === 'string' && hostname.length === 0) {
+      throw new Error(
+        'Connector admin API: invalid hs-hostname response shape'
+      );
+    }
+    return body as HsHostnameResponse;
   }
 
   /**

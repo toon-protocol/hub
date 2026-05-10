@@ -23,7 +23,7 @@ export {
   ConfigValidationError,
 } from './config/index.js';
 
-export { DockerOrchestrator } from './docker/index.js';
+export { DockerOrchestrator, OrchestratorError } from './docker/index.js';
 export type {
   NodeType,
   ContainerSpec,
@@ -41,6 +41,7 @@ export type {
   ConnectorRuntimeConfig,
   PeerEntry,
   HealthResponse,
+  HsHostnameResponse,
   MetricsResponse,
   MetricsPeerEntry,
   PeerStatus,

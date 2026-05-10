@@ -205,6 +205,82 @@ describe('ConnectorAdminClient', () => {
     });
   });
 
+  describe('getHsHostname() (Story 45.3 / AC #7)', () => {
+    it('returns hostname + publishedAt when bootstrap is complete (200 with non-null fields)', async () => {
+      const body = {
+        hostname: 'abc123.anyone',
+        publishedAt: '2026-05-09T00:00:00Z',
+      };
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => body,
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+      const result = await client.getHsHostname();
+
+      expect(result.hostname).toBe('abc123.anyone');
+      expect(result.publishedAt).toBe('2026-05-09T00:00:00Z');
+    });
+
+    it('returns nulls when bootstrap is still in progress (200 with null fields)', async () => {
+      const body = { hostname: null, publishedAt: null };
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => body,
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+      const result = await client.getHsHostname();
+
+      expect(result.hostname).toBeNull();
+      expect(result.publishedAt).toBeNull();
+    });
+
+    it('throws anon-disabled error on 503 response', async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        json: async () => ({ error: 'anon-disabled' }),
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+
+      await expect(client.getHsHostname()).rejects.toThrow('anon-disabled');
+    });
+
+    it('throws on shape-violating response (hostname: number)', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ hostname: 42, publishedAt: null }),
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+
+      await expect(client.getHsHostname()).rejects.toThrow(
+        /invalid hs-hostname response shape/
+      );
+    });
+
+    it('throws on shape-violating response (publishedAt: number)', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ hostname: 'x.anyone', publishedAt: 99 }),
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+
+      await expect(client.getHsHostname()).rejects.toThrow(
+        /invalid hs-hostname response shape/
+      );
+    });
+  });
+
   describe('constructor', () => {
     it('accepts base URL without trailing slash', async () => {
       fetchMock.mockResolvedValue({ ok: true, json: async () => HEALTHY_BODY });

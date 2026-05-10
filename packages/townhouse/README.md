@@ -230,6 +230,45 @@ The package-local `packages/townhouse/compose/townhouse-dev.yml` is the canonica
 
 For backward compatibility, `docker-compose-townhouse-dev.yml` at the repo root is preserved and continues to be used by `scripts/townhouse-dev-infra.sh`. A follow-up story will route the script through the package-local copy.
 
+## DockerOrchestrator Profiles
+
+The `DockerOrchestrator` class drives both the contributor dev stack and
+the operator HS-mode apex stack via a single `profile: 'dev' | 'hs'`
+parameter:
+
+- **`profile: 'dev'`** (default) — uses `dockerode` for fine-grained
+  programmatic control. Matches the lifecycle the existing `townhouse up`
+  CLI has shipped since Epic 21. No `composePath` required.
+- **`profile: 'hs'`** — shells out to `docker compose -f <composePath> up -d`
+  with `--profile <type>` flags for each enabled peer. Waits on the
+  connector's `GET /admin/hs-hostname` endpoint (connector v3.5.0+) until
+  the `.anyone` hostname is published. Requires `composePath` (typically
+  the path returned by `materializeComposeTemplate('hs')`).
+
+Example (HS-mode caller, as Story 45.4's `townhouse hs up` will use):
+```typescript
+import { materializeComposeTemplate, DockerOrchestrator } from '@toon-protocol/townhouse';
+import Docker from 'dockerode';
+
+const { composePath } = materializeComposeTemplate('hs');
+const docker = new Docker();
+const orch = new DockerOrchestrator(docker, config, walletManager, {
+  profile: 'hs',
+  composePath,
+});
+await orch.up([]); // apex-only (connector + townhouse-api)
+```
+
+### Connector Anon Requirement (HS Profile)
+
+The HS profile's readiness gate calls `GET /admin/hs-hostname`. The
+connector container MUST be configured with `anon.enabled: true` —
+if anon is disabled, the endpoint returns 503 and the orchestrator
+throws `OrchestratorError("connector is anon-disabled — set
+anon.enabled: true in the connector config")`. Story 45.4's
+`townhouse hs up` generates the connector config with `anon.enabled: true`
+by default; manual configurations should mirror that setting.
+
 ## Running the townhouse as a hidden service (laptop)
 
 `docker-compose-townhouse-hs.yml` brings up the full operator stack —

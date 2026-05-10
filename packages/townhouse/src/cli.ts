@@ -333,7 +333,9 @@ async function handleStatus(
   docker: Docker,
   config: TownhouseConfig
 ): Promise<void> {
-  const orchestrator = new DockerOrchestrator(docker, config);
+  const orchestrator = new DockerOrchestrator(docker, config, undefined, {
+    profile: 'dev',
+  });
   const statuses = await orchestrator.status();
 
   console.log('Node Status:');
@@ -503,7 +505,9 @@ async function handleUp(
     }
   }
 
-  const orchestrator = new DockerOrchestrator(docker, config, walletManager);
+  const orchestrator = new DockerOrchestrator(docker, config, walletManager, {
+    profile: 'dev',
+  });
 
   // Wire up progress reporting
   orchestrator.on(
@@ -669,7 +673,9 @@ async function handleDown(
   config: TownhouseConfig,
   docker: Docker
 ): Promise<void> {
-  const orchestrator = new DockerOrchestrator(docker, config);
+  const orchestrator = new DockerOrchestrator(docker, config, undefined, {
+    profile: 'dev',
+  });
 
   orchestrator.on(
     'containerState',

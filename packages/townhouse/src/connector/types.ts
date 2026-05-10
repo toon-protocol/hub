@@ -206,5 +206,16 @@ export interface PacketLogEntry {
 /** Response shape for GET /packets (array of entries) */
 export type PacketLogResponse = PacketLogEntry[];
 
+/**
+ * Response from GET /admin/hs-hostname on the connector's adminApi port.
+ * Mirrors the connector v3.5.0+ `HsHostnameResponse` (Story 44.1 / AC FR35).
+ * Both fields are null while the .anyone hidden-service bootstrap is in
+ * progress; both become non-null once the descriptor is published.
+ */
+export interface HsHostnameResponse {
+  hostname: string | null;
+  publishedAt: string | null;
+}
+
 /** Node types that can be registered as peers */
 export type { NodeType };
