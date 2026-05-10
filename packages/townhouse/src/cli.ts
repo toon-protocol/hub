@@ -13,10 +13,17 @@
  */
 
 import { parseArgs } from 'node:util';
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import {
+  mkdirSync,
+  writeFileSync,
+  existsSync,
+  renameSync,
+  rmSync,
+} from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 import { stringify } from 'yaml';
 import Docker from 'dockerode';
 
@@ -29,12 +36,18 @@ import {
   ConnectorAdminClient,
   TransportProbe,
   DEFAULT_ATOR_PROXY,
+  writeHsConnectorConfig,
 } from './connector/index.js';
+import { materializeComposeTemplate } from './compose-loader.js';
+import type { ComposeLoaderOptions } from './compose-loader.js';
 import { createApiServer } from './api/server.js';
 import { createWizardApiServer } from './api/wizard-server.js';
 import type { ApiServer } from './api/index.js';
 import { RealBrowserOpener } from './cli/browser-opener.js';
 import type { BrowserOpener } from './cli/browser-opener.js';
+import { OnboardingRibbon } from './cli/onboarding-ribbon.js';
+import { renderFailure } from './cli/failure-copy.js';
+import { promptPassword } from './cli/password-prompt.js';
 import {
   WalletManager,
   encryptWallet,
@@ -65,18 +78,56 @@ Usage:
   townhouse status [-c <path>]                   Show node status
   townhouse metrics [-c <path>]                  Show connector metrics
   townhouse wallet show [-c <path>] [--password <pw>]  Show derived addresses
+  townhouse hs up [--password <pw>] [-c <path>]                Boot apex (connector + .anyone HS)
+  townhouse hs down [--rotate-keys] [-c <path>]               Stop apex (--rotate-keys deletes .anyone keypair)
   townhouse --help                               Show this help
 
 Flags:
-  --town       Start Town (Nostr relay) node
-  --mill       Start Mill (swap) node
-  --dvm        Start DVM (compute) node
-  --password   Wallet password (non-interactive mode)
-  --no-browser Skip opening the browser automatically (setup command)
-  --port       Override the API port (setup command, default 9400)
-  --preset     Init from a named preset (init only). Supported: demo
-  --yes        Non-interactive (init only); with --preset=demo uses demo password if --password absent
+  --town         Start Town (Nostr relay) node
+  --mill         Start Mill (swap) node
+  --dvm          Start DVM (compute) node
+  --password     Wallet password (non-interactive mode)
+  --rotate-keys  Delete the .anyone keypair volume on hs down (produces a new address on next hs up)
+  --no-browser   Skip opening the browser automatically (setup command)
+  --port         Override the API port (setup command, default 9400)
+  --preset       Init from a named preset (init only). Supported: demo
+  --yes          Non-interactive (init only); with --preset=demo uses demo password if --password absent
   If no flags given, starts all enabled nodes from config.`;
+
+/**
+ * Dependency-injection overrides for the `hs up` / `hs down` CLI path.
+ * Used by unit tests to stub out Docker, file I/O, and admin client.
+ */
+export interface CliHsOverrides {
+  /** Override materializeComposeTemplate (avoids disk writes in tests). */
+  materializeComposeTemplate?: (
+    profile: string,
+    opts?: ComposeLoaderOptions
+  ) => { composePath: string; manifestPath: string };
+  /** Override the DockerOrchestrator constructor (avoids real Docker in tests). */
+  createOrchestrator?: (
+    docker: Docker,
+    config: TownhouseConfig,
+    walletManager: WalletManager | undefined,
+    options: { profile: 'hs'; composePath: string }
+  ) => {
+    up: (profiles: NodeType[]) => Promise<void>;
+    down: () => Promise<void>;
+    on: (event: string, handler: (...args: unknown[]) => void) => unknown;
+  };
+  /** Override ConnectorAdminClient construction (avoids real HTTP in tests). */
+  createAdminClient?: (
+    baseUrl: string,
+    timeoutMs: number
+  ) => {
+    getHsHostname: () => Promise<{
+      hostname: string | null;
+      publishedAt: string | null;
+    }>;
+  };
+  /** Override `docker compose down -v` spawn for --rotate-keys (avoids real Docker). */
+  runComposeDown?: (composePath: string, withVolumes: boolean) => Promise<void>;
+}
 
 const DEFAULT_CONFIG_DIR = join(homedir(), '.townhouse');
 const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, 'config.yaml');
@@ -689,14 +740,351 @@ async function handleDown(
   console.log('All nodes stopped.');
 }
 
+/** Connector admin URL for HS mode. */
+const HS_CONNECTOR_ADMIN_URL = 'http://127.0.0.1:9401';
+/** Townhouse API URL for HS mode (inside the townhouse-api container). */
+const HS_TOWNHOUSE_API_URL = 'http://127.0.0.1:28090';
+
+/**
+ * Boot the apex (connector + townhouse-api) via `townhouse hs up`.
+ * Idempotent: if the apex is already running, re-prints the hostname and exits 0.
+ * After the apex is live, writes `~/.townhouse/host.json` and prints the final line.
+ */
+async function handleHsUp(
+  _configPath: string,
+  configDir: string,
+  config: TownhouseConfig,
+  docker: Docker,
+  options: {
+    password?: string;
+    force?: boolean;
+    hsOverrides?: CliHsOverrides;
+  }
+): Promise<void> {
+  const { password, force, hsOverrides } = options;
+
+  // Resolve wallet password (AC #10): --password → env var → interactive prompt → reject
+  const walletPath = config.wallet.encrypted_path;
+  if (!existsSync(walletPath)) {
+    console.error(
+      `Wallet not found at ${walletPath}. Run \`townhouse init\` first.`
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
+
+  let resolvedPassword: string;
+  if (walletPassword) {
+    resolvedPassword = walletPassword;
+  } else if (process.stdin.isTTY) {
+    resolvedPassword = await promptPassword('Wallet password: ');
+  } else {
+    console.error(
+      'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const loaded = await loadWallet(walletPath);
+  if (!loaded) {
+    console.error(`Wallet at ${walletPath} could not be read.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let walletManager: WalletManager | undefined;
+  try {
+    walletManager = new WalletManager({ encryptedPath: walletPath });
+    await walletManager.fromMnemonic(
+      decryptWallet(loaded.wallet, resolvedPassword)
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to decrypt wallet: ${msg}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const ribbon = new OnboardingRibbon();
+
+  try {
+    // Idempotency probe (AC #7): check if apex is already running.
+    if (!force) {
+      const adminClientFactory =
+        hsOverrides?.createAdminClient ??
+        ((url: string, t: number) => new ConnectorAdminClient(url, t));
+      const probe = adminClientFactory(HS_CONNECTOR_ADMIN_URL, 3_000);
+      try {
+        const existing = await probe.getHsHostname();
+        if (existing.hostname !== null) {
+          // Apex is already running — re-print hostname and refresh host.json.
+          // hostname from the connector already includes the .anyone suffix.
+          console.log(`Apex live at ${existing.hostname}`);
+          _writeHostJson(configDir, {
+            hostname: existing.hostname,
+            publishedAt: existing.publishedAt ?? new Date().toISOString(),
+            writtenAt: new Date().toISOString(),
+          });
+          return;
+        }
+        // hostname is null → apex started but HS not ready → treat as cold-start.
+      } catch (probeErr: unknown) {
+        const msg =
+          probeErr instanceof Error ? probeErr.message : String(probeErr);
+        if (msg.includes('anon-disabled')) {
+          // Apex running but anon is disabled — render failure copy and exit.
+          const { exitCode } = renderFailure(probeErr);
+          process.exitCode = exitCode;
+          return;
+        }
+        // ECONNREFUSED or timeout → not running → proceed to cold-boot.
+      }
+    }
+
+    // Cold-boot path.
+
+    // Step 1: write connector.yaml with anon.enabled: true (AC #3).
+    writeHsConnectorConfig(configDir, config, { force });
+
+    // Step 2: materialize compose template.
+    const materialize =
+      hsOverrides?.materializeComposeTemplate ?? materializeComposeTemplate;
+    const { composePath } = materialize('hs', { townhouseHome: configDir });
+
+    // Step 3: start the ribbon (phase 1 — pulling).
+    ribbon.start('pull');
+
+    // Step 4: construct orchestrator and wire ribbon events.
+    const orchestratorFactory =
+      hsOverrides?.createOrchestrator ??
+      ((
+        d: Docker,
+        cfg: TownhouseConfig,
+        wm: WalletManager | undefined,
+        opts: { profile: 'hs'; composePath: string }
+      ) => new DockerOrchestrator(d, cfg, wm, opts));
+
+    const orch = orchestratorFactory(docker, config, walletManager, {
+      profile: 'hs',
+      composePath,
+    });
+
+    // Transition ribbon to bootstrap phase when a container starts creating.
+    let bootstrapStarted = false;
+    orch.on('containerState', (event: unknown) => {
+      const ev = event as { name?: string; state?: string; detail?: string };
+      if (
+        !bootstrapStarted &&
+        (ev.state === 'creating' || ev.state === 'starting')
+      ) {
+        bootstrapStarted = true;
+        ribbon.start('bootstrap');
+      }
+    });
+
+    // Step 5: up (always-on services only — empty profile array).
+    await orch.up([]);
+
+    // Step 6: fetch published hostname and publishedAt for host.json (AC #6).
+    const adminClientFactory2 =
+      hsOverrides?.createAdminClient ??
+      ((url: string, t: number) => new ConnectorAdminClient(url, t));
+    const adminClient = adminClientFactory2(HS_CONNECTOR_ADMIN_URL, 5_000);
+    const hsInfo = await adminClient.getHsHostname();
+
+    const hostname = hsInfo.hostname ?? '';
+    const publishedAt = hsInfo.publishedAt ?? new Date().toISOString();
+
+    // Step 7: write host.json atomically (AC #6).
+    _writeHostJson(configDir, {
+      hostname,
+      publishedAt,
+      writtenAt: new Date().toISOString(),
+    });
+
+    // Step 8: ribbon phase 3 + final stdout line (AC #5).
+    // hostname from the connector already includes the .anyone suffix.
+    // ribbon.start('live', hostname) prints: "Apex live at <hostname>" as the FINAL stdout line.
+    ribbon.start('live', hostname);
+  } catch (err: unknown) {
+    const { exitCode } = renderFailure(err);
+    process.exitCode = exitCode;
+  } finally {
+    ribbon.stop();
+    if (walletManager) {
+      walletManager.lock();
+    }
+  }
+}
+
+/** Atomically write ~/.townhouse/host.json (AC #6). */
+function _writeHostJson(
+  configDir: string,
+  data: { hostname: string; publishedAt: string; writtenAt: string }
+): void {
+  const hostJsonPath = join(configDir, 'host.json');
+  const tmpPath = `${hostJsonPath}.tmp`;
+  // hostname from the connector already includes the .anyone suffix (e.g. "abc123.anyone").
+  const content = JSON.stringify(
+    {
+      hostname: data.hostname,
+      publishedAt: data.publishedAt,
+      connectorAdminUrl: HS_CONNECTOR_ADMIN_URL,
+      townhouseApiUrl: HS_TOWNHOUSE_API_URL,
+      writtenAt: data.writtenAt,
+    },
+    null,
+    2
+  );
+  writeFileSync(tmpPath, content, { mode: 0o600, encoding: 'utf-8' });
+  renameSync(tmpPath, hostJsonPath);
+}
+
+/**
+ * Stop the apex via `townhouse hs down`.
+ * Default: preserves the townhouse-hs-anon volume (stable .anyone address).
+ * --rotate-keys: removes the volume (new address on next hs up).
+ */
+async function handleHsDown(
+  configDir: string,
+  config: TownhouseConfig,
+  docker: Docker,
+  options: {
+    rotateKeys?: boolean;
+    hsOverrides?: CliHsOverrides;
+  }
+): Promise<void> {
+  const { rotateKeys, hsOverrides } = options;
+
+  // Materialize compose template to get the composePath (idempotent re-write).
+  const materialize =
+    hsOverrides?.materializeComposeTemplate ?? materializeComposeTemplate;
+  const { composePath } = materialize('hs', { townhouseHome: configDir });
+
+  if (rotateKeys) {
+    // Confirmation prompt when TTY is available.
+    if (process.stdin.isTTY) {
+      // Read the existing hostname from host.json for the warning message.
+      let existingHostname = '(unknown)';
+      const hostJsonPath = join(configDir, 'host.json');
+      if (existsSync(hostJsonPath)) {
+        try {
+          const { readFileSync } = await import('node:fs');
+          const json = JSON.parse(readFileSync(hostJsonPath, 'utf-8')) as {
+            hostname?: string;
+          };
+          existingHostname = json.hostname ?? existingHostname;
+        } catch {
+          // best-effort
+        }
+      }
+      // Use readline for the yes/no confirmation prompt.
+      const { createInterface } = await import('node:readline');
+      const answer = await new Promise<string>((resolve) => {
+        const rl = createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        });
+        rl.question(
+          `WARNING: --rotate-keys will permanently delete your current .anyone address (${existingHostname}). The next 'hs up' will publish a new address. Continue? [y/N] `,
+          (ans) => {
+            rl.close();
+            resolve(ans);
+          }
+        );
+      });
+      if (!['y', 'yes'].includes(answer.trim().toLowerCase())) {
+        console.log('Cancelled.');
+        return;
+      }
+    }
+
+    // Run `docker compose down -v` to remove volumes (including townhouse-hs-anon).
+    const runDown = hsOverrides?.runComposeDown ?? _runDockerComposeDown;
+    try {
+      await runDown(composePath, true);
+    } catch (err: unknown) {
+      const { exitCode } = renderFailure(err);
+      process.exitCode = exitCode;
+      return;
+    }
+
+    // Delete host.json so the stale hostname doesn't outlive the keypair (AC #9).
+    rmSync(join(configDir, 'host.json'), { force: true });
+
+    console.log(
+      "Apex stopped. Volumes deleted — your next 'hs up' will publish a NEW .anyone address."
+    );
+    return;
+  }
+
+  // Default: preserve volumes (townhouse-hs-anon survives → same hostname next hs up).
+  const orchestratorFactory =
+    hsOverrides?.createOrchestrator ??
+    ((
+      d: Docker,
+      cfg: TownhouseConfig,
+      wm: WalletManager | undefined,
+      opts: { profile: 'hs'; composePath: string }
+    ) => new DockerOrchestrator(d, cfg, wm, opts));
+
+  const orch = orchestratorFactory(docker, config, undefined, {
+    profile: 'hs',
+    composePath,
+  });
+
+  try {
+    await orch.down();
+  } catch (err: unknown) {
+    const { exitCode } = renderFailure(err);
+    process.exitCode = exitCode;
+    return;
+  }
+
+  console.log(
+    'Apex stopped. Volumes preserved — your .anyone address is stable.'
+  );
+}
+
+/**
+ * Run `docker compose -f <composePath> down [-v]` as a subprocess.
+ * Used by handleHsDown's --rotate-keys path (AC #9).
+ */
+function _runDockerComposeDown(
+  composePath: string,
+  withVolumes: boolean
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = ['compose', '-f', composePath, 'down'];
+    if (withVolumes) args.push('-v');
+    const child = spawn('docker', args, {
+      stdio: ['ignore', 'inherit', 'inherit'],
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`docker compose down exited with code ${code}`));
+      }
+    });
+  });
+}
+
 /**
  * Main CLI entry — exported for testability (same pattern as Mill CLI).
  * Accepts optional dockerode instance for dependency injection in tests.
+ * The optional `hsOverrides` bag is used by unit tests to stub out Docker,
+ * file I/O, and admin-client calls in the `hs up` / `hs down` path.
  */
 export async function main(
   argv: string[],
   dockerInstance?: Docker,
-  browserOpener?: BrowserOpener
+  browserOpener?: BrowserOpener,
+  hsOverrides?: CliHsOverrides
 ): Promise<void> {
   const { values, positionals } = parseArgs({
     args: argv,
@@ -714,6 +1102,7 @@ export async function main(
       port: { type: 'string' },
       preset: { type: 'string' },
       yes: { type: 'boolean' },
+      'rotate-keys': { type: 'boolean' },
     },
     strict: false,
     allowPositionals: true,
@@ -813,6 +1202,31 @@ export async function main(
       const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
       const config = loadConfig(configPath);
       await handleMetrics(config);
+      break;
+    }
+    case 'hs': {
+      const action = positionals[1];
+      const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
+      const config = loadConfig(configPath);
+      const docker = dockerInstance ?? new Docker();
+      const configDir = dirname(configPath);
+      if (action === 'up') {
+        await handleHsUp(configPath, configDir, config, docker, {
+          password: values.password as string | undefined,
+          force: values.force === true,
+          hsOverrides,
+        });
+      } else if (action === 'down') {
+        await handleHsDown(configDir, config, docker, {
+          rotateKeys: values['rotate-keys'] === true,
+          hsOverrides,
+        });
+      } else {
+        console.error(
+          'Usage: townhouse hs <up|down> [--rotate-keys] [--password <pw>] [-c <path>]'
+        );
+        process.exitCode = 1;
+      }
       break;
     }
     default: {

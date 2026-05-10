@@ -269,6 +269,80 @@ anon.enabled: true in the connector config")`. Story 45.4's
 `townhouse hs up` generates the connector config with `anon.enabled: true`
 by default; manual configurations should mirror that setting.
 
+## HS Mode (Apex Install)
+
+`townhouse hs up` is the one-command install for homelab operators. It boots the
+apex stack (connector + townhouse-api) and publishes a `.anyone` hidden-service
+address, writing the address to `~/.townhouse/host.json` as the final step.
+
+### First-run flow
+
+```bash
+npx @toon-protocol/townhouse init         # initialise config + wallet (one-time)
+npx @toon-protocol/townhouse hs up        # boot apex — prints "Apex live at <hostname>.anyone"
+```
+
+On a cold image cache the command takes up to 5 minutes (image pull + anon
+bootstrap). On subsequent runs with a warm cache, the HS bootstrap phase
+(30–90 s) dominates.
+
+### Files written by `hs up`
+
+| File | Mode | Purpose |
+|------|------|---------|
+| `~/.townhouse/config.yaml` | 0o600 | Townhouse config (written by `init`) |
+| `~/.townhouse/wallet.enc` | 0o600 | Encrypted BIP-39 wallet (written by `init`) |
+| `~/.townhouse/compose/townhouse-hs.yml` | 0o600 | Materialised HS compose template |
+| `~/.townhouse/image-manifest.json` | 0o600 | Digest-pinned image manifest |
+| `~/.townhouse/connector.yaml` | 0o600 | Connector config with `anon.enabled: true` |
+| `~/.townhouse/host.json` | 0o600 | Published hostname + metadata |
+
+`host.json` schema:
+```json
+{
+  "hostname": "<onion>.anyone",
+  "publishedAt": "<ISO-8601>",
+  "connectorAdminUrl": "http://127.0.0.1:9401",
+  "townhouseApiUrl": "http://127.0.0.1:28090",
+  "writtenAt": "<ISO-8601>"
+}
+```
+
+### Idempotent re-run
+
+Re-running `townhouse hs up` against an already-running apex detects the
+running connector, re-prints the hostname, and exits 0 without pulling images
+or restarting containers. `~/.townhouse/host.json` is refreshed.
+
+### `hs down` vs. `hs down --rotate-keys`
+
+| Command | Volumes | `host.json` | Next `hs up` |
+|---------|---------|-------------|--------------|
+| `townhouse hs down` | **Preserved** (`townhouse-hs-anon`) | Kept | **Same** `.anyone` address |
+| `townhouse hs down --rotate-keys` | **Deleted** | Deleted | **New** `.anyone` address |
+
+`--rotate-keys` prompts for confirmation when stdin is a TTY. When stdin is not
+a TTY (CI, scripted), it proceeds without prompting.
+
+### Password sourcing
+
+Resolution order:
+1. `--password <pw>` flag
+2. `TOWNHOUSE_WALLET_PASSWORD` environment variable
+3. Interactive prompt (only when `process.stdin.isTTY === true`)
+4. Exit 1 with an error message (non-interactive, no password provided)
+
+### Failure-state copy (UX-DR5)
+
+| Class | Detection | Next step shown |
+|-------|-----------|-----------------|
+| anon-timeout | `HS hostname publication timeout` in error | `Re-run with DEBUG=townhouse:*` |
+| anon-disabled | `anon-disabled (HTTP 503)` from probe | Edit `connector.yaml`, set `anon.enabled: true` |
+| image-pull-failure | `failed to pull` / `pull access denied` in stderr | Check your network |
+| port-collision | `address already in use` / `port is already allocated` in stderr | Stop the conflicting service |
+| missing-docker-sock | `Cannot connect to the Docker daemon` / `docker CLI not found` | Start Docker |
+| generic | Any other error | `Run with DEBUG=townhouse:*` |
+
 ## Running the townhouse as a hidden service (laptop)
 
 `docker-compose-townhouse-hs.yml` brings up the full operator stack —
