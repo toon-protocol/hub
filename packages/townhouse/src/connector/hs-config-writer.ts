@@ -13,10 +13,7 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse, stringify as yamlStringify } from 'yaml';
-import {
-  ConnectorConfigGenerator,
-  DEFAULT_ATOR_PROXY,
-} from './config-generator.js';
+import { ConnectorConfigGenerator } from './config-generator.js';
 import type { TownhouseConfig } from '../config/schema.js';
 import type { ConnectorRuntimeConfig } from './types.js';
 

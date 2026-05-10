@@ -208,7 +208,7 @@ describe('ConnectorAdminClient', () => {
   describe('getHsHostname() (Story 45.3 / AC #7)', () => {
     it('returns hostname + publishedAt when bootstrap is complete (200 with non-null fields)', async () => {
       const body = {
-        hostname: 'abc123.anyone',
+        hostname: 'abc123.anon',
         publishedAt: '2026-05-09T00:00:00Z',
       };
       fetchMock.mockResolvedValue({
@@ -220,7 +220,7 @@ describe('ConnectorAdminClient', () => {
       const client = new ConnectorAdminClient('http://localhost:9401');
       const result = await client.getHsHostname();
 
-      expect(result.hostname).toBe('abc123.anyone');
+      expect(result.hostname).toBe('abc123.anon');
       expect(result.publishedAt).toBe('2026-05-09T00:00:00Z');
     });
 
@@ -270,7 +270,7 @@ describe('ConnectorAdminClient', () => {
       fetchMock.mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ hostname: 'x.anyone', publishedAt: 99 }),
+        json: async () => ({ hostname: 'x.anon', publishedAt: 99 }),
       });
 
       const client = new ConnectorAdminClient('http://localhost:9401');
