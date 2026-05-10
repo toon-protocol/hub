@@ -7,10 +7,9 @@
  */
 
 import { EventEmitter } from 'node:events';
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { promisify } from 'node:util';
 import type Docker from 'dockerode';
 import type { TownhouseConfig } from '../config/schema.js';
 import { ConnectorConfigGenerator } from '../connector/config-generator.js';
@@ -24,12 +23,6 @@ import {
 } from '../constants.js';
 import type { NodeType, HealthCheckOptions, BandwidthStats } from './types.js';
 import type { WalletManager } from '../wallet/index.js';
-
-// Reserved for parity with prior dev-path implementations that used
-// promisify(execFile). HS path uses runDockerCompose (spawn-based) so the
-// operator's TTY sees `docker pull` progress (Story 45.3 AC #10).
-void promisify;
-void execFile;
 
 interface RunDockerOptions {
   timeout?: number;
@@ -62,7 +55,9 @@ function runDockerCompose(
         : ['ignore', 'pipe', 'pipe'],
     });
     const stderrChunks: Buffer[] = [];
+    const stdoutChunks: Buffer[] = [];
     let stderrLen = 0;
+    let stdoutLen = 0;
     let timedOut = false;
     const timer =
       timeout !== undefined && timeout > 0
@@ -81,6 +76,15 @@ function runDockerCompose(
         stderrLen += chunk.length;
       }
     });
+    // Capture stdout when piped (inheritStdio: false). When stdio inherits to
+    // the parent TTY, child.stdout is null and we leave stdoutChunks empty —
+    // the operator sees the output directly.
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (stdoutLen < maxBuffer) {
+        stdoutChunks.push(chunk);
+        stdoutLen += chunk.length;
+      }
+    });
     child.on('error', (err: NodeJS.ErrnoException) => {
       if (timer) clearTimeout(timer);
       reject(err);
@@ -88,29 +92,34 @@ function runDockerCompose(
     child.on('close', (code, signal) => {
       if (timer) clearTimeout(timer);
       const stderr = Buffer.concat(stderrChunks).toString('utf8');
+      const stdout = Buffer.concat(stdoutChunks).toString('utf8');
       if (timedOut) {
         const err = new Error(
           `docker subprocess timed out after ${timeout}ms`
         ) as Error & {
+          stdout?: string;
           stderr?: string;
           code?: number | string;
           signal?: NodeJS.Signals | null;
         };
+        err.stdout = stdout;
         err.stderr = stderr;
         err.code = 'ETIMEDOUT';
         err.signal = signal;
         return reject(err);
       }
       if (code === 0) {
-        return resolve({ stdout: '', stderr });
+        return resolve({ stdout, stderr });
       }
       const err = new Error(
         `docker subprocess exited with ${code !== null ? `code ${code}` : `signal ${signal}`}`
       ) as Error & {
+        stdout?: string;
         stderr?: string;
         code?: number | string;
         signal?: NodeJS.Signals | null;
       };
+      err.stdout = stdout;
       err.stderr = stderr;
       if (code !== null) err.code = code;
       if (signal !== null) err.signal = signal;
@@ -383,10 +392,16 @@ export class DockerOrchestrator extends EventEmitter {
    * fallback event with name `'compose-up'`.
    */
   private surfaceComposeFailure(stderr: string): void {
+    // Patterns 1 + 2 capture the SERVICE name from quoted Compose v2 stderr
+    // (e.g., `failed to start "townhouse-api"`). Pattern 3 captures the
+    // CONTAINER suffix after the `townhouse-hs-` prefix (e.g.,
+    // `Container townhouse-hs-townhouse-api Error`); `[\w-]+` includes the
+    // hyphen so multi-word service names are captured intact rather than
+    // truncated to the first hyphen-delimited word.
     const patterns = [
       /failed to start (?:service\s+)?["']([^"']+)["']/gi,
       /service\s+["']([^"']+)["']\s+failed/gi,
-      /Container\s+townhouse-hs-(\w+)\s+Error/gi,
+      /Container\s+townhouse-hs-([\w-]+?)(?:-\d+)?\s+Error/gi,
     ];
     const detail = stderr.trim().slice(0, 500);
     const seen = new Set<string>();
@@ -416,9 +431,11 @@ export class DockerOrchestrator extends EventEmitter {
     let lastResponse:
       | { hostname: string | null; publishedAt: string | null }
       | undefined;
+    let lastError: Error | undefined;
     while (Date.now() < deadline) {
       try {
         lastResponse = await client.getHsHostname();
+        lastError = undefined;
         if (
           lastResponse.hostname !== null &&
           lastResponse.publishedAt !== null
@@ -427,6 +444,7 @@ export class DockerOrchestrator extends EventEmitter {
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+        lastError = err instanceof Error ? err : new Error(String(err));
         // 503 anon-disabled is fatal — do NOT keep polling.
         if (msg.includes('anon-disabled')) {
           throw new OrchestratorError(
@@ -434,15 +452,36 @@ export class DockerOrchestrator extends EventEmitter {
             { cause: err instanceof Error ? err : undefined }
           );
         }
-        // Network errors (ECONNREFUSED, etc.) — retry within budget.
+        // Connector returned 200 with malformed body (or non-JSON) — fatal.
+        // Retrying for 120 s would mask a real connector regression behind a
+        // generic timeout. Surface the shape error immediately.
+        if (
+          msg.includes('invalid hs-hostname response shape') ||
+          msg.includes('invalid JSON in hs-hostname response')
+        ) {
+          throw new OrchestratorError(
+            `connector returned a malformed /admin/hs-hostname response: ${msg}`,
+            { cause: err instanceof Error ? err : undefined }
+          );
+        }
+        // Network errors (ECONNREFUSED, request timeout, etc.) — retry within
+        // budget. lastError preserves the most recent diagnostic for the
+        // timeout message below.
       }
       await new Promise((r) => setTimeout(r, pollInterval));
     }
+    // Build a timeout message that prefers the most recent observation. If the
+    // last poll *failed* (e.g., connector died mid-bootstrap), report that —
+    // not a stale earlier success — so the operator sees connection death
+    // instead of "anon bootstrap is still in progress" misdiagnosis.
+    const tail = lastError
+      ? ` (last error: ${lastError.message})`
+      : lastResponse
+        ? ` (last response: ${JSON.stringify(lastResponse)})`
+        : ' (no successful response received)';
     throw new OrchestratorError(
-      `HS hostname publication timeout after 120000ms` +
-        (lastResponse
-          ? ` (last response: ${JSON.stringify(lastResponse)})`
-          : ' (no successful response received)')
+      `HS hostname publication timeout after 120000ms` + tail,
+      lastError ? { cause: lastError } : {}
     );
   }
 

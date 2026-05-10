@@ -28,6 +28,7 @@ import Docker from 'dockerode';
 import { DockerOrchestrator } from '../docker/orchestrator.js';
 import { materializeComposeTemplate } from '../compose-loader.js';
 import { ConnectorAdminClient } from '../connector/admin-client.js';
+import { getDefaultConfig } from '../config/defaults.js';
 import { isTruthyEnv } from './_test-helpers.js';
 
 // ── Skip gates ──────────────────────────────────────────────────────────────
@@ -51,6 +52,8 @@ describe.skipIf(!shouldRun)(
     let composePath: string;
     let orch: DockerOrchestrator;
 
+    const previousWalletPassword = process.env['TOWNHOUSE_WALLET_PASSWORD'];
+
     beforeAll(async () => {
       tmpDir = mkdtempSync(join(tmpdir(), 'townhouse-hs-orch-'));
       ({ composePath } = materializeComposeTemplate('hs', {
@@ -60,7 +63,9 @@ describe.skipIf(!shouldRun)(
       // docker compose up fails immediately with a substitution error.
       process.env['TOWNHOUSE_WALLET_PASSWORD'] = 'integration-test-pwd';
       const docker = new Docker();
-      orch = new DockerOrchestrator(docker, undefined as never, undefined, {
+      // Pass a real TownhouseConfig (NOT undefined) — waitForHsHostname reads
+      // config.connector.adminPort, so undefined here would TypeError mid-test.
+      orch = new DockerOrchestrator(docker, getDefaultConfig(), undefined, {
         profile: 'hs',
         composePath,
       });
@@ -69,20 +74,29 @@ describe.skipIf(!shouldRun)(
 
     afterAll(async () => {
       try {
-        await orch.down();
-      } catch {
-        /* best-effort */
+        try {
+          await orch.down();
+        } catch {
+          /* best-effort */
+        }
+        // Wipe named volumes so subsequent runs get a fresh .anyone address.
+        try {
+          execSync(`docker compose -f "${composePath}" down -v`, {
+            timeout: 30_000,
+          });
+        } catch {
+          /* best-effort */
+        }
+        rmSync(tmpDir, { recursive: true, force: true });
+      } finally {
+        // Always restore the wallet-password env var, even if cleanup throws,
+        // so vitest worker reuse can't leak the test value into sibling suites.
+        if (previousWalletPassword === undefined) {
+          delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
+        } else {
+          process.env['TOWNHOUSE_WALLET_PASSWORD'] = previousWalletPassword;
+        }
       }
-      // Wipe named volumes so subsequent runs get a fresh .anyone address.
-      try {
-        execSync(`docker compose -f "${composePath}" down -v`, {
-          timeout: 30_000,
-        });
-      } catch {
-        /* best-effort */
-      }
-      rmSync(tmpDir, { recursive: true, force: true });
-      delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
     }, 60_000);
 
     it('exactly two containers running: connector + townhouse-api', () => {

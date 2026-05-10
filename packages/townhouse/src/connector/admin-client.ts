@@ -115,12 +115,19 @@ export class ConnectorAdminClient {
         );
       }
       // Body read MUST happen inside the AbortSignal-protected try so the
-      // request timeout covers a slow / streaming JSON body. response.json()
-      // can throw SyntaxError on a non-JSON body — re-throw as a shape error
-      // so the readiness loop can disambiguate from network errors.
+      // request timeout covers a slow / streaming JSON body. An AbortError
+      // here means the body read itself timed out; surface as a timeout so
+      // the readiness loop's diagnostics distinguish it from a malformed
+      // body. Other JSON errors (true SyntaxError on non-JSON content)
+      // re-throw as a shape error.
       try {
         body = await response.json();
       } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw new Error(
+            `Connector admin API request timeout after ${this.timeoutMs}ms: ${url}`
+          );
+        }
         const msg = error instanceof Error ? error.message : String(error);
         throw new Error(
           `Connector admin API: invalid JSON in hs-hostname response: ${msg}`
@@ -145,9 +152,24 @@ export class ConnectorAdminClient {
         'Connector admin API: invalid hs-hostname response shape'
       );
     }
-    // Empty-string hostname is a server-side bug — reject so the readiness
-    // loop keeps polling instead of returning "ready" with an unusable address.
+    // Empty-string hostname / publishedAt are server-side bugs — reject so
+    // the readiness loop fails fast instead of returning "ready" with an
+    // unusable address or empty timestamp.
     if (typeof hostname === 'string' && hostname.length === 0) {
+      throw new Error(
+        'Connector admin API: invalid hs-hostname response shape'
+      );
+    }
+    if (typeof publishedAt === 'string' && publishedAt.length === 0) {
+      throw new Error(
+        'Connector admin API: invalid hs-hostname response shape'
+      );
+    }
+    // Enforce the `.anyone` suffix at the trust boundary: the contract is
+    // that this endpoint publishes anon hidden-service hostnames. A
+    // non-`.anyone` value indicates connector-side misconfiguration and
+    // would propagate as an unusable address through Story 45.4's CLI.
+    if (typeof hostname === 'string' && !hostname.endsWith('.anyone')) {
       throw new Error(
         'Connector admin API: invalid hs-hostname response shape'
       );
