@@ -70,10 +70,32 @@ services:
   #
   # NFR7: connector MUST NOT mount /var/run/docker.sock.
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # One-shot init: ensure the .anyone key volume is owned by uid 1000 (node)
+  # before the connector starts. Docker creates named volumes as root on first
+  # boot; the connector (running as node) cannot write the HS keypair/hostname
+  # without this chown step.
+  connector-init:
+    image: busybox
+    user: root
+    # anon (Tor-based) requires the HS dir to be mode 0700 — too-permissive
+    # directories cause an immediate abort. Docker creates volumes as root 755.
+    command: ['sh', '-c', 'mkdir -p /data && chown -R 1000:1000 /data && chmod 700 /data']
+    volumes:
+      - townhouse-hs-anon:/data
+    restart: 'no'
+    networks:
+      - townhouse-hs-net
+
   connector:
     image: ghcr.io/toon-protocol/connector${TOON_CONNECTOR_DIGEST}
+    # v3.5.1 has the multi-arch manifest but the default resolves to arm64 on
+    # some Docker versions. Pin to amd64 explicitly until the manifest is fixed.
+    platform: linux/amd64
     container_name: townhouse-hs-connector
     hostname: connector
+    depends_on:
+      connector-init:
+        condition: service_completed_successfully
     networks:
       - townhouse-hs-net
     ports:
@@ -92,7 +114,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      # The managed anon daemon needs ~60-120s to bootstrap circuits and publish
+      # the HS hostname before the connector starts its admin API. Keep
+      # start_period generous so health-check failures during bootstrap don't
+      # prematurely mark the container unhealthy.
+      start_period: 150s
     restart: unless-stopped
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -110,6 +136,10 @@ services:
   townhouse-api:
     image: ghcr.io/toon-protocol/townhouse-api${TOON_TOWNHOUSE_API_DIGEST}
     container_name: townhouse-hs-api
+    # Run as the operator's host UID so bind-mounted ~/.townhouse files
+    # (rw------- 600) are readable. TOWNHOUSE_UID is injected by `townhouse hs up`.
+    # Defaults to 1000 (the standard first-user UID on Linux).
+    user: '${TOWNHOUSE_UID:-1000}'
     networks:
       - townhouse-hs-net
     depends_on:
@@ -123,17 +153,30 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Operator home — wallet, config, compose files, snapshots (RW).
       - ~/.townhouse:/.townhouse:rw
+      # Wallet dir mirrored at the host-absolute path so config.yaml's
+      # `wallet.encrypted_path` (an absolute host path set by `townhouse init`)
+      # resolves correctly inside the container. TOWNHOUSE_WALLET_DIR is
+      # injected by `townhouse hs up` as path.dirname(config.wallet.encrypted_path).
+      - ${TOWNHOUSE_WALLET_DIR:-~/.townhouse}:${TOWNHOUSE_WALLET_DIR:-~/.townhouse}:ro
     environment:
       # Override entrypoint default '/config/config.yaml' so the API reads from
       # the mounted operator-home dir (where Story 45.4 writes config.yaml).
       TOWNHOUSE_CONFIG: /.townhouse/config.yaml
+      # Bind on all interfaces inside the container so Docker's port mapping
+      # (127.0.0.1:28090:28090) can reach it from the host. ALLOW_REMOTE=1
+      # is required when HOST is non-loopback; Docker's host-only binding on
+      # the outer port (127.0.0.1) is the actual access control gate.
+      TOWNHOUSE_API_HOST: 0.0.0.0
+      TOWNHOUSE_API_ALLOW_REMOTE: '1'
       # Wallet decryption password — operator must export TOWNHOUSE_WALLET_PASSWORD
       # in the shell that runs `docker compose up`. Compose interpolates the value
       # at up time; the container exits immediately if it is unset (intended).
       TOWNHOUSE_WALLET_PASSWORD: '${TOWNHOUSE_WALLET_PASSWORD:?TOWNHOUSE_WALLET_PASSWORD must be exported before docker compose up}'
     healthcheck:
       # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal probe
-      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:28090/api/health']
+      # Use 127.0.0.1 (not localhost) to avoid IPv6 resolution surprises. The
+      # townhouse-api exposes /api/transport (not /api/health).
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:28090/api/transport']
       interval: 10s
       timeout: 5s
       retries: 5

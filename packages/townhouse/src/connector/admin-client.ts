@@ -165,11 +165,11 @@ export class ConnectorAdminClient {
         'Connector admin API: invalid hs-hostname response shape'
       );
     }
-    // Enforce the `.anyone` suffix at the trust boundary: the contract is
-    // that this endpoint publishes anon hidden-service hostnames. A
-    // non-`.anyone` value indicates connector-side misconfiguration and
-    // would propagate as an unusable address through Story 45.4's CLI.
-    if (typeof hostname === 'string' && !hostname.endsWith('.anyone')) {
+    // Enforce the `.anon` suffix at the trust boundary: the ATOR network uses
+    // `.anon` as the hidden-service TLD (analogous to Tor's `.onion`). A
+    // non-`.anon` value indicates connector-side misconfiguration and would
+    // propagate as an unusable address through Story 45.4's CLI.
+    if (typeof hostname === 'string' && !hostname.endsWith('.anon')) {
       throw new Error(
         'Connector admin API: invalid hs-hostname response shape'
       );

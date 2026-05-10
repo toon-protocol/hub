@@ -886,7 +886,39 @@ async function handleHsUp(
     });
 
     // Step 5: up (always-on services only — empty profile array).
-    await orch.up([]);
+    // Inject env vars that Docker Compose interpolates in townhouse-hs.yml:
+    //   TOWNHOUSE_WALLET_PASSWORD — required by townhouse-api service
+    //   TOWNHOUSE_UID — run townhouse-api as the host user so bind-mounted
+    //     ~/.townhouse files (rw------- 600) are readable inside the container
+    const prevWalletPassword = process.env['TOWNHOUSE_WALLET_PASSWORD'];
+    const prevTownhouseUid = process.env['TOWNHOUSE_UID'];
+    const prevWalletDir = process.env['TOWNHOUSE_WALLET_DIR'];
+    process.env['TOWNHOUSE_WALLET_PASSWORD'] = resolvedPassword;
+    process.env['TOWNHOUSE_UID'] = String(process.getuid?.() ?? 1000);
+    // Inject the wallet dir as an absolute host path so the townhouse-api
+    // container can find the wallet at the same path as config.wallet.encrypted_path.
+    process.env['TOWNHOUSE_WALLET_DIR'] = dirname(
+      resolve(config.wallet.encrypted_path)
+    );
+    try {
+      await orch.up([]);
+    } finally {
+      if (prevWalletPassword === undefined) {
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
+      } else {
+        process.env['TOWNHOUSE_WALLET_PASSWORD'] = prevWalletPassword;
+      }
+      if (prevTownhouseUid === undefined) {
+        delete process.env['TOWNHOUSE_UID'];
+      } else {
+        process.env['TOWNHOUSE_UID'] = prevTownhouseUid;
+      }
+      if (prevWalletDir === undefined) {
+        delete process.env['TOWNHOUSE_WALLET_DIR'];
+      } else {
+        process.env['TOWNHOUSE_WALLET_DIR'] = prevWalletDir;
+      }
+    }
 
     // Step 6: fetch published hostname and publishedAt for host.json (AC #6).
     const adminClientFactory2 =

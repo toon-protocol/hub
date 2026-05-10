@@ -72,15 +72,24 @@ export function writeHsConnectorConfig(
   const generator = new ConnectorConfigGenerator(config);
   const baseConfig = generator.generate([]); // apex-only, no peers
 
+  // Managed mode: the connector spawns the anon daemon in-process. The SOCKS
+  // proxy port binds locally at 127.0.0.1:9050 — use the local address so the
+  // connector's TCP-readiness check waits for the right host, not the external
+  // public ATOR proxy (proxy.ator.io:9050) which can never bind locally.
+  const HS_LOCAL_SOCKS_PROXY = 'socks5h://127.0.0.1:9050';
+
   const hsRuntimeConfig: ConnectorRuntimeConfig = {
     ...baseConfig,
     transport: {
       mode: 'ator',
-      socksProxy: DEFAULT_ATOR_PROXY,
+      socksProxy: HS_LOCAL_SOCKS_PROXY,
       externalUrl: 'auto',
       hiddenService: {
         dir: HS_DIR,
         port: HS_PORT,
+        // The orchestrator polls getHsHostname() for up to 120s; give the
+        // connector the same budget so the internal timeout doesn't fire first.
+        startupTimeoutMs: 120_000,
       },
     },
   };
