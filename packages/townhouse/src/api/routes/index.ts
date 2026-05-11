@@ -8,6 +8,7 @@ export { registerWalletBalancesRoutes } from './wallet-balances.js';
 export { registerWalletRevealRoutes } from './wallet-reveal.js';
 export { registerWalletWithdrawRoutes } from './wallet-withdraw.js';
 export { registerConfigPatchRoutes, resetConfigMutex } from './nodes-patch.js';
+export { registerNodeLifecycleRoutes } from './nodes-lifecycle.js';
 export { registerMetricsWsRoutes } from './metrics-ws.js';
 export { registerWizardRoutes, buildConfigFromRequest } from './wizard.js';
 export type {

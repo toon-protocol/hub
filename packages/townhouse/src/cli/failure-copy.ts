@@ -56,7 +56,7 @@ function supportsUnicode(): boolean {
   return false;
 }
 
-function useAscii(): boolean {
+export function useAscii(): boolean {
   if (process.env['NO_COLOR'] !== undefined && process.env['NO_COLOR'] !== '')
     return true;
   return !supportsUnicode();

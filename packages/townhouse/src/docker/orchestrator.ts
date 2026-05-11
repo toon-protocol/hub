@@ -28,6 +28,8 @@ interface RunDockerOptions {
   timeout?: number;
   maxBuffer?: number;
   inheritStdio?: boolean;
+  /** Override the subprocess env. Defaults to process.env when omitted. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -47,12 +49,14 @@ function runDockerCompose(
     timeout,
     maxBuffer = 16 * 1024 * 1024,
     inheritStdio = false,
+    env,
   } = options;
   return new Promise((resolve, reject) => {
     const child = spawn(file, Array.from(args), {
       stdio: inheritStdio
         ? ['ignore', 'inherit', 'pipe']
         : ['ignore', 'pipe', 'pipe'],
+      ...(env !== undefined ? { env } : {}),
     });
     const stderrChunks: Buffer[] = [];
     const stdoutChunks: Buffer[] = [];
@@ -195,6 +199,28 @@ export class OrchestratorError extends Error {
     if (options.exitCode !== undefined) this.exitCode = options.exitCode;
     if (options.stderr !== undefined) this.stderr = options.stderr;
   }
+}
+
+/**
+ * Strip secret-name env assignments from compose stderr before it becomes
+ * part of an error message (Story 46.2 P5). Compose stderr can echo env
+ * interpolation, including injected secrets. Conservative: keep the KEY so
+ * operators see which secret was involved; redact only the VALUE up to the
+ * next whitespace, quote, or newline.
+ */
+function redactSecretsInComposeStderr(stderr: string): string {
+  const SECRET_KEYS = [
+    'TOWN_SECRET_KEY',
+    'MILL_SECRET_KEY',
+    'DVM_SECRET_KEY',
+    'TOWN_SETTLEMENT_PRIVATE_KEY',
+    'MILL_SETTLEMENT_PRIVATE_KEY',
+    'DVM_SETTLEMENT_PRIVATE_KEY',
+    'MILL_MNEMONIC',
+    'TOWNHOUSE_WALLET_PASSWORD',
+  ];
+  const pattern = new RegExp(`(${SECRET_KEYS.join('|')})=[^\\s"'\\n\\r]+`, 'g');
+  return stderr.replace(pattern, '$1=[REDACTED]');
 }
 
 /**
@@ -937,25 +963,188 @@ export class DockerOrchestrator extends EventEmitter {
       imagesToPull.add(normalizeImageTag(RELAY_ATOR_SIDECAR_IMAGE));
     }
 
-    // Check which images exist locally. Match against both RepoTags (tag-form
-    // refs) and RepoDigests (digest-form refs); since DEFAULT_CONNECTOR_IMAGE
-    // flipped to digest form (Story 45.2), RepoTags alone never matches it
-    // and we'd re-pull on every up().
+    // Delegate per-image pull to the public pullImage method (reuses skip-if-exists logic).
+    for (const image of imagesToPull) {
+      await this.pullImage(image);
+    }
+  }
+
+  /**
+   * Pull a single image by its reference (tag or digest form).
+   *
+   * Skips the pull when the image already exists locally (matches against
+   * both RepoTags and RepoDigests so digest-form refs like
+   * `ghcr.io/toon-protocol/town@sha256:abc...` are found correctly).
+   * Throws `OrchestratorError` on pull failure.
+   */
+  async pullImage(image: string): Promise<void> {
     const existingImages = await this.docker.listImages();
     const existingRefs = new Set<string>();
     for (const img of existingImages) {
       for (const tag of img.RepoTags ?? []) existingRefs.add(tag);
       for (const digest of img.RepoDigests ?? []) existingRefs.add(digest);
     }
-
-    // Pull missing images
-    for (const image of imagesToPull) {
-      if (existingRefs.has(image)) {
-        continue;
-      }
-
+    if (existingRefs.has(image)) {
+      return;
+    }
+    try {
       const stream = await this.docker.pull(image);
       await this.followPullProgress(image, stream);
+    } catch (err: unknown) {
+      throw new OrchestratorError(
+        `Failed to pull image ${image}: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err instanceof Error ? err : undefined }
+      );
+    }
+  }
+
+  /**
+   * Start a child peer node via `docker compose --profile <type> up -d <type>`.
+   *
+   * HS-profile only — throws `OrchestratorError` when called on the dev profile.
+   *
+   * The `env` parameter supplies the per-node wallet secrets (e.g.
+   * `TOWN_SECRET_KEY`, `MILL_MNEMONIC`). It is layered on top of `process.env`
+   * so that PATH, HOME, and other process-level env vars are preserved for the
+   * docker CLI subprocess.
+   *
+   * Logging guard: the caller (nodes-lifecycle route) must NOT log the `env`
+   * argument — it contains secret keys and the wallet mnemonic.
+   */
+  async startNodeViaCompose(
+    type: NodeType,
+    env: Record<string, string>
+  ): Promise<void> {
+    if (this.profile === 'dev') {
+      throw new OrchestratorError(
+        `startNodeViaCompose is only available in HS profile; current profile is 'dev'`
+      );
+    }
+    const composePath = this.requireComposePath();
+    this.validateComposePath(composePath);
+
+    const args = [
+      'compose',
+      '-f',
+      composePath,
+      '--profile',
+      type,
+      'up',
+      '-d',
+      type,
+    ] as const;
+
+    try {
+      await this.execFileAsync('docker', args, {
+        timeout: 180_000,
+        maxBuffer: 16 * 1024 * 1024,
+        inheritStdio: true,
+        // Layer node secrets on top of process.env — preserves PATH, HOME, etc.
+        env: { ...process.env, ...env },
+      });
+    } catch (err: unknown) {
+      const e = err as NodeJS.ErrnoException & {
+        stderr?: string;
+        code?: number | string;
+        signal?: string | null;
+      };
+      // P5: redact env-value secrets before stderr ever reaches an error
+      // message or response body.
+      const stderr = redactSecretsInComposeStderr(String(e.stderr ?? ''));
+      const numericExit = typeof e.code === 'number' ? e.code : undefined;
+      const codeLabel = String(e.code ?? e.signal ?? 'unknown');
+      let message: string;
+      if (e.code === 'ENOENT') {
+        message = `docker CLI not found on PATH (ENOENT): ${stderr.trim().slice(0, 2000)}`;
+      } else if (e.code === 'ETIMEDOUT') {
+        message = `docker compose up timed out after 180000ms: ${stderr.trim().slice(0, 2000)}`;
+      } else {
+        message = `docker compose up failed (exit ${codeLabel}): ${stderr.trim().slice(0, 2000)}`;
+      }
+      this.surfaceComposeFailure(stderr);
+      throw new OrchestratorError(message, {
+        ...(numericExit !== undefined ? { exitCode: numericExit } : {}),
+        stderr,
+        cause: err instanceof Error ? err : undefined,
+      });
+    }
+  }
+
+  /**
+   * Stop and remove a child peer node via `docker compose stop` + `rm -f`.
+   *
+   * HS-profile only — throws `OrchestratorError` when called on the dev profile.
+   * Idempotent: stderr patterns indicating the service/container is already gone
+   * (`'no such service'`, `'no containers to remove'`, `'No such container'`)
+   * are treated as success so callers can run this as a rollback without
+   * worrying about the container's prior state.
+   */
+  async stopNodeViaCompose(type: NodeType): Promise<void> {
+    if (this.profile === 'dev') {
+      throw new OrchestratorError(
+        `stopNodeViaCompose is only available in HS profile; current profile is 'dev'`
+      );
+    }
+    const composePath = this.requireComposePath();
+
+    const idempotentStderr = (stderr: string): boolean =>
+      stderr.includes('no such service') ||
+      stderr.includes('no containers to remove') ||
+      stderr.includes('No such container');
+
+    // Step 1: stop the service
+    try {
+      await this.execFileAsync(
+        'docker',
+        ['compose', '-f', composePath, '--profile', type, 'stop', type],
+        { timeout: 60_000, maxBuffer: 16 * 1024 * 1024 }
+      );
+    } catch (err: unknown) {
+      const e = err as NodeJS.ErrnoException & {
+        stderr?: string;
+        code?: number | string;
+      };
+      const stderr = redactSecretsInComposeStderr(String(e.stderr ?? ''));
+      if (!idempotentStderr(stderr)) {
+        // P11: wrap raw error in OrchestratorError for parity with startNodeViaCompose.
+        const numericExit = typeof e.code === 'number' ? e.code : undefined;
+        const codeLabel = String(e.code ?? 'unknown');
+        throw new OrchestratorError(
+          `docker compose stop failed (exit ${codeLabel}): ${stderr.trim().slice(0, 2000)}`,
+          {
+            ...(numericExit !== undefined ? { exitCode: numericExit } : {}),
+            stderr,
+            cause: err instanceof Error ? err : undefined,
+          }
+        );
+      }
+    }
+
+    // Step 2: remove the stopped container so a future `up` re-creates it cleanly
+    try {
+      await this.execFileAsync(
+        'docker',
+        ['compose', '-f', composePath, '--profile', type, 'rm', '-f', type],
+        { timeout: 60_000, maxBuffer: 16 * 1024 * 1024 }
+      );
+    } catch (err: unknown) {
+      const e = err as NodeJS.ErrnoException & {
+        stderr?: string;
+        code?: number | string;
+      };
+      const stderr = redactSecretsInComposeStderr(String(e.stderr ?? ''));
+      if (!idempotentStderr(stderr)) {
+        const numericExit = typeof e.code === 'number' ? e.code : undefined;
+        const codeLabel = String(e.code ?? 'unknown');
+        throw new OrchestratorError(
+          `docker compose rm failed (exit ${codeLabel}): ${stderr.trim().slice(0, 2000)}`,
+          {
+            ...(numericExit !== undefined ? { exitCode: numericExit } : {}),
+            stderr,
+            cause: err instanceof Error ? err : undefined,
+          }
+        );
+      }
     }
   }
 

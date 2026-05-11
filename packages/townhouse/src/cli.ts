@@ -40,6 +40,7 @@ import {
 } from './connector/index.js';
 import { materializeComposeTemplate } from './compose-loader.js';
 import type { ComposeLoaderOptions } from './compose-loader.js';
+import { BootReconciler } from './reconciler.js';
 import { createApiServer } from './api/server.js';
 import { createWizardApiServer } from './api/wizard-server.js';
 import type { ApiServer } from './api/index.js';
@@ -48,6 +49,15 @@ import type { BrowserOpener } from './cli/browser-opener.js';
 import { OnboardingRibbon } from './cli/onboarding-ribbon.js';
 import { renderFailure } from './cli/failure-copy.js';
 import { promptPassword } from './cli/password-prompt.js';
+import {
+  handleNodeAdd,
+  handleNodeRemove,
+  handleNodeList,
+  NODE_HELP,
+  NODE_ADD_HELP,
+  NODE_REMOVE_HELP,
+  NODE_LIST_HELP,
+} from './cli/node-commands.js';
 import {
   WalletManager,
   encryptWallet,
@@ -80,6 +90,9 @@ Usage:
   townhouse wallet show [-c <path>] [--password <pw>]  Show derived addresses
   townhouse hs up [--password <pw>] [-c <path>]                Boot apex (connector + .anyone HS)
   townhouse hs down [--rotate-keys] [-c <path>]               Stop apex (--rotate-keys deletes .anyone keypair)
+  townhouse node add [<type>] [--json] [-c <path>]    Provision a child node (default: town)
+  townhouse node remove <id> [--yes] [--json] [-c <path>]   Deprovision a child node
+  townhouse node list [--json] [-c <path>]            List provisioned nodes
   townhouse --help                               Show this help
 
 Flags:
@@ -92,6 +105,7 @@ Flags:
   --port         Override the API port (setup command, default 9400)
   --preset       Init from a named preset (init only). Supported: demo
   --yes          Non-interactive (init only); with --preset=demo uses demo password if --password absent
+  --json         Machine-readable JSON output (node commands)
   If no flags given, starts all enabled nodes from config.`;
 
 /**
@@ -127,6 +141,26 @@ export interface CliHsOverrides {
   };
   /** Override `docker compose down -v` spawn for --rotate-keys (avoids real Docker). */
   runComposeDown?: (composePath: string, withVolumes: boolean) => Promise<void>;
+  /**
+   * Override BootReconciler construction (Story 46.1). Tests inject a stub
+   * with a spied-on `reconcile()` to assert wiring without touching disk
+   * or the connector. When omitted, the default constructs a real
+   * `BootReconciler` against `~/.townhouse/{nodes.yaml,reconciler.log}`.
+   */
+  createReconciler?: (
+    nodesYamlPath: string,
+    reconcilerLogPath: string
+  ) => { reconcile: () => Promise<void> };
+}
+
+/**
+ * Dependency-injection overrides for the `node add` / `node remove` / `node list` CLI path.
+ * Used by unit tests to stub `fetch` and the interactive confirmation prompt.
+ */
+export interface CliNodeCommandOverrides {
+  fetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  confirm?: (question: string) => Promise<boolean>;
+  apiUrl?: string;
 }
 
 const DEFAULT_CONFIG_DIR = join(homedir(), '.townhouse');
@@ -746,6 +780,36 @@ const HS_CONNECTOR_ADMIN_URL = 'http://127.0.0.1:9401';
 const HS_TOWNHOUSE_API_URL = 'http://127.0.0.1:28090';
 
 /**
+ * Run `reconciler.reconcile()` with a brief retry budget for cold-boot
+ * transients. The connector container may not have bound its admin port
+ * by the time `orchestrator.up()` resolves; treat ECONNREFUSED / timeout
+ * on early attempts as "still warming" and retry. Persistent failures
+ * surface to the caller and end up in the non-fatal stderr log.
+ */
+async function reconcileWithBriefRetry(
+  reconciler: { reconcile: () => Promise<unknown> },
+  budgetMs: number
+): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    try {
+      await reconciler.reconcile();
+      return;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const transient =
+        msg.includes('ECONNREFUSED') ||
+        msg.includes('connection refused') ||
+        msg.includes('request timeout');
+      if (!transient || Date.now() >= deadline) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+}
+
+/**
  * Boot the apex (connector + townhouse-api) via `townhouse hs up`.
  * Idempotent: if the apex is already running, re-prints the hostname and exits 0.
  * After the apex is live, writes `~/.townhouse/host.json` and prints the final line.
@@ -929,6 +993,40 @@ async function handleHsUp(
       } else {
         process.env['TOWNHOUSE_WALLET_DIR'] = prevWalletDir;
       }
+    }
+
+    // Step 5b: reconcile connector peer state to nodes.yaml (Story 46.1).
+    // Runs after orchestrator.up([]) but BEFORE host.json is written and the
+    // hostname is printed. Reconciler divergences are non-fatal — the
+    // failure is logged to stderr but does not block apex boot.
+    const nodesYamlPath = join(configDir, 'nodes.yaml');
+    const reconcilerLogPath = join(configDir, 'reconciler.log');
+    const reconcilerFactory =
+      hsOverrides?.createReconciler ??
+      ((nodesPath: string, logPath: string) => {
+        const reconcilerAdminClient = new ConnectorAdminClient(
+          HS_CONNECTOR_ADMIN_URL,
+          5_000
+        );
+        return new BootReconciler(reconcilerAdminClient, nodesPath, logPath);
+      });
+    const reconciler = reconcilerFactory(nodesYamlPath, reconcilerLogPath);
+    // Brief retry on cold-boot transient errors — orchestrator.up() returns
+    // once Docker accepts the create call, not when the connector inside
+    // the container has bound its admin port. A short retry budget keeps
+    // cold-boot stderr quiet on the common "connector still warming" case
+    // while still surfacing genuine connector-down failures via the final
+    // non-fatal log below.
+    try {
+      await reconcileWithBriefRetry(reconciler, 5_000);
+    } catch (reconcilerErr: unknown) {
+      const detail =
+        reconcilerErr instanceof Error
+          ? (reconcilerErr.stack ?? reconcilerErr.message)
+          : String(reconcilerErr);
+      console.error(
+        `[townhouse hs up] reconciler error (non-fatal): ${detail}`
+      );
     }
 
     // Step 6: fetch published hostname and publishedAt for host.json (AC #6).
@@ -1147,7 +1245,8 @@ export async function main(
   argv: string[],
   dockerInstance?: Docker,
   browserOpener?: BrowserOpener,
-  hsOverrides?: CliHsOverrides
+  hsOverrides?: CliHsOverrides,
+  nodeCommandOverrides?: CliNodeCommandOverrides
 ): Promise<void> {
   const { values, positionals } = parseArgs({
     args: argv,
@@ -1166,17 +1265,34 @@ export async function main(
       preset: { type: 'string' },
       yes: { type: 'boolean' },
       'rotate-keys': { type: 'boolean' },
+      json: { type: 'boolean' },
     },
     strict: false,
     allowPositionals: true,
   });
 
+  const command = positionals[0];
+
+  // Handle `townhouse node <verb> --help` before the global --help check so
+  // node sub-help takes priority over the global HELP_TEXT.
+  if (command === 'node' && values.help) {
+    const action = positionals[1];
+    const subHelp =
+      action === 'add'
+        ? NODE_ADD_HELP
+        : action === 'remove'
+          ? NODE_REMOVE_HELP
+          : action === 'list'
+            ? NODE_LIST_HELP
+            : NODE_HELP;
+    console.log(subHelp);
+    throw new CliHelpRequested();
+  }
+
   if (values.help) {
     console.log(HELP_TEXT);
     throw new CliHelpRequested();
   }
-
-  const command = positionals[0];
 
   if (!command) {
     console.log(HELP_TEXT);
@@ -1289,6 +1405,58 @@ export async function main(
           'Usage: townhouse hs <up|down> [--rotate-keys] [--password <pw>] [-c <path>]'
         );
         process.exitCode = 1;
+      }
+      break;
+    }
+    case 'node': {
+      const action = positionals[1];
+      const jsonMode = values.json === true;
+      const yesMode = values.yes === true;
+      const nodeApiUrl = nodeCommandOverrides?.apiUrl ?? HS_TOWNHOUSE_API_URL;
+
+      if (!action) {
+        console.log(NODE_HELP);
+        throw new CliHelpRequested();
+      }
+
+      switch (action) {
+        case 'add': {
+          const typeArg = positionals[2] ?? 'town';
+          await handleNodeAdd(typeArg, {
+            json: jsonMode,
+            apiUrl: nodeApiUrl,
+            fetch: nodeCommandOverrides?.fetch,
+            confirm: nodeCommandOverrides?.confirm,
+          });
+          break;
+        }
+        case 'remove': {
+          const idArg = positionals[2] ?? '';
+          await handleNodeRemove(idArg, {
+            yes: yesMode,
+            json: jsonMode,
+            apiUrl: nodeApiUrl,
+            fetch: nodeCommandOverrides?.fetch,
+            confirm: nodeCommandOverrides?.confirm,
+          });
+          break;
+        }
+        case 'list': {
+          await handleNodeList({
+            json: jsonMode,
+            apiUrl: nodeApiUrl,
+            fetch: nodeCommandOverrides?.fetch,
+          });
+          break;
+        }
+        default: {
+          // Sanitize to prevent log injection
+          // eslint-disable-next-line no-control-regex
+          const safeAction = action.replace(/[\x00-\x1f\x7f]/g, '');
+          console.error(`Unknown node subcommand: ${safeAction}`);
+          console.log(NODE_HELP);
+          process.exitCode = 1;
+        }
       }
       break;
     }

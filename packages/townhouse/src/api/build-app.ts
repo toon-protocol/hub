@@ -65,6 +65,20 @@ export async function buildFastifyApp(
               'mnemonic',
               'password',
               'password_confirm',
+              // Story 46.2: secret-bearing fields introduced by node lifecycle
+              // routes. These never appear in request/response bodies (they go
+              // to subprocess env), but defense-in-depth covers them at every
+              // path Pino might log a stray object (error objects, debug dumps).
+              'nostrSecretKey',
+              'evmPrivateKey',
+              'TOWN_SECRET_KEY',
+              'MILL_SECRET_KEY',
+              'DVM_SECRET_KEY',
+              'TOWN_SETTLEMENT_PRIVATE_KEY',
+              'MILL_SETTLEMENT_PRIVATE_KEY',
+              'DVM_SETTLEMENT_PRIVATE_KEY',
+              'MILL_MNEMONIC',
+              'TOWNHOUSE_WALLET_PASSWORD',
             ],
             censor: '[REDACTED]',
           },

@@ -1534,3 +1534,232 @@ describe('DockerOrchestrator', () => {
     });
   });
 });
+
+// ── Story 46.2: pullImage, startNodeViaCompose, stopNodeViaCompose ────────────
+
+import {
+  writeFileSync as _wfs46,
+  mkdtempSync as _mkd46,
+  rmSync as _rms46,
+} from 'node:fs';
+import { join as _join46 } from 'node:path';
+import { tmpdir as _tmpdir46 } from 'node:os';
+
+function makeTempCompose46() {
+  const dir = _mkd46(_join46(_tmpdir46(), 'orch-46-'));
+  const composePath = _join46(dir, 'compose.yml');
+  _wfs46(composePath, 'services: {}\n');
+  return {
+    composePath,
+    cleanup: () => _rms46(dir, { recursive: true, force: true }),
+  };
+}
+
+type Exec46 = (
+  file: string,
+  args: readonly string[],
+  options?: Record<string, unknown>
+) => Promise<{ stdout: string; stderr: string }>;
+
+function makeExec46() {
+  const calls: {
+    file: string;
+    args: string[];
+    options?: Record<string, unknown>;
+  }[] = [];
+  const exec: Exec46 = (file, args, options) => {
+    calls.push({ file: String(file), args: Array.from(args), options });
+    return Promise.resolve({ stdout: '', stderr: '' });
+  };
+  return { exec, calls };
+}
+
+describe('DockerOrchestrator (Story 46.2 — pullImage, startNodeViaCompose, stopNodeViaCompose)', () => {
+  describe('pullImage()', () => {
+    it('skips pull when image already exists in RepoTags', async () => {
+      const mockDocker = {
+        listImages: vi.fn().mockResolvedValue([
+          {
+            RepoTags: ['ghcr.io/toon-protocol/town:latest'],
+            RepoDigests: [],
+          },
+        ]),
+        pull: vi.fn(),
+        modem: { followProgress: vi.fn() },
+      } as never;
+
+      const orch = new DockerOrchestrator(mockDocker, getDefaultConfig());
+      await orch.pullImage('ghcr.io/toon-protocol/town:latest');
+      expect(mockDocker.pull).not.toHaveBeenCalled();
+    });
+
+    it('skips pull when image already exists in RepoDigests', async () => {
+      const digest = 'sha256:' + 'a'.repeat(64);
+      const ref = `ghcr.io/toon-protocol/town@${digest}`;
+      const mockDocker = {
+        listImages: vi
+          .fn()
+          .mockResolvedValue([{ RepoTags: [], RepoDigests: [ref] }]),
+        pull: vi.fn(),
+        modem: { followProgress: vi.fn() },
+      } as never;
+
+      const orch = new DockerOrchestrator(mockDocker, getDefaultConfig());
+      await orch.pullImage(ref);
+      expect(mockDocker.pull).not.toHaveBeenCalled();
+    });
+
+    it('calls docker.pull and follows the stream for a new image', async () => {
+      const fakeStream = {};
+      const mockDocker = {
+        listImages: vi.fn().mockResolvedValue([]),
+        pull: vi.fn().mockResolvedValue(fakeStream),
+        modem: {
+          followProgress: vi
+            .fn()
+            .mockImplementation(
+              (_stream: unknown, onFinished: (err: null) => void) =>
+                onFinished(null)
+            ),
+        },
+      } as never;
+
+      const orch = new DockerOrchestrator(mockDocker, getDefaultConfig());
+      await orch.pullImage('ghcr.io/toon-protocol/town:new');
+      expect(mockDocker.pull).toHaveBeenCalledWith(
+        'ghcr.io/toon-protocol/town:new'
+      );
+    });
+
+    it('wraps docker.pull failure in OrchestratorError', async () => {
+      const mockDocker = {
+        listImages: vi.fn().mockResolvedValue([]),
+        pull: vi.fn().mockRejectedValue(new Error('registry error')),
+        modem: { followProgress: vi.fn() },
+      } as never;
+
+      const orch = new DockerOrchestrator(mockDocker, getDefaultConfig());
+      await expect(
+        orch.pullImage('ghcr.io/toon-protocol/town:bad')
+      ).rejects.toMatchObject({
+        name: 'OrchestratorError',
+      });
+    });
+  });
+
+  describe('startNodeViaCompose()', () => {
+    it('throws OrchestratorError when profile is dev', async () => {
+      // dev profile (default) — no composePath
+      const { exec } = makeExec46();
+      const orch = new DockerOrchestrator(
+        {} as never,
+        getDefaultConfig(),
+        undefined,
+        { execFileAsync: exec as never }
+      );
+      await expect(
+        orch.startNodeViaCompose('town', { TOWN_SECRET_KEY: 'abc' })
+      ).rejects.toMatchObject({ name: 'OrchestratorError' });
+    });
+
+    it('calls execFileAsync with correct compose args and layered env', async () => {
+      const { composePath, cleanup } = makeTempCompose46();
+      try {
+        const { exec, calls } = makeExec46();
+        const orch = new DockerOrchestrator(
+          {} as never,
+          getDefaultConfig(),
+          undefined,
+          { profile: 'hs', composePath, execFileAsync: exec as never }
+        );
+        await orch.startNodeViaCompose('town', {
+          TOWN_SECRET_KEY: 'testsecret',
+        });
+
+        expect(calls).toHaveLength(1);
+        const { file, args, options } = calls[0]!;
+        expect(file).toBe('docker');
+        expect(args).toEqual([
+          'compose',
+          '-f',
+          composePath,
+          '--profile',
+          'town',
+          'up',
+          '-d',
+          'town',
+        ]);
+        // env must be layered (contains both process.env and the secret)
+        const env = (options as { env?: Record<string, string> })?.env;
+        expect(env).toBeDefined();
+        expect(env?.['TOWN_SECRET_KEY']).toBe('testsecret');
+        expect(env?.['PATH']).toBeDefined(); // process.env inherited
+      } finally {
+        cleanup();
+      }
+    });
+  });
+
+  describe('stopNodeViaCompose()', () => {
+    it('throws OrchestratorError when profile is dev', async () => {
+      const { exec } = makeExec46();
+      const orch = new DockerOrchestrator(
+        {} as never,
+        getDefaultConfig(),
+        undefined,
+        { execFileAsync: exec as never }
+      );
+      await expect(orch.stopNodeViaCompose('mill')).rejects.toMatchObject({
+        name: 'OrchestratorError',
+      });
+    });
+
+    it('calls stop then rm with correct args', async () => {
+      const { composePath, cleanup } = makeTempCompose46();
+      try {
+        const { exec, calls } = makeExec46();
+        const orch = new DockerOrchestrator(
+          {} as never,
+          getDefaultConfig(),
+          undefined,
+          { profile: 'hs', composePath, execFileAsync: exec as never }
+        );
+        await orch.stopNodeViaCompose('mill');
+
+        expect(calls).toHaveLength(2);
+        expect(calls[0]?.args).toContain('stop');
+        expect(calls[0]?.args).toContain('mill');
+        expect(calls[1]?.args).toContain('rm');
+        expect(calls[1]?.args).toContain('mill');
+      } finally {
+        cleanup();
+      }
+    });
+
+    it('swallows "no such service" stderr — real-world docker compose rm stderr string', async () => {
+      const { composePath, cleanup } = makeTempCompose46();
+      try {
+        // Real-world docker compose rm stderr when container doesn't exist
+        const noSuchContainerStderr =
+          'no containers to remove\nservice "mill" is not running container "townhouse-hs-mill"';
+        const exec: Exec46 = () => {
+          const err = Object.assign(
+            new Error('docker subprocess exited with code 1'),
+            { stderr: noSuchContainerStderr, code: 1 }
+          );
+          return Promise.reject(err);
+        };
+        const orch = new DockerOrchestrator(
+          {} as never,
+          getDefaultConfig(),
+          undefined,
+          { profile: 'hs', composePath, execFileAsync: exec as never }
+        );
+        // Must not throw — no such container is an idempotent no-op
+        await expect(orch.stopNodeViaCompose('mill')).resolves.toBeUndefined();
+      } finally {
+        cleanup();
+      }
+    });
+  });
+});

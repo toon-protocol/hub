@@ -237,6 +237,150 @@ export class ConnectorAdminClient {
   }
 
   /**
+   * POST /admin/peers — register (or re-register, idempotent) a child peer
+   * with the connector. Used by the boot reconciler (Story 46.1) to
+   * re-register peers present in `nodes.yaml` but missing from the
+   * connector's runtime peer roster (e.g., after a connector restart).
+   *
+   * The connector's POST /admin/peers handler treats a POST whose `id`
+   * matches an existing peer as a re-registration (no-op for the peer
+   * itself; routes are appended). A POST with a new `id` triggers
+   * `addPeer()` and BTP connection setup.
+   *
+   * @param input.id - peer identifier (matches `nodes.yaml`'s `peerId` and
+   *   the connector's `PeerStatus.id`).
+   * @param input.url - BTP WebSocket URL the connector dials. MUST start
+   *   with `ws://` or `wss://` (the connector validates this).
+   * @param input.authToken - shared auth token; pass empty string for
+   *   internal Townhouse peers (no auth).
+   * @param input.routes - optional ILP route prefixes to register against
+   *   this peer. The reconciler passes the peer's ilpAddress.
+   *
+   * @throws Error on non-2xx response, timeout, or connection refused.
+   */
+  async registerPeer(input: {
+    id: string;
+    url: string;
+    authToken: string;
+    routes?: { prefix: string; priority?: number }[];
+  }): Promise<void> {
+    if (!input.url.startsWith('ws://') && !input.url.startsWith('wss://')) {
+      throw new Error(
+        `Connector admin API: registerPeer.url must start with ws:// or wss:// (got: ${input.url})`
+      );
+    }
+    const url = `${this.baseUrl}/admin/peers`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(input),
+          signal: controller.signal,
+        });
+      } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw new Error(
+            `Connector admin API request timeout after ${this.timeoutMs}ms: POST ${url}`
+          );
+        }
+        const msg = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Connector admin API request failed: POST ${url} — ${msg}`
+        );
+      }
+      if (!response.ok) {
+        // Body read MUST happen inside the AbortSignal-protected try so a slow
+        // response body cannot hang past the request timeout.
+        let body = '';
+        try {
+          body = await response.text();
+        } catch (error: unknown) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            throw new Error(
+              `Connector admin API request timeout after ${this.timeoutMs}ms: POST ${url} (body read)`
+            );
+          }
+          /* best-effort: leave body empty */
+        }
+        throw new Error(
+          `Connector admin API error: POST /admin/peers returned ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * DELETE /admin/peers/:peerId?removeRoutes=true — deregister a child peer.
+   *
+   * Idempotent: a 404 from the connector (peer already removed) is treated as
+   * success so callers can safely use this as a rollback step without knowing
+   * whether the peer was ever registered.
+   *
+   * `removeRoutes=true` is always sent so the connector drops the ILP routing
+   * entries for this peer along with the BTP connection config.
+   *
+   * @throws Error on empty peerId (rejected at client, no network request made)
+   * @throws Error on non-2xx/404 response, timeout, or connection refused
+   */
+  async removePeer(peerId: string): Promise<void> {
+    if (!peerId) {
+      throw new Error(
+        'Connector admin API: removePeer requires a non-empty peerId'
+      );
+    }
+    const url = `${this.baseUrl}/admin/peers/${encodeURIComponent(peerId)}?removeRoutes=true`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: 'DELETE',
+          signal: controller.signal,
+        });
+      } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw new Error(
+            `Connector admin API request timeout after ${this.timeoutMs}ms: DELETE ${url}`
+          );
+        }
+        const msg = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Connector admin API request failed: DELETE ${url} — ${msg}`
+        );
+      }
+      // 404 means peer already gone — idempotent success.
+      if (response.status === 404) {
+        return;
+      }
+      if (!response.ok) {
+        let body = '';
+        try {
+          body = await response.text();
+        } catch (error: unknown) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            throw new Error(
+              `Connector admin API request timeout after ${this.timeoutMs}ms: DELETE ${url} (body read)`
+            );
+          }
+          /* best-effort: leave body empty */
+        }
+        throw new Error(
+          `Connector admin API error: DELETE /admin/peers/${peerId} returned ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`
+        );
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
    * GET /packets — returns the connector's raw packet log filtered by the
    * given criteria. Used by the timeseries aggregation route (story 21.10).
    *

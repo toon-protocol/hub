@@ -14,12 +14,15 @@ import { registerWalletBalancesRoutes } from './routes/wallet-balances.js';
 import { registerWalletRevealRoutes } from './routes/wallet-reveal.js';
 import { registerWalletWithdrawRoutes } from './routes/wallet-withdraw.js';
 import { registerConfigPatchRoutes } from './routes/nodes-patch.js';
+import { registerNodeLifecycleRoutes } from './routes/nodes-lifecycle.js';
 import {
   registerMetricsWsRoutes,
   getOpenWebSockets,
 } from './routes/metrics-ws.js';
 import { registerWizardRoutes } from './routes/wizard.js';
 import { registerTransportRoutes } from './routes/transport.js';
+import { registerEarningsRoutes } from './routes/earnings.js';
+import { registerLogsRoutes } from './routes/logs.js';
 
 /**
  * Create the Fastify API server. Caller MUST supply a `transportProbe` in
@@ -53,6 +56,9 @@ export async function createApiServer(deps: ApiDeps): Promise<ApiServer> {
   registerWalletRevealRoutes(app, deps);
   registerWalletWithdrawRoutes(app, deps);
   registerConfigPatchRoutes(app, deps);
+  registerNodeLifecycleRoutes(app, deps);
+  registerEarningsRoutes(app, deps);
+  registerLogsRoutes(app, deps);
   registerMetricsWsRoutes(app, deps);
 
   const CLOSE_TIMEOUT_MS = 5000;

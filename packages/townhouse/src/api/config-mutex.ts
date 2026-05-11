@@ -29,3 +29,27 @@ export function releaseConfigMutex(): void {
 export function resetConfigMutex(): void {
   isMutating = false;
 }
+
+// ── Node lifecycle mutex ────────────────────────────────────────────────────
+// Serializes concurrent POST/DELETE /api/nodes requests so the 6-step
+// provision pipeline cannot race with a concurrent teardown.
+// Kept separate from configMutex so config fee-patches and node-add can run
+// in parallel (they touch disjoint state).
+
+let isNodeLifecycleRunning = false;
+
+/** Acquire the node-lifecycle mutex. Returns true on success, false if busy. */
+export function acquireNodeLifecycleMutex(): boolean {
+  if (isNodeLifecycleRunning) return false;
+  isNodeLifecycleRunning = true;
+  return true;
+}
+
+export function releaseNodeLifecycleMutex(): void {
+  isNodeLifecycleRunning = false;
+}
+
+/** Reset for testing. */
+export function resetNodeLifecycleMutex(): void {
+  isNodeLifecycleRunning = false;
+}

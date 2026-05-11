@@ -335,4 +335,98 @@ describe('ConnectorAdminClient', () => {
       );
     });
   });
+
+  // ── Story 46.2: removePeer() ───────────────────────────────────────────────
+
+  describe('removePeer() (Story 46.2, Task 5.2)', () => {
+    it('resolves on 200 (success)', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => '{"success":true}',
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+      await expect(client.removePeer('town')).resolves.toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:9401/admin/peers/town?removeRoutes=true',
+        expect.objectContaining({
+          method: 'DELETE',
+          signal: expect.any(AbortSignal),
+        })
+      );
+    });
+
+    it('resolves on 404 — idempotent (peer already removed)', async () => {
+      // 404 means peer already gone, which is the desired end state.
+      // The client MUST treat this as success so DELETE /api/nodes/:id
+      // is idempotent regardless of whether the connector was cleaned up
+      // separately (e.g. connector restart, reconciler ran).
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        text: async () =>
+          '{"error":"Not found","message":"Peer \'town\' not found"}',
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+      await expect(client.removePeer('town')).resolves.toBeUndefined();
+    });
+
+    it('throws on 500 with response status in message', async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        text: async () => '{"error":"Internal server error"}',
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+      await expect(client.removePeer('town')).rejects.toThrow('500');
+    });
+
+    it('throws timeout error on AbortError', async () => {
+      fetchMock.mockImplementation(
+        (_url: unknown, opts: { signal: AbortSignal }) => {
+          return new Promise<Response>((_resolve, reject) => {
+            if (opts.signal.aborted) {
+              const e = Object.assign(new Error('The operation was aborted.'), {
+                name: 'AbortError',
+              });
+              reject(e);
+            } else {
+              opts.signal.addEventListener('abort', () => {
+                const e = Object.assign(
+                  new Error('The operation was aborted.'),
+                  { name: 'AbortError' }
+                );
+                reject(e);
+              });
+            }
+          });
+        }
+      );
+
+      const client = new ConnectorAdminClient('http://localhost:9401', 1);
+      await expect(client.removePeer('town')).rejects.toThrow(/timeout/i);
+    });
+
+    it('throws on connection refused with descriptive message', async () => {
+      fetchMock.mockRejectedValue(
+        Object.assign(new Error('ECONNREFUSED'), { code: 'ECONNREFUSED' })
+      );
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+      await expect(client.removePeer('town')).rejects.toThrow(
+        /request failed/i
+      );
+    });
+
+    it('throws immediately for empty peerId without making a network request', async () => {
+      const client = new ConnectorAdminClient('http://localhost:9401');
+      await expect(client.removePeer('')).rejects.toThrow(/non-empty peerId/i);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
 });

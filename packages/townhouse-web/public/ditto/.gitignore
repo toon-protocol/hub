@@ -1,0 +1,4 @@
+# Built by scripts/prep-ditto-build.sh — checked-in files only:
+*
+!.gitignore
+!README.md

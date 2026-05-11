@@ -170,6 +170,73 @@ export class WalletManager {
   }
 
   /**
+   * Get derived keys for a specific node type at a given derivation index.
+   *
+   * Pure derivation — does NOT mutate `state`. Re-derives from the stored
+   * mnemonic each time it is called. For mill, also derives Solana + Mina
+   * addresses at the same account index. Throws if the wallet is locked.
+   *
+   * v1 callers MUST pass `derivationIndex = ACCOUNT_INDEX_{type}` for the
+   * first (and only) instance per type. Multi-instance support is out of
+   * scope for v1 — the route layer enforces single-instance-per-type.
+   */
+  async deriveNodeKey(
+    type: NodeType,
+    derivationIndex: number
+  ): Promise<NodeKeys> {
+    if (!this.state) {
+      throw new Error(
+        'Wallet not initialized. Call generate() or fromMnemonic() first.'
+      );
+    }
+    const mnemonic = this.state.mnemonic;
+    let seed: Uint8Array | undefined;
+    try {
+      seed = mnemonicToSeedSync(mnemonic);
+      const baseKeys = this.deriveNodeKeys(seed, type, derivationIndex);
+      if (type !== 'mill') {
+        return baseKeys;
+      }
+      // Mill: also derive Solana + Mina at the same account index.
+      let solanaAddress: string | undefined;
+      let minaAddress: string | undefined;
+      try {
+        const millChainKeys = await deriveMillKeys({
+          mnemonic,
+          chains: ['solana', 'mina'],
+          accountIndex: derivationIndex,
+        });
+        if (millChainKeys.solana) {
+          solanaAddress = base58Encode(millChainKeys.solana.publicKey);
+        }
+        if (millChainKeys.mina) {
+          minaAddress = millChainKeys.mina.publicKey;
+        }
+      } catch (err: unknown) {
+        // deriveMillKeys failure (e.g. unsupported platform, library load
+        // error) — chain addresses are optional at derivation time, but a
+        // non-platform failure should be visible (P8). Log via console.warn
+        // because WalletManager has no logger injected.
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[WalletManager] deriveMillKeys failed for accountIndex=${derivationIndex}: ${errMsg} — Solana/Mina addresses omitted`
+        );
+      }
+      return { ...baseKeys, solanaAddress, minaAddress };
+    } finally {
+      if (seed) seed.fill(0);
+    }
+  }
+
+  /**
+   * Return the BIP-39 mnemonic from in-memory wallet state.
+   * Returns null when the wallet is locked or not initialized.
+   */
+  getMnemonic(): string | null {
+    return this.state?.mnemonic ?? null;
+  }
+
+  /**
    * Derive keys for all node types from a mnemonic.
    */
   private async deriveAllKeys(mnemonic: string): Promise<WalletState> {
@@ -205,7 +272,7 @@ export class WalletManager {
         mill: { ...millBaseKeys, solanaAddress, minaAddress },
         dvm: this.deriveNodeKeys(seed, 'dvm'),
       };
-      return { keys };
+      return { keys, mnemonic };
     } finally {
       if (seed) seed.fill(0);
     }
@@ -213,12 +280,18 @@ export class WalletManager {
 
   /**
    * Derive Nostr + EVM keys for a specific node type.
+   * Accepts an optional `accountIndex` to override the default per-type index.
+   * When omitted, uses `NODE_ACCOUNT_INDEX[nodeType]` (existing behavior).
    */
-  private deriveNodeKeys(seed: Uint8Array, nodeType: NodeType): NodeKeys {
-    const accountIndex = NODE_ACCOUNT_INDEX[nodeType];
+  private deriveNodeKeys(
+    seed: Uint8Array,
+    nodeType: NodeType,
+    accountIndex?: number
+  ): NodeKeys {
+    const idx = accountIndex ?? NODE_ACCOUNT_INDEX[nodeType];
 
     // Nostr key: NIP-06 path m/44'/1237'/{account}'/0/0
-    const nostrPath = `m/44'/1237'/${accountIndex}'/0/0`;
+    const nostrPath = `m/44'/1237'/${idx}'/0/0`;
     const nostrHdKey = HDKey.fromMasterSeed(seed).derive(nostrPath);
     if (!nostrHdKey.privateKey) {
       throw new Error(`Nostr private key missing at ${nostrPath}`);
@@ -227,7 +300,7 @@ export class WalletManager {
     const nostrPubkey = getPublicKey(nostrSecretKey);
 
     // EVM key: standard path m/44'/60'/{account}'/0/0
-    const evmPath = `m/44'/60'/${accountIndex}'/0/0`;
+    const evmPath = `m/44'/60'/${idx}'/0/0`;
     const evmHdKey = HDKey.fromMasterSeed(seed).derive(evmPath);
     if (!evmHdKey.privateKey) {
       throw new Error(`EVM private key missing at ${evmPath}`);

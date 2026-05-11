@@ -296,4 +296,81 @@ describe('WalletManager', () => {
       expect(dvm.evmDerivationPath).toBe("m/44'/60'/2'/0/0");
     });
   });
+
+  // ── Story 46.2: deriveNodeKey + getMnemonic ────────────────────────────────
+
+  describe('deriveNodeKey() (Story 46.2, Task 3.2)', () => {
+    it('returns the same keys as getNodeKeys() when derivationIndex = ACCOUNT_INDEX (identity invariant)', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
+
+      const ACCOUNT_INDEX_TOWN = 0;
+      const derived = await manager.deriveNodeKey('town', ACCOUNT_INDEX_TOWN);
+      const cached = manager.getNodeKeys('town');
+
+      expect(derived.nostrPubkey).toBe(cached.nostrPubkey);
+      expect(derived.evmAddress).toBe(cached.evmAddress);
+      expect(Buffer.from(derived.nostrSecretKey).toString('hex')).toBe(
+        Buffer.from(cached.nostrSecretKey).toString('hex')
+      );
+    });
+
+    it('produces different keys when derivationIndex differs from the default', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
+
+      const defaultKeys = await manager.deriveNodeKey('town', 0);
+      const alternateKeys = await manager.deriveNodeKey('town', 5);
+
+      expect(defaultKeys.nostrPubkey).not.toBe(alternateKeys.nostrPubkey);
+      expect(defaultKeys.evmAddress).not.toBe(alternateKeys.evmAddress);
+    });
+
+    it('throws when wallet has never been initialized', async () => {
+      // Fresh manager (no fromMnemonic/generate call) — deriveNodeKey throws.
+      await expect(manager.deriveNodeKey('town', 0)).rejects.toThrow(
+        /not initialized/i
+      );
+    });
+
+    it('throws when wallet is locked after being initialized (P9/P10)', async () => {
+      // Initialize, then lock — deriveNodeKey must throw the same not-initialized
+      // error class so callers cannot accidentally derive keys post-lock.
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
+      manager.lock();
+      await expect(manager.deriveNodeKey('town', 0)).rejects.toThrow(
+        /not initialized/i
+      );
+    });
+
+    it('mill type: returns Solana + Mina addresses when derivation succeeds', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
+      const ACCOUNT_INDEX_MILL = 1;
+      // deriveMillKeys may succeed or fail depending on the test platform.
+      // Either way, deriveNodeKey should NOT throw — mill chain addresses are optional.
+      const keys = await manager.deriveNodeKey('mill', ACCOUNT_INDEX_MILL);
+      expect(keys.nostrPubkey).toBeTruthy();
+      expect(keys.evmAddress).toBeTruthy();
+      // solanaAddress / minaAddress may or may not be present (optional)
+      if (keys.solanaAddress !== undefined) {
+        expect(typeof keys.solanaAddress).toBe('string');
+      }
+    });
+  });
+
+  describe('getMnemonic() (Story 46.2, Task 3.3)', () => {
+    it('returns the mnemonic after fromMnemonic()', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
+      expect(manager.getMnemonic()).toBe(TEST_MNEMONIC_12);
+    });
+
+    it('returns null when wallet has never been initialized', () => {
+      expect(manager.getMnemonic()).toBeNull();
+    });
+
+    it('returns null after lock()', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
+      expect(manager.getMnemonic()).toBe(TEST_MNEMONIC_12);
+      manager.lock();
+      expect(manager.getMnemonic()).toBeNull();
+    });
+  });
 });

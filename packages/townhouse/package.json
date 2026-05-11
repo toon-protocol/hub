@@ -60,7 +60,8 @@
     "fastify": "^5.0.0",
     "nostr-tools": "^2.23.1",
     "viem": "^2.0.0",
-    "yaml": "^2.7.0"
+    "yaml": "^2.7.0",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/dockerode": "^3.3.0",

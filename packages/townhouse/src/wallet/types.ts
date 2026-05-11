@@ -62,6 +62,11 @@ export interface NodeKeyInfo {
 export interface WalletState {
   /** All derived node keys */
   keys: DerivedNodeKeys;
+  /**
+   * BIP-39 mnemonic held in memory for transient re-derivation.
+   * Cleared on lock() by setting this.state = null. Never serialized.
+   */
+  mnemonic: string;
 }
 
 /** Encrypted wallet file format (JSON, all fields base64-encoded) */

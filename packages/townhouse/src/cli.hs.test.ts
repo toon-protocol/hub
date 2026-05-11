@@ -88,6 +88,10 @@ interface HsOverrideOptions {
   down?: () => Promise<void>;
   /** If true, the stub orchestrator emits a containerState 'creating' event during up(). */
   emitContainerStateOnUp?: boolean;
+  /** If supplied, capture the BootReconciler stub's reconcile spy here. */
+  reconcileSpy?: ReturnType<typeof vi.fn>;
+  /** If true, the reconciler stub throws — verifies non-fatal handling. */
+  reconcileThrows?: boolean;
 }
 
 /** Build a minimal CliHsOverrides stub for unit testing. */
@@ -97,6 +101,8 @@ function makeHsOverrides({
   up,
   down,
   emitContainerStateOnUp = false,
+  reconcileSpy,
+  reconcileThrows = false,
 }: HsOverrideOptions = {}): CliHsOverrides {
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
   let adminClientCallCount = 0;
@@ -154,6 +160,15 @@ function makeHsOverrides({
     runComposeDown: vi.fn(
       async (_composePath: string, _withVolumes: boolean) => undefined
     ),
+    createReconciler: vi.fn((_nodesYamlPath: string, _logPath: string) => ({
+      reconcile:
+        reconcileSpy ??
+        vi.fn(async () => {
+          if (reconcileThrows) {
+            throw new Error('reconciler boom');
+          }
+        }),
+    })),
   };
 }
 
@@ -434,6 +449,74 @@ describe('CLI hs subcommand', () => {
       );
       // If no error is thrown, the ribbon transition fired without crashing.
       expect(process.exitCode).not.toBe(1);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // ── hs up: reconciler wiring (Story 46.1) ─────────────────────────────────
+
+  it('hs up calls BootReconciler.reconcile() exactly once on cold-boot', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const reconcileSpy = vi.fn(async () => undefined);
+      const overrides = makeHsOverrides({ reconcileSpy });
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+      expect(overrides.createReconciler).toHaveBeenCalledTimes(1);
+      expect(overrides.createReconciler).toHaveBeenCalledWith(
+        join(configDir, 'nodes.yaml'),
+        join(configDir, 'reconciler.log')
+      );
+      expect(reconcileSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up: reconciler errors are non-fatal (logged to stderr, hostname still printed)', async () => {
+    const hostname = 'reconcerr.anyone';
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const overrides = makeHsOverrides({ hostname, reconcileThrows: true });
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+      // Non-fatal: exit code is not 1, hostname still printed.
+      expect(process.exitCode).not.toBe(1);
+      const errOutput = consoleErrorSpy.mock.calls
+        .map((c) => c[0] as string)
+        .join('\n');
+      expect(errOutput).toContain('reconciler error (non-fatal)');
+      expect(errOutput).toContain('reconciler boom');
+      const allOutput =
+        consoleSpy.mock.calls.map((c) => c[0] as string).join('') +
+        stdoutSpy.mock.calls.map((c) => c[0] as string).join('');
+      expect(allOutput).toContain(`Apex live at ${hostname}`);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up: reconciler is NOT called on idempotent path (apex already running)', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const overrides = makeHsOverrides({ probe: 'running' });
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+      // Idempotent re-print path skips orchestrator AND reconciler.
+      expect(overrides.createReconciler).not.toHaveBeenCalled();
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }

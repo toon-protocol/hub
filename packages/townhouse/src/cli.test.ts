@@ -157,6 +157,14 @@ describe('CLI', () => {
       expect(output).toContain('--mill');
       expect(output).toContain('--dvm');
     });
+
+    it('help text contains all three node verb lines (Story 46.3 regression guard)', async () => {
+      await expect(main(['--help'])).rejects.toThrow(CliHelpRequested);
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(output).toContain('townhouse node add');
+      expect(output).toContain('townhouse node remove');
+      expect(output).toContain('townhouse node list');
+    });
   });
 
   describe('init (T-001, T-004)', () => {
