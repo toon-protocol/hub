@@ -1007,6 +1007,22 @@ async function handleHsDown(
     hsOverrides?.materializeComposeTemplate ?? materializeComposeTemplate;
   const { composePath } = materialize('hs', { townhouseHome: configDir });
 
+  // TOWNHOUSE_HOME must be exported for `docker compose down` to interpolate
+  // the same bind-mount sources the template uses (`${TOWNHOUSE_HOME}/...`).
+  // Without it, Compose warns "TOWNHOUSE_HOME is not set" and rejects the
+  // teardown with `invalid spec: :/.townhouse:rw: empty section between colons`.
+  // Mirrors the env-export pattern in handleHsUp; covers both the default
+  // (orch.down()) and --rotate-keys (_runDockerComposeDown) paths below.
+  const prevTownhouseHome = process.env['TOWNHOUSE_HOME'];
+  process.env['TOWNHOUSE_HOME'] = configDir;
+  const restoreTownhouseHome = (): void => {
+    if (prevTownhouseHome === undefined) {
+      delete process.env['TOWNHOUSE_HOME'];
+    } else {
+      process.env['TOWNHOUSE_HOME'] = prevTownhouseHome;
+    }
+  };
+
   if (rotateKeys) {
     // Confirmation prompt when TTY is available.
     if (process.stdin.isTTY) {
@@ -1052,6 +1068,7 @@ async function handleHsDown(
     } catch (err: unknown) {
       const { exitCode } = renderFailure(err);
       process.exitCode = exitCode;
+      restoreTownhouseHome();
       return;
     }
 
@@ -1061,6 +1078,7 @@ async function handleHsDown(
     console.log(
       "Apex stopped. Volumes deleted — your next 'hs up' will publish a NEW .anyone address."
     );
+    restoreTownhouseHome();
     return;
   }
 
@@ -1084,8 +1102,10 @@ async function handleHsDown(
   } catch (err: unknown) {
     const { exitCode } = renderFailure(err);
     process.exitCode = exitCode;
+    restoreTownhouseHome();
     return;
   }
+  restoreTownhouseHome();
 
   console.log(
     'Apex stopped. Volumes preserved — your .anyone address is stable.'
