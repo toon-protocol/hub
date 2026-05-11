@@ -887,12 +887,18 @@ async function handleHsUp(
 
     // Step 5: up (always-on services only — empty profile array).
     // Inject env vars that Docker Compose interpolates in townhouse-hs.yml:
+    //   TOWNHOUSE_HOME — operator's config dir; replaces hardcoded `~/.townhouse`
+    //     bind-mount sources so a custom --config-dir (or test tmpDir) actually
+    //     reaches the containers. Docker does NOT expand `~` in bind-mount
+    //     sources, so the template must use an explicit interpolation variable.
     //   TOWNHOUSE_WALLET_PASSWORD — required by townhouse-api service
     //   TOWNHOUSE_UID — run townhouse-api as the host user so bind-mounted
     //     ~/.townhouse files (rw------- 600) are readable inside the container
+    const prevTownhouseHome = process.env['TOWNHOUSE_HOME'];
     const prevWalletPassword = process.env['TOWNHOUSE_WALLET_PASSWORD'];
     const prevTownhouseUid = process.env['TOWNHOUSE_UID'];
     const prevWalletDir = process.env['TOWNHOUSE_WALLET_DIR'];
+    process.env['TOWNHOUSE_HOME'] = configDir;
     process.env['TOWNHOUSE_WALLET_PASSWORD'] = resolvedPassword;
     process.env['TOWNHOUSE_UID'] = String(process.getuid?.() ?? 1000);
     // Inject the wallet dir as an absolute host path so the townhouse-api
@@ -903,6 +909,11 @@ async function handleHsUp(
     try {
       await orch.up([]);
     } finally {
+      if (prevTownhouseHome === undefined) {
+        delete process.env['TOWNHOUSE_HOME'];
+      } else {
+        process.env['TOWNHOUSE_HOME'] = prevTownhouseHome;
+      }
       if (prevWalletPassword === undefined) {
         delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
       } else {

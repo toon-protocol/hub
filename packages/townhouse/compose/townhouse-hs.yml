@@ -103,7 +103,11 @@ services:
       - '127.0.0.1:9401:9401'
     volumes:
       # Rendered connector config (Story 45.4 writes this on first-run).
-      - ~/.townhouse/connector.yaml:/config/connector.yaml:ro
+      # TOWNHOUSE_HOME is exported by `townhouse hs up` as the operator's
+      # config dir (default ~/.townhouse; --config-dir overrides). Docker does
+      # NOT expand `~` in bind-mount sources, so the path must come through
+      # Compose interpolation.
+      - ${TOWNHOUSE_HOME}/connector.yaml:/config/connector.yaml:ro
       # .anyone keypair + HS state (persists across down/up cycles).
       - townhouse-hs-anon:/var/lib/anon/hs
     environment:
@@ -152,7 +156,11 @@ services:
       # Docker socket — townhouse-api is the sole orchestration surface.
       - /var/run/docker.sock:/var/run/docker.sock
       # Operator home — wallet, config, compose files, snapshots (RW).
-      - ~/.townhouse:/.townhouse:rw
+      # TOWNHOUSE_HOME is exported by `townhouse hs up` (see connector volume
+      # above). The container-side path stays `/.townhouse` so config.yaml
+      # `TOWNHOUSE_CONFIG: /.townhouse/config.yaml` resolves identically
+      # regardless of the operator's host-side config dir.
+      - ${TOWNHOUSE_HOME}:/.townhouse:rw
       # Wallet dir mirrored at the host-absolute path so config.yaml's
       # `wallet.encrypted_path` (an absolute host path set by `townhouse init`)
       # resolves correctly inside the container. TOWNHOUSE_WALLET_DIR is
@@ -272,7 +280,8 @@ services:
       TOON_CONNECTOR_LOG_LEVEL: '${TOON_CONNECTOR_LOG_LEVEL:-warn}'
     volumes:
       # Operator-managed mill config (Epic 46 provisions this on `townhouse node add mill`).
-      - ~/.townhouse/mill.config.json:/config/mill.config.json:ro
+      # TOWNHOUSE_HOME is exported by `townhouse hs up` (see connector volume above).
+      - ${TOWNHOUSE_HOME}/mill.config.json:/config/mill.config.json:ro
       - townhouse-hs-mill-data:/data
     healthcheck:
       test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3200/health']
