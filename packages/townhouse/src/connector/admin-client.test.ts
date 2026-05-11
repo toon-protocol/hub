@@ -279,6 +279,34 @@ describe('ConnectorAdminClient', () => {
         /invalid hs-hostname response shape/
       );
     });
+
+    it('Fix 5: throws immediately on 404 with "unexpected status" (fast-fail, no retry)', async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+
+      await expect(client.getHsHostname()).rejects.toThrow(
+        /unexpected status 404/
+      );
+    });
+
+    it('Fix 5: throws immediately on 401 with "unexpected status"', async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+
+      await expect(client.getHsHostname()).rejects.toThrow(
+        /unexpected status 401/
+      );
+    });
   });
 
   describe('constructor', () => {

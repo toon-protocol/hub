@@ -109,9 +109,14 @@ export class ConnectorAdminClient {
       if (response.status === 503) {
         throw new Error('connector is anon-disabled (HTTP 503)');
       }
+      // fast-fail on unexpected non-200/503 status codes. Retrying a 404
+      // (pre-v3.5.0 connector image) for 120 s silently burns the full readiness
+      // timeout. Only 200 (success) and 503 (anon-disabled, caught above) are
+      // expected — everything else is an immediate fatal error.
       if (!response.ok) {
         throw new Error(
-          `Connector admin API error: ${response.status} ${response.statusText}`
+          `Connector admin API unexpected status ${response.status} on /admin/hs-hostname — ` +
+            `expected 200 or 503 (connector image may be too old or misconfigured)`
         );
       }
       // Body read MUST happen inside the AbortSignal-protected try so the

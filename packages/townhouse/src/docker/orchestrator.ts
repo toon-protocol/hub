@@ -8,8 +8,8 @@
 
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
 import type Docker from 'dockerode';
 import type { TownhouseConfig } from '../config/schema.js';
 import { ConnectorConfigGenerator } from '../connector/config-generator.js';
@@ -285,10 +285,13 @@ export class DockerOrchestrator extends EventEmitter {
    * - 'hs': docker compose subprocess + HS hostname readiness gate
    */
   async up(profiles: NodeType[]): Promise<void> {
-    this.activeNodes = [...profiles];
     if (this.profile === 'hs') {
       await this.upHs(profiles);
+      // defer activeNodes mutation until after upHs succeeds so a
+      // failed/timed-out upHs does not leave phantom state.
+      this.activeNodes = [...profiles];
     } else {
+      this.activeNodes = [...profiles];
       await this.upDev(profiles);
     }
   }
@@ -325,9 +328,28 @@ export class DockerOrchestrator extends EventEmitter {
     return this.composePath;
   }
 
+  /**
+   * validate that composePath is absolute and exists on disk before
+   * passing it to any subprocess call. Defence-in-depth — callers pass paths
+   * from materializeComposeTemplate so this should never fire in normal use.
+   */
+  private validateComposePath(composePath: string): void {
+    if (!isAbsolute(composePath)) {
+      throw new OrchestratorError(
+        `composePath must be an absolute path, got: ${composePath}`
+      );
+    }
+    if (!existsSync(composePath)) {
+      throw new OrchestratorError(
+        `composePath does not exist on disk: ${composePath}`
+      );
+    }
+  }
+
   /** HS-mode startup: shell out to `docker compose up -d`, wait for HS hostname. */
   private async upHs(profiles: NodeType[]): Promise<void> {
     const composePath = this.requireComposePath();
+    this.validateComposePath(composePath);
     // Profile flags MUST come BEFORE the subcommand per Docker Compose CLI grammar.
     // Deterministic order: town → mill → dvm (matches AC #4).
     const PROFILE_ORDER: NodeType[] = ['town', 'mill', 'dvm'];
@@ -367,11 +389,11 @@ export class DockerOrchestrator extends EventEmitter {
       const codeLabel = String(e.code ?? e.signal ?? 'unknown');
       let message: string;
       if (e.code === 'ENOENT') {
-        message = `docker CLI not found on PATH (ENOENT): ${stderr.trim().slice(0, 500)}`;
+        message = `docker CLI not found on PATH (ENOENT): ${stderr.trim().slice(0, 2000)}`;
       } else if (e.code === 'ETIMEDOUT') {
-        message = `docker compose up timed out after 180000ms: ${stderr.trim().slice(0, 500)}`;
+        message = `docker compose up timed out after 180000ms: ${stderr.trim().slice(0, 2000)}`;
       } else {
-        message = `docker compose up failed (exit ${codeLabel}): ${stderr.trim().slice(0, 500)}`;
+        message = `docker compose up failed (exit ${codeLabel}): ${stderr.trim().slice(0, 2000)}`;
       }
       this.surfaceComposeFailure(stderr);
       throw new OrchestratorError(message, {
@@ -381,7 +403,17 @@ export class DockerOrchestrator extends EventEmitter {
       });
     }
 
-    await this.waitForHsHostname();
+    // roll back containers when waitForHsHostname times out or throws,
+    // so the operator can retry without a manual `townhouse hs down`.
+    try {
+      await this.waitForHsHostname();
+    } catch (err: unknown) {
+      await this.downHs().catch(() => {
+        // Best-effort rollback — ignore teardown errors so the original error
+        // propagates to the caller unchanged.
+      });
+      throw err;
+    }
   }
 
   /**
@@ -393,17 +425,17 @@ export class DockerOrchestrator extends EventEmitter {
    */
   private surfaceComposeFailure(stderr: string): void {
     // Patterns 1 + 2 capture the SERVICE name from quoted Compose v2 stderr
-    // (e.g., `failed to start "townhouse-api"`). Pattern 3 captures the
-    // CONTAINER suffix after the `townhouse-hs-` prefix (e.g.,
-    // `Container townhouse-hs-townhouse-api Error`); `[\w-]+` includes the
-    // hyphen so multi-word service names are captured intact rather than
-    // truncated to the first hyphen-delimited word.
+    // (e.g., `failed to start "townhouse-api"`).
+    // Pattern 3 was hardcoded to `townhouse-hs-` which would miss
+    // Epic 46 containers (town-*, mill-*, dvm-*). The generic Compose container
+    // name format is `<project>-<service>-<N>`. Capture the service name by
+    // matching `Container <word>-<service>-<N> Error` without a fixed prefix.
     const patterns = [
       /failed to start (?:service\s+)?["']([^"']+)["']/gi,
       /service\s+["']([^"']+)["']\s+failed/gi,
-      /Container\s+townhouse-hs-([\w-]+?)(?:-\d+)?\s+Error/gi,
+      /Container\s+[\w-]+-([a-z][\w-]*?)(?:-\d+)?\s+Error/gi,
     ];
-    const detail = stderr.trim().slice(0, 500);
+    const detail = stderr.trim().slice(0, 2000);
     const seen = new Set<string>();
     for (const pattern of patterns) {
       for (const match of stderr.matchAll(pattern)) {
@@ -426,13 +458,16 @@ export class DockerOrchestrator extends EventEmitter {
   private async waitForHsHostname(): Promise<void> {
     const adminUrl = `http://127.0.0.1:${this.config.connector.adminPort}`;
     const client = this.adminClientFactory(adminUrl, 5_000);
-    const deadline = Date.now() + 120_000;
+    // use process.hrtime.bigint() (monotonic) instead of Date.now() so
+    // laptop suspend/resume cannot jump the clock backward and extend the timeout
+    // indefinitely. 120_000ms → 120_000_000_000n nanoseconds.
+    const deadlineNs = process.hrtime.bigint() + 120_000_000_000n;
     const pollInterval = 2_000;
     let lastResponse:
       | { hostname: string | null; publishedAt: string | null }
       | undefined;
     let lastError: Error | undefined;
-    while (Date.now() < deadline) {
+    while (process.hrtime.bigint() < deadlineNs) {
       try {
         lastResponse = await client.getHsHostname();
         lastError = undefined;
@@ -463,6 +498,14 @@ export class DockerOrchestrator extends EventEmitter {
             `connector returned a malformed /admin/hs-hostname response: ${msg}`,
             { cause: err instanceof Error ? err : undefined }
           );
+        }
+        // fast-fail on unexpected status codes (e.g. 404 from a pre-v3.5.0
+        // connector image). The admin-client throws with 'unexpected status' in the
+        // message; retrying these would burn the full 120 s budget silently.
+        if (msg.includes('unexpected status')) {
+          throw new OrchestratorError(msg, {
+            cause: err instanceof Error ? err : undefined,
+          });
         }
         // Network errors (ECONNREFUSED, request timeout, etc.) — retry within
         // budget. lastError preserves the most recent diagnostic for the
@@ -605,8 +648,10 @@ export class DockerOrchestrator extends EventEmitter {
     // NO -v flag — preserves the townhouse-hs-anon volume so the .anyone
     // address survives `down` (Story 45.4 AC).
     try {
+      // 120s timeout (up from 60s) to accommodate Epic 46 multi-container
+      // stacks where town+mill+dvm each need a SIGTERM grace period.
       await this.execFileAsync('docker', args, {
-        timeout: 60_000,
+        timeout: 120_000,
         maxBuffer: 16 * 1024 * 1024,
       });
     } catch (err: unknown) {
@@ -620,11 +665,22 @@ export class DockerOrchestrator extends EventEmitter {
       const codeLabel = String(e.code ?? e.signal ?? 'unknown');
       let message: string;
       if (e.code === 'ENOENT') {
-        message = `docker CLI not found on PATH (ENOENT): ${stderr.trim().slice(0, 500)}`;
+        message = `docker CLI not found on PATH (ENOENT): ${stderr.trim().slice(0, 2000)}`;
       } else if (e.code === 'ETIMEDOUT') {
-        message = `docker compose down timed out after 60000ms: ${stderr.trim().slice(0, 500)}`;
+        message = `docker compose down timed out after 120000ms: ${stderr.trim().slice(0, 2000)}`;
       } else {
-        message = `docker compose down failed (exit ${codeLabel}): ${stderr.trim().slice(0, 500)}`;
+        // Compose down returns non-zero when nothing is running on some
+        // Compose versions. Treat an empty-stack teardown (no containers / no
+        // such service) as success so `townhouse hs down` is idempotent.
+        if (
+          stderr.includes('no such service') ||
+          stderr.includes('no containers to remove') ||
+          stderr.includes('No such container') ||
+          (stderr.includes('network') && stderr.includes('not found'))
+        ) {
+          return;
+        }
+        message = `docker compose down failed (exit ${codeLabel}): ${stderr.trim().slice(0, 2000)}`;
       }
       throw new OrchestratorError(message, {
         ...(numericExit !== undefined ? { exitCode: numericExit } : {}),
