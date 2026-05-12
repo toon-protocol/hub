@@ -50,6 +50,7 @@
 
 networks:
   townhouse-hs-net:
+    name: townhouse-hs-net
     driver: bridge
 
 volumes:
@@ -207,6 +208,21 @@ services:
       # which broke the teardown flow. Discovered by Story 46.4 live gate
       # run (Finding J, 2026-05-11).
       TOWNHOUSE_WALLET_PASSWORD: '${TOWNHOUSE_WALLET_PASSWORD:-}'
+      # Pass the host-side compose-interpolation values through to the
+      # townhouse-api container, because the API itself shells out to
+      # `docker compose -f /.townhouse/compose/townhouse-hs.yml up -d <type>`
+      # for each lazy peer-node provisioning request (Story 46.2). That
+      # nested compose re-parses the SAME YAML and needs the same env vars
+      # set — otherwise the townhouse-api volume specs interpolate to
+      # `:/.townhouse:rw` (empty source) and the inner `up` aborts with
+      # `invalid spec: :/.townhouse:rw: empty section between colons`.
+      # All four values are HOST paths/IDs (because Docker bind-mount
+      # sources are resolved by the daemon, which sees host paths).
+      # Discovered by Story 46.4 live gate run (Finding L, 2026-05-12).
+      TOWNHOUSE_HOME: '${TOWNHOUSE_HOME}'
+      TOWNHOUSE_WALLET_DIR: '${TOWNHOUSE_WALLET_DIR}'
+      TOWNHOUSE_UID: '${TOWNHOUSE_UID:-1000}'
+      TOWNHOUSE_DOCKER_GID: '${TOWNHOUSE_DOCKER_GID:-0}'
     healthcheck:
       # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal probe
       # Use 127.0.0.1 (not localhost) to avoid IPv6 resolution surprises. The
@@ -257,7 +273,15 @@ services:
       NODE_EVM_ADDRESS: ''
       # Derived from HD wallet at runtime (Story 45.4 / Epic 46).
       NODE_NOSTR_SECRET_KEY: '${TOWN_SECRET_KEY:-}'
-      SETTLEMENT_PRIVATE_KEY: '${TOWN_SETTLEMENT_PRIVATE_KEY:-}'
+      # Town reads TOON_SETTLEMENT_PRIVATE_KEY (packages/town/src/cli.ts:305),
+      # 0x-prefixed 32-byte hex. The API passes the already-0x-prefixed value
+      # via TOWN_SETTLEMENT_PRIVATE_KEY. Previously this was wired to the wrong
+      # env var name (`SETTLEMENT_PRIVATE_KEY`), so town crash-looped at boot
+      # with `TOON_SETTLEMENT_PRIVATE_KEY must be a 0x-prefixed 32-byte hex
+      # string` and never reached its /health endpoint — failing the gate
+      # at step 5 (healthcheck). Story 46.4 live gate run (Finding N+O,
+      # 2026-05-12).
+      TOON_SETTLEMENT_PRIVATE_KEY: '${TOWN_SETTLEMENT_PRIVATE_KEY:-}'
       PARENT_EVM_ADDRESS: '${APEX_EVM_ADDRESS:-}'
       TOON_CONNECTOR_LOG_LEVEL: '${TOON_CONNECTOR_LOG_LEVEL:-warn}'
     volumes:

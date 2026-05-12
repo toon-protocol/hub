@@ -98,17 +98,23 @@ function buildNodeEnv(
   mnemonic: string | null,
   apexEvmAddress: string
 ): Record<string, string> {
+  // Town's TOON_SETTLEMENT_PRIVATE_KEY (and mill's settlement key, if it
+  // were ever read) requires a 0x-prefixed 32-byte hex string. bytesToHex
+  // from @noble/hashes returns unprefixed hex — without the 0x, town
+  // crashes at boot with `TOON_SETTLEMENT_PRIVATE_KEY must be a 0x-prefixed
+  // 32-byte hex string`. Story 46.4 live gate run (Finding O, 2026-05-12).
+  const evmPrivateKeyHex0x = `0x${evmPrivateKeyHex}`;
   switch (type) {
     case 'town':
       return {
         TOWN_SECRET_KEY: nostrSecretKeyHex,
-        TOWN_SETTLEMENT_PRIVATE_KEY: evmPrivateKeyHex,
+        TOWN_SETTLEMENT_PRIVATE_KEY: evmPrivateKeyHex0x,
         APEX_EVM_ADDRESS: apexEvmAddress,
       };
     case 'mill':
       return {
         MILL_SECRET_KEY: nostrSecretKeyHex,
-        MILL_SETTLEMENT_PRIVATE_KEY: evmPrivateKeyHex,
+        MILL_SETTLEMENT_PRIVATE_KEY: evmPrivateKeyHex0x,
         MILL_MNEMONIC: mnemonic ?? '',
         APEX_EVM_ADDRESS: apexEvmAddress,
       };
