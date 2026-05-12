@@ -255,6 +255,13 @@ export class ConnectorAdminClient {
    *   internal Townhouse peers (no auth).
    * @param input.routes - optional ILP route prefixes to register against
    *   this peer. The reconciler passes the peer's ilpAddress.
+   * @param input.transport - optional per-peer transport selection
+   *   (connector >= 3.6.2). `'direct'` forces the connector to bypass the
+   *   global SOCKS5 transport for this peer, even when the apex itself
+   *   runs in `transport.type: socks5` mode. Required for Docker-sibling
+   *   peers in HS mode — the anon SOCKS5 proxy cannot resolve internal
+   *   Docker hostnames. When omitted, the peer inherits the connector's
+   *   global transport (back-compat with pre-3.6.2 connectors).
    *
    * @throws Error on non-2xx response, timeout, or connection refused.
    */
@@ -263,6 +270,7 @@ export class ConnectorAdminClient {
     url: string;
     authToken: string;
     routes?: { prefix: string; priority?: number }[];
+    transport?: 'direct' | 'socks5';
   }): Promise<void> {
     if (!input.url.startsWith('ws://') && !input.url.startsWith('wss://')) {
       throw new Error(

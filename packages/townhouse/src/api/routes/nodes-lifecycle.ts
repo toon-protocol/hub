@@ -509,6 +509,14 @@ export function registerNodeLifecycleRoutes(
             url: btpUrl,
             authToken: '',
             routes: [{ prefix: ilpAddress, priority: 0 }],
+            // Force direct (non-SOCKS5) BTP dial for this Docker-sibling
+            // peer. The apex connector runs with `transport.type: socks5`
+            // so the .anyone HS can publish; without this override, every
+            // peer dial gets routed through the anon proxy and fails with
+            // `HostUnreachable` on Docker-internal hostnames. Requires
+            // connector >= 3.6.2 (toon-protocol/connector#70). Discovered
+            // by Story 46.4 live gate run (Finding Q, 2026-05-12).
+            transport: 'direct',
           });
         } catch (err: unknown) {
           const errMsg = sanitizeErrorMessage(
