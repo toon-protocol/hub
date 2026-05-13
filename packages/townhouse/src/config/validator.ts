@@ -3,7 +3,10 @@
  * Validates shape, narrows types, returns typed config or throws.
  */
 
-import type { TownhouseConfig } from './schema.js';
+import type { ChainProviderEntry, TownhouseConfig } from './schema.js';
+
+const VALID_CHAIN_TYPES = new Set(['evm']);
+const HEX_ADDRESS = /^0x[a-fA-F0-9]+$/;
 
 class ConfigValidationError extends Error {
   constructor(message: string) {
@@ -226,6 +229,54 @@ export function validateConfig(raw: unknown): TownhouseConfig {
     );
   }
 
+  // chainProviders (optional)
+  let chainProviders: ChainProviderEntry[] | undefined;
+  if (raw['chainProviders'] !== undefined) {
+    if (!Array.isArray(raw['chainProviders'])) {
+      throw new ConfigValidationError(
+        'config.chainProviders must be an array of ChainProviderEntry'
+      );
+    }
+    chainProviders = (raw['chainProviders'] as unknown[]).map((entry, idx) => {
+      const path = `config.chainProviders[${idx}]`;
+      assertObject(entry, path);
+      assertString(entry['chainType'], `${path}.chainType`);
+      if (!VALID_CHAIN_TYPES.has(entry['chainType'] as string)) {
+        throw new ConfigValidationError(
+          `${path}.chainType must be one of: ${[...VALID_CHAIN_TYPES].join(', ')}`
+        );
+      }
+      assertString(entry['chainId'], `${path}.chainId`);
+      assertString(entry['rpcUrl'], `${path}.rpcUrl`);
+      assertString(entry['registryAddress'], `${path}.registryAddress`);
+      if (!HEX_ADDRESS.test(entry['registryAddress'] as string)) {
+        throw new ConfigValidationError(
+          `${path}.registryAddress must match /^0x[a-fA-F0-9]+$/`
+        );
+      }
+      assertString(entry['tokenAddress'], `${path}.tokenAddress`);
+      if (!HEX_ADDRESS.test(entry['tokenAddress'] as string)) {
+        throw new ConfigValidationError(
+          `${path}.tokenAddress must match /^0x[a-fA-F0-9]+$/`
+        );
+      }
+      assertString(entry['keyId'], `${path}.keyId`);
+      if (!HEX_ADDRESS.test(entry['keyId'] as string)) {
+        throw new ConfigValidationError(
+          `${path}.keyId must match /^0x[a-fA-F0-9]+$/`
+        );
+      }
+      return {
+        chainType: entry['chainType'] as 'evm',
+        chainId: entry['chainId'] as string,
+        rpcUrl: entry['rpcUrl'] as string,
+        registryAddress: entry['registryAddress'] as string,
+        tokenAddress: entry['tokenAddress'] as string,
+        keyId: entry['keyId'] as string,
+      };
+    });
+  }
+
   // api
   assertObject(raw['api'], 'config.api');
   const api = raw['api'] as Record<string, unknown>;
@@ -301,6 +352,7 @@ export function validateConfig(raw: unknown): TownhouseConfig {
     logging: {
       level: logging['level'] as 'debug' | 'info' | 'warn' | 'error',
     },
+    ...(chainProviders !== undefined ? { chainProviders } : {}),
   };
 }
 

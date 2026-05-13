@@ -8,9 +8,9 @@
  *     - Earnings panel renders (aria-label "Earnings")
  *     - Log-tail panel renders (aria-label "Live container logs")
  *     - StatusPills row renders all four pills (town/mill/dvm/ator)
- *   AC-D10-4 — GET /api/earnings returns 200 and matches AC-D4-1 schema:
- *     { since, totals:{sats,tokens}, by_source:{relay,mill,dvm,connector}, items? }
- *     Each by_source bucket has sats:string and tokens:object; since parses ISO8601.
+ *   AC-D10-4 — GET /api/earnings returns 200 and matches Story 47.2 AggregatedEarnings schema:
+ *     { apex: { routingFees: Record<assetCode, PerAsset> }, peers: NodeEarnings[] }
+ *     Updated shape replaces legacy by_source/{relay,mill,dvm,connector} (Story 47.2).
  *   AC-D10-5 — GET /api/logs/stream opens with Content-Type: text/event-stream
  *     and the SSE handshake succeeds. We don't wait indefinitely for events —
  *     a successful upstream stream open with one event-or-comment frame is
@@ -49,41 +49,29 @@ import { test, expect, request as pwRequest } from '@playwright/test';
 
 const REAL_STACK = process.env['TOWNHOUSE_E2E_REAL_STACK'] === '1';
 
-// ── Earnings response shape (AC-D4-1) ─────────────────────────────────────────
-// Mirrors EarningsPayload from packages/townhouse/src/earnings/aggregator.ts.
-// Repeated here (not imported) to keep the spec self-contained and to lock
-// the wire contract independently of the producer's types.
-interface AssetBucketShape {
-  amount: string;
-  decimals: number;
-  symbol: string;
-  chain?: string;
+// ── Earnings response shape (Story 47.2 — AggregatedEarnings) ────────────────
+// Mirrors AggregatedEarnings from packages/townhouse/src/earnings/aggregator.ts.
+// Repeated here (not imported) to keep the spec self-contained and lock the
+// wire contract independently of the producer's types.
+interface PerAssetShape {
+  lifetime: string;
+  today: string;
+  month: string;
+  year: string;
 }
-interface PerSourceTotalsShape {
-  sats: string;
-  tokens: Record<string, AssetBucketShape>;
+interface NodeEarningsShape {
+  id: string;
+  type: 'town' | 'mill' | 'dvm' | 'external';
+  byAsset: Record<string, PerAssetShape>;
 }
-interface EarningsItemShape {
-  ts: string;
-  source: 'relay' | 'mill' | 'dvm' | 'connector';
-  asset: { symbol: string; decimals: number; chain?: string };
-  amount: string;
-  txHash?: string;
-  explorerUrl?: string;
-}
-interface EarningsPayloadShape {
-  since: string;
-  totals: { sats: string; tokens: Record<string, AssetBucketShape> };
-  by_source: {
-    relay: PerSourceTotalsShape;
-    mill: PerSourceTotalsShape;
-    dvm: PerSourceTotalsShape;
-    connector: PerSourceTotalsShape;
+interface AggregatedEarningsShape {
+  /** 'ok' on the happy path; 'connector_unavailable' when getEarnings() throws. */
+  status: 'ok' | 'connector_unavailable';
+  apex: {
+    routingFees: Record<string, PerAssetShape>;
   };
-  items?: EarningsItemShape[];
+  peers: NodeEarningsShape[];
 }
-
-const REQUIRED_SOURCES = ['relay', 'mill', 'dvm', 'connector'] as const;
 const REQUIRED_PILLS = ['town', 'mill', 'dvm', 'ator'] as const;
 
 test.describe('@real-stack Demo composition (D10)', () => {
@@ -123,18 +111,21 @@ test.describe('@real-stack Demo composition (D10)', () => {
 
       // 3) Earnings panel renders.
       // earnings-panel.tsx wraps content in <section aria-label="Earnings">.
+      // Story 47.2 shape: apex routing fees + per-peer earnings table.
       const earningsPanel = page.getByRole('region', { name: 'Earnings' });
       await expect(earningsPanel).toBeVisible({ timeout: 10_000 });
       await expect(earningsPanel.getByRole('heading', { name: /^Earnings$/ }))
         .toBeVisible();
 
-      // The four per-source rail tiles must all be present (relay/mill/dvm/connector).
-      // Each tile has aria-label "<Source> earnings: <N> sats".
-      for (const source of ['Relay', 'Mill', 'DVM', 'Connector']) {
-        await expect(
-          earningsPanel.getByLabel(new RegExp(`^${source} earnings:`, 'i'))
-        ).toBeVisible({ timeout: 10_000 });
-      }
+      // Apex routing fees section must be present (may be empty on fresh demo).
+      await expect(
+        earningsPanel.getByRole('region', { name: /Apex routing fees/i })
+      ).toBeVisible({ timeout: 10_000 });
+
+      // Peer earnings section must be present (may be empty on fresh demo).
+      await expect(
+        earningsPanel.getByRole('region', { name: /Peer earnings/i })
+      ).toBeVisible({ timeout: 10_000 });
 
       // 4) Log-tail panel renders.
       // log-tail.tsx wraps content in <section aria-label="Live container logs">.
@@ -176,9 +167,9 @@ test.describe('@real-stack Demo composition (D10)', () => {
     }
   );
 
-  // AC-D10-4 — Earnings API contract.
+  // AC-D10-4 — Earnings API contract (Story 47.2: AggregatedEarnings shape).
   test(
-    'AC-D10-4: GET /api/earnings returns AC-D4-1 schema with all 4 sources',
+    'AC-D10-4: GET /api/earnings returns AggregatedEarnings schema { apex, peers }',
     async ({ baseURL }) => {
       // Hit the API via the Vite dev server proxy (playwright.config.ts
       // webServer reuses an existing dev server; the proxy forwards
@@ -189,62 +180,44 @@ test.describe('@real-stack Demo composition (D10)', () => {
         const res = await ctx.get('/api/earnings');
         expect(res.status(), 'GET /api/earnings should return 200').toBe(200);
 
-        const body = (await res.json()) as EarningsPayloadShape;
+        const body = (await res.json()) as AggregatedEarningsShape;
 
-        // since: ISO8601 string parseable as a finite Date.
-        expect(typeof body.since).toBe('string');
-        const sinceMs = Date.parse(body.since);
+        // status field: 'ok' on the happy path (demo connector is wired).
+        // A fresh demo may briefly return 'connector_unavailable' during
+        // settlement boot — accept either, but flag a non-recognised value.
         expect(
-          Number.isFinite(sinceMs),
-          `since must parse as ISO8601 (got: ${body.since})`
+          ['ok', 'connector_unavailable'].includes(body.status),
+          `status must be 'ok' or 'connector_unavailable' (got: ${body.status})`
         ).toBe(true);
 
-        // totals: { sats: string, tokens: object }
-        expect(body.totals).toBeDefined();
-        expect(typeof body.totals.sats).toBe('string');
-        expect(/^\d+$/.test(body.totals.sats)).toBe(true);
-        expect(typeof body.totals.tokens).toBe('object');
-        expect(body.totals.tokens).not.toBeNull();
+        // apex.routingFees: object keyed by assetCode.
+        expect(body.apex, 'apex must be present').toBeDefined();
+        expect(
+          typeof body.apex.routingFees,
+          'apex.routingFees must be an object'
+        ).toBe('object');
+        expect(
+          body.apex.routingFees,
+          'apex.routingFees must not be null'
+        ).not.toBeNull();
 
-        // by_source: 4 buckets, each with { sats: string, tokens: object }.
-        expect(body.by_source).toBeDefined();
-        for (const source of REQUIRED_SOURCES) {
-          const bucket = body.by_source[source];
-          expect(
-            bucket,
-            `by_source.${source} must be present`
-          ).toBeDefined();
-          expect(
-            typeof bucket.sats,
-            `by_source.${source}.sats must be a string`
-          ).toBe('string');
-          expect(
-            /^\d+$/.test(bucket.sats),
-            `by_source.${source}.sats must be a non-negative integer string (got: ${bucket.sats})`
-          ).toBe(true);
-          expect(
-            typeof bucket.tokens,
-            `by_source.${source}.tokens must be an object`
-          ).toBe('object');
-          expect(
-            bucket.tokens,
-            `by_source.${source}.tokens must not be null`
-          ).not.toBeNull();
+        // Each routingFees entry must have PerAsset shape.
+        for (const [code, asset] of Object.entries(body.apex.routingFees)) {
+          expect(typeof asset.lifetime, `routingFees.${code}.lifetime must be string`).toBe('string');
+          expect(typeof asset.today, `routingFees.${code}.today must be string`).toBe('string');
+          expect(typeof asset.month, `routingFees.${code}.month must be string`).toBe('string');
+          expect(typeof asset.year, `routingFees.${code}.year must be string`).toBe('string');
         }
 
-        // items is optional in the schema (the producer always returns an
-        // array, possibly empty — assert the optional contract).
-        if (body.items !== undefined) {
-          expect(Array.isArray(body.items)).toBe(true);
-          for (const item of body.items) {
-            expect(typeof item.ts).toBe('string');
-            expect(Number.isFinite(Date.parse(item.ts))).toBe(true);
-            expect(REQUIRED_SOURCES).toContain(item.source);
-            expect(typeof item.amount).toBe('string');
-            expect(item.asset).toBeDefined();
-            expect(typeof item.asset.symbol).toBe('string');
-            expect(typeof item.asset.decimals).toBe('number');
-          }
+        // peers: array of NodeEarnings.
+        expect(Array.isArray(body.peers), 'peers must be an array').toBe(true);
+        for (const peer of body.peers) {
+          expect(typeof peer.id, 'peer.id must be a string').toBe('string');
+          expect(
+            ['town', 'mill', 'dvm', 'external'].includes(peer.type),
+            `peer.type must be a valid NodeType | 'external' (got: ${peer.type})`
+          ).toBe(true);
+          expect(typeof peer.byAsset, 'peer.byAsset must be an object').toBe('object');
         }
       } finally {
         await ctx.dispose();

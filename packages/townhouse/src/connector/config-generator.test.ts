@@ -405,4 +405,93 @@ describe('ConnectorConfigGenerator', () => {
       expect(yaml).not.toMatch(/externalUrl:\s*auto/);
     });
   });
+
+  // ── chainProviders emission (Epic 47 BUG-1 product fix, D2) ──────────────
+  describe('toYaml() — chainProviders emission (Epic 47 BUG-1)', () => {
+    it('omits chainProviders when config.chainProviders is undefined', () => {
+      const config = configWithNodes(['town']);
+      // chainProviders intentionally not set
+      const generator = new ConnectorConfigGenerator(config);
+      const runtimeConfig = generator.generate(['town']);
+      const yaml = generator.toYaml(runtimeConfig);
+
+      expect(yaml).not.toMatch(/^chainProviders:/m);
+    });
+
+    it('omits chainProviders when config.chainProviders is an empty array', () => {
+      const config = configWithNodes(['town'], { chainProviders: [] });
+      const generator = new ConnectorConfigGenerator(config);
+      const runtimeConfig = generator.generate(['town']);
+      const yaml = generator.toYaml(runtimeConfig);
+
+      expect(yaml).not.toMatch(/^chainProviders:/m);
+    });
+
+    it('emits chainProviders block when configured', () => {
+      const config = configWithNodes(['town'], {
+        chainProviders: [
+          {
+            chainType: 'evm',
+            chainId: 'evm:base:31337',
+            rpcUrl: 'http://127.0.0.1:8545',
+            registryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+            tokenAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+            keyId:
+              '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+          },
+        ],
+      });
+      const generator = new ConnectorConfigGenerator(config);
+      const runtimeConfig = generator.generate(['town']);
+      const yaml = generator.toYaml(runtimeConfig);
+
+      expect(yaml).toMatch(/^chainProviders:/m);
+      expect(yaml).toMatch(/chainType:\s*evm/);
+      expect(yaml).toMatch(/chainId:\s*evm:base:31337/);
+      expect(yaml).toMatch(/rpcUrl:\s*http:\/\/127\.0\.0\.1:8545/);
+      expect(yaml).toMatch(
+        /registryAddress:.*0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512/
+      );
+      expect(yaml).toMatch(
+        /tokenAddress:.*0x5FbDB2315678afecb367f032d93F642f64180aa3/
+      );
+      expect(yaml).toMatch(
+        /keyId:.*0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6/
+      );
+    });
+
+    it('emits multiple chainProviders entries as a list', () => {
+      const config = configWithNodes(['town'], {
+        chainProviders: [
+          {
+            chainType: 'evm',
+            chainId: 'evm:base:31337',
+            rpcUrl: 'http://127.0.0.1:8545',
+            registryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+            tokenAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+            keyId:
+              '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+          },
+          {
+            chainType: 'evm',
+            chainId: 'evm:base:8453',
+            rpcUrl: 'https://mainnet.base.org',
+            registryAddress: '0xaaaa1725E7734CE288F8367e1Bb143E90bb3F0512',
+            tokenAddress: '0xbbbbb2315678afecb367f032d93F642f64180aa3',
+            keyId:
+              '0xccccc118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+          },
+        ],
+      });
+      const generator = new ConnectorConfigGenerator(config);
+      const runtimeConfig = generator.generate(['town']);
+      const yaml = generator.toYaml(runtimeConfig);
+
+      // Both chainIds appear; YAML list rendering has at least two `chainType:` keys.
+      const chainTypeOccurrences = (yaml.match(/chainType:/g) ?? []).length;
+      expect(chainTypeOccurrences).toBe(2);
+      expect(yaml).toMatch(/chainId:\s*evm:base:31337/);
+      expect(yaml).toMatch(/chainId:\s*evm:base:8453/);
+    });
+  });
 });

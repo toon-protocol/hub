@@ -1,60 +1,34 @@
 /**
- * EarningsPanel — operator earnings dashboard view (Story D4, AC-D4-4).
+ * EarningsPanel — operator earnings dashboard view (Story 47.2).
  *
- * Polls `GET /api/earnings` every 5 s and renders:
- *   - Hero: total sats earned across all four sources.
- *   - Per-source breakdown: relay / mill / dvm / connector with sats counts.
- *   - Recent items list: each row hover-reveals a tooltip with txid +
- *     block-explorer link button (when an explorerUrl is available).
+ * Polls `GET /api/earnings` every 5 s and renders the aggregator's
+ * `{ status, apex, peers }` shape. The panel shows:
+ *   - Apex routing fees by asset (connector-level fees).
+ *   - Per-peer earnings table grouped by node type.
+ *   - Banner when `status === 'connector_unavailable'` (route returned 200
+ *     but the connector itself was unreachable).
  *
- * For D4 the "no mock data" rule means rows without an `explorerUrl` show
- * the source label only — we deliberately do NOT render fake links. When
- * mill's live SettlementEvent emission ships (post-D4), rows will start
- * carrying `txHash` + `explorerUrl` and the tooltip's "View on explorer"
- * button will become the primary affordance.
+ * Delta columns render only when a row has non-stub deltas — until Story
+ * 47.3 wires the snapshot-backed delta computer, today/month/year are '0'.
  *
- * Provisional layout per AC-D4-5: D9 will redo the dashboard layout.
- *
- * @since D4
+ * @since 47.2
  */
 
 import * as React from 'react';
+import type {
+  AggregatedEarnings,
+  NodeEarnings,
+  PerAsset,
+} from '@toon-protocol/townhouse';
 import { MetricBlock } from './primitives/MetricBlock';
 
 const POLL_INTERVAL_MS = 5_000;
 const REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_ENDPOINT = '/api/earnings';
 
-/** Per-source bucket — mirrors the server's `PerSourceTotals`. */
-export interface EarningsAssetBucket {
-  amount: string;
-  decimals: number;
-  symbol: string;
-  chain?: string;
-}
-
-export interface EarningsPerSource {
-  sats: string;
-  tokens: Record<string, EarningsAssetBucket>;
-}
-
-export type EarningsSource = 'relay' | 'mill' | 'dvm' | 'connector';
-
-export interface EarningsItem {
-  ts: string;
-  source: EarningsSource;
-  asset: { symbol: string; decimals: number; chain?: string };
-  amount: string;
-  txHash?: string;
-  explorerUrl?: string;
-}
-
-export interface EarningsPayload {
-  since: string;
-  totals: { sats: string; tokens: Record<string, EarningsAssetBucket> };
-  by_source: Record<EarningsSource, EarningsPerSource>;
-  items: EarningsItem[];
-}
+// Re-export the aggregator types so callers of this module continue to
+// import them from here (back-compat with pre-review imports).
+export type { AggregatedEarnings, NodeEarnings, PerAsset };
 
 export interface EarningsPanelProps {
   /** Override the API endpoint (test injection only). */
@@ -62,35 +36,14 @@ export interface EarningsPanelProps {
   /** Test-only override for the polling interval. */
   pollIntervalMs?: number;
   /** Test injection for initial data — bypasses fetch entirely. */
-  initialData?: EarningsPayload | null;
+  initialData?: AggregatedEarnings | null;
   /** Test injection — disables fetch entirely. */
   fetchEnabled?: boolean;
 }
 
 /**
- * Order the rows render in the "By source" rail. Locked here so the layout
- * is stable across polls — Object.entries() doesn't guarantee order on the
- * payload, but our spec does (relay → mill → dvm → connector).
- */
-const SOURCE_ORDER: readonly EarningsSource[] = [
-  'relay',
-  'mill',
-  'dvm',
-  'connector',
-] as const;
-
-const SOURCE_LABEL: Record<EarningsSource, string> = {
-  relay: 'Relay',
-  mill: 'Mill',
-  dvm: 'DVM',
-  connector: 'Connector',
-};
-
-/**
  * Format a BigInt-safe decimal string with thousands separators. Falls
- * through to the raw string if BigInt parsing fails (defensive — the API
- * shouldn't emit garbage but we never want a panel that crashes on bad
- * data).
+ * through to the raw string if BigInt parsing fails.
  */
 export function formatSats(amount: string): string {
   try {
@@ -98,17 +51,6 @@ export function formatSats(amount: string): string {
     return big.toLocaleString('en-US');
   } catch {
     return amount;
-  }
-}
-
-/** Format an ISO timestamp as HH:MM:SS — short, monospace-friendly. */
-function formatTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return '--:--:--';
-    return d.toLocaleTimeString('en-US', { hour12: false });
-  } catch {
-    return '--:--:--';
   }
 }
 
@@ -121,13 +63,35 @@ export function truncateHash(hash: string): string {
   return `${hash.slice(0, 8)}…${hash.slice(-4)}`;
 }
 
+/**
+ * Returns true when the delta fields are unset / stubbed. Tolerates
+ * malformed payloads (`undefined` / missing fields) so a wonky mock body
+ * never crashes the panel — earlier defensive comments documented this.
+ */
+function deltasStubbed(asset: PerAsset | undefined): boolean {
+  if (!asset) return true;
+  return asset.today === '0' && asset.month === '0' && asset.year === '0';
+}
+
+const NODE_TYPE_LABEL: Record<NodeEarnings['type'], string> = {
+  town: 'Town',
+  mill: 'Mill',
+  dvm: 'DVM',
+  external: 'External',
+};
+
+/** Defensive label lookup — falls back to "Unknown" if a future node type slips through. */
+function nodeTypeLabel(type: NodeEarnings['type'] | string): string {
+  return (NODE_TYPE_LABEL as Record<string, string>)[type] ?? 'Unknown';
+}
+
 export function EarningsPanel({
   endpoint = DEFAULT_ENDPOINT,
   pollIntervalMs = POLL_INTERVAL_MS,
   initialData = null,
   fetchEnabled = true,
 }: EarningsPanelProps): React.ReactElement {
-  const [data, setData] = React.useState<EarningsPayload | null>(initialData);
+  const [data, setData] = React.useState<AggregatedEarnings | null>(initialData);
   const [status, setStatus] = React.useState<'loading' | 'ready' | 'error'>(
     initialData ? 'ready' : 'loading'
   );
@@ -149,7 +113,7 @@ export function EarningsPanel({
           setStatus('error');
           return;
         }
-        const payload = (await res.json()) as EarningsPayload;
+        const payload = (await res.json()) as AggregatedEarnings;
         if (cancelled) return;
         setData(payload);
         setStatus('ready');
@@ -172,9 +136,28 @@ export function EarningsPanel({
     };
   }, [endpoint, pollIntervalMs, fetchEnabled]);
 
-  // Defensive access — Home.test (and other consumers) mock /api/earnings
-  // with arbitrary shapes. Never crash; show "0" + ride out the next poll.
-  const heroSats = data?.totals?.sats ?? '0';
+  // Combine HTTP fetch state with the wire-level `status` field. Either
+  // `'error'` (HTTP non-200 / network) or `'connector_unavailable'` (HTTP
+  // 200 but connector itself unreachable) drives the unavailable banner.
+  const connectorUnavailable = data?.status === 'connector_unavailable';
+  const isUnavailable = status === 'error' || connectorUnavailable;
+
+  // Hero: first apex routing fee lifetime, or '0' when empty.
+  // Defensive access — wire shape may be a mock with arbitrary fields.
+  const apexFees = data?.apex?.routingFees ?? {};
+  const apexEntries = Object.entries(apexFees);
+  const firstApex = apexEntries[0];
+  const heroValue = isUnavailable
+    ? '—'
+    : firstApex
+      ? formatSats(firstApex[1]?.lifetime ?? '0')
+      : '0';
+  const heroUnit = firstApex ? firstApex[0] : undefined;
+  const heroAriaLabel = isUnavailable
+    ? 'earnings metric unavailable'
+    : firstApex
+      ? `Apex routing fees: ${heroValue} ${heroUnit}`
+      : 'Apex routing fees: none yet';
 
   return (
     <section
@@ -191,179 +174,170 @@ export function EarningsPanel({
         >
           {status === 'loading'
             ? 'loading…'
-            : status === 'error'
+            : isUnavailable
               ? 'unavailable'
               : 'live'}
         </span>
       </header>
 
-      {/* Hero number — total sats. */}
-      <div className="flex items-end justify-between gap-4">
+      {/* Connector-unavailable banner (wire-level signal, not HTTP error). */}
+      {connectorUnavailable && (
+        <div
+          role="status"
+          className="shadow-border rounded bg-amber-500/[0.08] px-3 py-2"
+          aria-label="Connector unavailable"
+        >
+          <p className="font-geist-sans text-xs text-ink/70">
+            Connector unreachable — showing last-known zero. Earnings will
+            resume when the apex connector reports settlement state.
+          </p>
+        </div>
+      )}
+
+      {/* Hero number — first apex routing fee asset. */}
+      <div className="flex items-end gap-4">
         <MetricBlock
-          value={status === 'error' ? '—' : formatSats(heroSats)}
-          label="Total sats"
+          value={heroValue}
+          label="Apex routing fees"
+          unit={!isUnavailable ? heroUnit : undefined}
           variant="full"
-          aria-label={
-            status === 'error'
-              ? 'earnings metric unavailable'
-              : `Total sats earned: ${formatSats(heroSats)}`
-          }
+          aria-label={heroAriaLabel}
         />
-        {data?.since && (
-          <span
-            className="font-geist-mono text-[11px] text-ink/40"
-            aria-label={`since ${data.since}`}
-          >
-            since {formatTime(data.since)}
-          </span>
-        )}
       </div>
 
-      {/* Per-source rail. */}
-      <div
-        className="grid grid-cols-2 gap-3 sm:grid-cols-4"
-        aria-label="Earnings by source"
+      {/* Apex routing fees breakdown. */}
+      <section
+        className="shadow-border rounded bg-ink/[0.02] p-3"
+        aria-label="Apex routing fees"
       >
-        {SOURCE_ORDER.map((source) => {
-          const bucket = data?.by_source?.[source];
-          const sats = bucket?.sats ?? '0';
-          return (
-            <div
-              key={source}
-              className="shadow-border rounded bg-ink/[0.02] p-3"
-              aria-label={`${SOURCE_LABEL[source]} earnings: ${formatSats(sats)} sats`}
-            >
-              <span className="font-geist-sans text-xs text-ink/50">
-                {SOURCE_LABEL[source]}
-              </span>
-              <div className="font-geist-mono mt-1 text-base font-semibold tabular-nums text-ink">
-                {formatSats(sats)}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+        <header className="mb-2 flex items-center justify-between">
+          <span className="font-geist-sans text-xs text-ink/50">
+            Apex routing fees
+          </span>
+          <span className="font-geist-mono text-xs text-ink/30">
+            {apexEntries.length} asset{apexEntries.length === 1 ? '' : 's'}
+          </span>
+        </header>
+        {apexEntries.length === 0 ? (
+          <p className="font-geist-sans text-xs text-ink/40">
+            {status === 'loading' ? 'Loading…' : 'No routing fees yet.'}
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {apexEntries.map(([code, asset]) => {
+              const lifetime = formatSats(asset?.lifetime ?? '0');
+              return (
+                <li
+                  key={code}
+                  className="flex items-center justify-between gap-2"
+                  aria-label={`Apex ${code} lifetime: ${lifetime}`}
+                >
+                  <span className="font-geist-mono text-xs text-ink/60">{code}</span>
+                  <span className="font-geist-mono text-sm font-semibold tabular-nums text-ink">
+                    {lifetime}
+                  </span>
+                  {!deltasStubbed(asset) && (
+                    <span className="font-geist-mono text-xs text-ink/40">
+                      +{formatSats(asset.today)} today
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
-      {/* Recent items. */}
-      <RecentItems
-        items={Array.isArray(data?.items) ? data.items : []}
+      {/* Per-peer earnings. */}
+      <PeerEarningsTable
+        peers={data?.peers ?? []}
         status={status}
+        connectorUnavailable={connectorUnavailable}
       />
     </section>
   );
 }
 
-interface RecentItemsProps {
-  items: EarningsItem[];
+interface PeerEarningsTableProps {
+  peers: NodeEarnings[];
   status: 'loading' | 'ready' | 'error';
+  connectorUnavailable: boolean;
 }
 
-function RecentItems({ items, status }: RecentItemsProps): React.ReactElement {
+function PeerEarningsTable({
+  peers,
+  status,
+  connectorUnavailable,
+}: PeerEarningsTableProps): React.ReactElement {
   return (
-    <div
+    <section
       className="shadow-border rounded bg-ink/[0.02]"
-      aria-label="Recent earnings"
+      aria-label="Peer earnings"
     >
       <header className="shadow-border flex items-center justify-between px-3 py-2">
-        <span className="font-geist-sans text-xs text-ink/50">Recent</span>
+        <span className="font-geist-sans text-xs text-ink/50">Peer earnings</span>
         <span className="font-geist-mono text-xs text-ink/40">
-          {items.length} item{items.length === 1 ? '' : 's'}
+          {peers.length} peer{peers.length === 1 ? '' : 's'}
         </span>
       </header>
-      {items.length === 0 ? (
+      {peers.length === 0 ? (
         <p className="font-geist-sans px-3 py-4 text-xs text-ink/40">
           {status === 'loading'
-            ? 'Loading recent activity…'
+            ? 'Loading peer earnings…'
             : status === 'error'
               ? 'Could not reach earnings API.'
-              : 'No paid events in the current window.'}
+              : connectorUnavailable
+                ? 'Connector unavailable — no peer earnings to show.'
+                : 'No peer earnings yet.'}
         </p>
       ) : (
-        <ul className="flex flex-col text-xs" aria-label="Earnings rows">
-          {items.slice(0, 25).map((item, idx) => (
-            <EarningsRow key={`${item.ts}-${item.source}-${idx}`} item={item} />
+        <ul className="flex flex-col text-xs" aria-label="Peer earnings rows">
+          {peers.map((peer) => (
+            <PeerRow key={peer.id} peer={peer} />
           ))}
         </ul>
       )}
-    </div>
+    </section>
   );
 }
 
-interface EarningsRowProps {
-  item: EarningsItem;
+interface PeerRowProps {
+  peer: NodeEarnings;
 }
 
-/**
- * One earnings row. Hovering shows a tooltip with the txid + an explorer
- * link button. We use `<details>` rather than a custom popover for D4
- * because:
- *   - Works without JS (a11y win for screen readers).
- *   - Native disclosure semantics — `aria-expanded` is automatic.
- *   - Avoids dragging in a popover dep for what's a provisional layout.
- *
- * D9 will likely replace this with a richer popover; until then the
- * disclosure is a clean, predictable interaction.
- */
-function EarningsRow({ item }: EarningsRowProps): React.ReactElement {
-  const hasDetails = !!item.txHash || !!item.explorerUrl;
+function PeerRow({ peer }: PeerRowProps): React.ReactElement {
+  const typeLabel = nodeTypeLabel(peer.type);
+  // Defensive: `byAsset` and inner shape may be malformed in test mocks.
+  const assetEntries = Object.entries(peer.byAsset ?? {});
+  const firstAsset = assetEntries[0];
+  const heroLifetime = firstAsset ? formatSats(firstAsset[1]?.lifetime ?? '0') : '0';
+  const heroUnit = firstAsset ? firstAsset[0] : undefined;
+
   return (
     <li
       className="shadow-border px-3 py-2"
-      data-source={item.source}
+      data-peer-type={peer.type}
+      aria-label={`${typeLabel} peer ${peer.id}: ${heroLifetime}${heroUnit ? ' ' + heroUnit : ''} lifetime`}
     >
-      <details className="group">
-        <summary
-          className="flex cursor-pointer items-center justify-between gap-3 hover:bg-ink/[0.03]"
-          aria-label={`${item.source} earned ${formatSats(item.amount)} ${item.asset.symbol} at ${formatTime(item.ts)}`}
-        >
-          <span className="font-geist-mono w-16 text-ink/40 tabular-nums">
-            {formatTime(item.ts)}
-          </span>
-          <span className="font-geist-sans w-16 text-ink/60">
-            {SOURCE_LABEL[item.source]}
-          </span>
-          <span className="font-geist-mono flex-1 text-right tabular-nums text-ink">
-            {formatSats(item.amount)}{' '}
-            <span className="text-ink/40">{item.asset.symbol}</span>
-          </span>
-          {hasDetails && (
-            <span
-              className="font-geist-mono text-ink/30 group-open:rotate-90"
-              aria-hidden="true"
-            >
-              ›
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-geist-sans w-16 text-ink/60">{typeLabel}</span>
+        <span className="font-geist-mono flex-1 truncate text-ink/40" title={peer.id}>
+          {peer.id}
+        </span>
+        {firstAsset && (
+          <div className="flex items-baseline gap-1">
+            <span className="font-geist-mono tabular-nums text-ink">
+              {heroLifetime}
             </span>
-          )}
-        </summary>
-        {hasDetails && (
-          <div
-            className="mt-2 flex flex-wrap items-center gap-2 pl-16"
-            role="group"
-            aria-label="Transaction details"
-          >
-            {item.txHash && (
-              <span
-                className="font-geist-mono rounded bg-ink/5 px-2 py-1 text-[11px] text-ink/70"
-                aria-label={`Transaction hash ${item.txHash}`}
-                title={item.txHash}
-              >
-                txid {truncateHash(item.txHash)}
+            <span className="font-geist-mono text-ink/40">{heroUnit}</span>
+            {!deltasStubbed(firstAsset[1]) && (
+              <span className="font-geist-mono text-xs text-ink/40">
+                +{formatSats(firstAsset[1].today)} today
               </span>
-            )}
-            {item.explorerUrl && (
-              <a
-                href={item.explorerUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-geist-sans rounded bg-ink/10 px-2 py-1 text-[11px] text-ink hover:bg-ink/20"
-                aria-label={`View transaction on block explorer (opens in new tab)`}
-              >
-                View on explorer ↗
-              </a>
             )}
           </div>
         )}
-      </details>
+      </div>
     </li>
   );
 }

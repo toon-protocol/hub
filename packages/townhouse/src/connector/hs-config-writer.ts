@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { parse, stringify as yamlStringify } from 'yaml';
 import { ConnectorConfigGenerator } from './config-generator.js';
 import type { TownhouseConfig } from '../config/schema.js';
+import { DEFAULT_HS_CHAIN_PROVIDERS } from '../config/defaults.js';
 import type { ConnectorRuntimeConfig } from './types.js';
 
 /** Absolute path inside the connector container where anon stores the keypair. */
@@ -65,8 +66,21 @@ export function writeHsConnectorConfig(
     // Fall through to overwrite.
   }
 
+  // Epic 47 BUG-1 product fix (D2): inject DEFAULT_HS_CHAIN_PROVIDERS when
+  // the operator has not configured chainProviders. Without at least one
+  // entry, the connector's settlement subsystem (AccountManager +
+  // ClaimReceiver) does not initialize, so `/admin/earnings.json` returns
+  // 503 and Townhouse's earnings data plane (Epic 47) breaks. The defaults
+  // are dev-Anvil deterministic addresses paired with a dead RPC; they
+  // initialize the subsystem successfully but never resolve on-chain calls.
+  // Operators running on real chains override chainProviders in config.yaml.
+  const hsConfig: TownhouseConfig =
+    config.chainProviders !== undefined && config.chainProviders.length > 0
+      ? config
+      : { ...config, chainProviders: [...DEFAULT_HS_CHAIN_PROVIDERS] };
+
   // Build the HS runtime config by extending the base generated config.
-  const generator = new ConnectorConfigGenerator(config);
+  const generator = new ConnectorConfigGenerator(hsConfig);
   const baseConfig = generator.generate([]); // apex-only, no peers
 
   // Managed mode: the connector spawns the anon daemon in-process. The SOCKS

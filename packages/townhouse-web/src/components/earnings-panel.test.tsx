@@ -1,214 +1,172 @@
 /**
- * Tests for EarningsPanel (Story D4, AC-D4-4).
+ * Tests for EarningsPanel (Story 47.2).
  *
- * Test gate (per build sheet):
- *   - renders the panel
- *   - hover/click reveals a tooltip on rows
- *   - explorer link href matches schema
+ * Tests cover:
+ *   - Panel renders with apex routing fees + peer earnings.
+ *   - Loading state before any data.
+ *   - Empty state when apex/peers are both empty.
+ *   - Per-row delta visibility (mixed row payload).
+ *   - `connector_unavailable` wire-level banner.
+ *   - External peer type fallback.
+ *   - formatSats / truncateHash utilities.
  */
 
 import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import {
   EarningsPanel,
   formatSats,
   truncateHash,
-  type EarningsPayload,
+  type AggregatedEarnings,
 } from './earnings-panel';
 
-const SAMPLE_PAYLOAD: EarningsPayload = {
-  since: '2026-05-04T10:00:00.000Z',
-  totals: { sats: '12345', tokens: {} },
-  by_source: {
-    relay: { sats: '10000', tokens: {} },
-    mill: { sats: '2000', tokens: {} },
-    dvm: { sats: '345', tokens: {} },
-    connector: { sats: '0', tokens: {} },
+const SAMPLE_PAYLOAD: AggregatedEarnings = {
+  status: 'ok',
+  apex: {
+    routingFees: {
+      USD: { lifetime: '12345', today: '0', month: '0', year: '0' },
+    },
   },
-  items: [
+  peers: [
     {
-      ts: '2026-05-04T11:00:00.000Z',
-      source: 'relay',
-      asset: { symbol: 'sats', decimals: 0 },
-      amount: '100',
+      id: 'peer-town-01',
+      type: 'town',
+      byAsset: {
+        USD: { lifetime: '10000', today: '0', month: '0', year: '0' },
+      },
     },
     {
-      ts: '2026-05-04T11:01:00.000Z',
-      source: 'mill',
-      asset: { symbol: 'sats', decimals: 0 },
-      amount: '50',
-      txHash: '0x' + 'a'.repeat(64),
-      explorerUrl: 'https://blockscout.example/tx/0x' + 'a'.repeat(64),
+      id: 'peer-mill-01',
+      type: 'mill',
+      byAsset: {
+        USD: { lifetime: '2000', today: '0', month: '0', year: '0' },
+      },
     },
   ],
 };
 
 describe('EarningsPanel', () => {
-  it('renders the panel with hero total and per-source breakdown', () => {
+  it('renders the panel with apex routing fees and peer earnings sections', () => {
     render(
       <EarningsPanel initialData={SAMPLE_PAYLOAD} fetchEnabled={false} />
     );
 
     expect(screen.getByLabelText(/^Earnings$/)).toBeInTheDocument();
-    // Hero total — formatted with thousands separator
     expect(
-      screen.getByLabelText(/Total sats earned: 12,345/)
+      screen.getByLabelText(/Apex routing fees: 12,345 USD/)
     ).toBeInTheDocument();
-    // Per-source rail
+    expect(screen.getAllByLabelText(/Apex routing fees/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('region', { name: 'Peer earnings' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Peer earnings rows')).toBeInTheDocument();
     expect(
-      screen.getByLabelText(/Relay earnings: 10,000 sats/)
-    ).toBeInTheDocument();
-    expect(
-      screen.getByLabelText(/Mill earnings: 2,000 sats/)
+      screen.getByLabelText(/Town peer peer-town-01: 10,000 USD lifetime/i)
     ).toBeInTheDocument();
     expect(
-      screen.getByLabelText(/DVM earnings: 345 sats/)
-    ).toBeInTheDocument();
-    expect(
-      screen.getByLabelText(/Connector earnings: 0 sats/)
+      screen.getByLabelText(/Mill peer peer-mill-01: 2,000 USD lifetime/i)
     ).toBeInTheDocument();
   });
 
   it('shows "loading…" status before any data arrives', () => {
     render(<EarningsPanel fetchEnabled={false} />);
-    expect(screen.getByText(/loading…/i)).toBeInTheDocument();
+    expect(screen.getByText('loading…')).toBeInTheDocument();
   });
 
-  it('shows the empty placeholder when items array is empty', () => {
-    const empty: EarningsPayload = {
-      ...SAMPLE_PAYLOAD,
-      items: [],
+  it('shows empty-state placeholder when apex and peers are both empty', () => {
+    const empty: AggregatedEarnings = {
+      status: 'ok',
+      apex: { routingFees: {} },
+      peers: [],
     };
     render(<EarningsPanel initialData={empty} fetchEnabled={false} />);
-    expect(
-      screen.getByText(/No paid events in the current window/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/No routing fees yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/No peer earnings yet/i)).toBeInTheDocument();
+    // Empty-state aria-label distinguishes "no fees" from "lifetime 0 of UNIT".
+    expect(screen.getByLabelText(/Apex routing fees: none yet/i)).toBeInTheDocument();
   });
 
-  it('hover/click reveals tooltip with txid and explorer link', async () => {
-    const user = userEvent.setup();
-    render(
-      <EarningsPanel initialData={SAMPLE_PAYLOAD} fetchEnabled={false} />
-    );
-
-    // Two rows — only the second has a txHash + explorerUrl. Find it by
-    // its source label and open the disclosure.
-    const rowsList = screen.getByLabelText(/Earnings rows/i);
-    const millRow = within(rowsList)
-      .getAllByRole('group', { hidden: true })
-      // group role is on the hidden inner div; fall back to data-source
-      .find(() => true);
-    expect(millRow).toBeDefined();
-
-    // Click the mill row's summary to expand the details disclosure.
-    const summaries = rowsList.querySelectorAll('summary');
-    expect(summaries.length).toBe(2);
-    // Mill row is index 1 (relay first, mill second)
-    await user.click(summaries[1]);
-
-    // Now the txid badge + explorer link should be visible. The badge is
-    // built from two text nodes ("txid " + truncated hash), so we match
-    // against the badge's aria-label which carries the full hash.
-    expect(
-      screen.getByLabelText(/Transaction hash 0xa{64}/)
-    ).toBeInTheDocument();
-
-    const link = screen.getByRole('link', {
-      name: /View transaction on block explorer/i,
-    });
-    expect(link).toHaveAttribute(
-      'href',
-      `https://blockscout.example/tx/0x${'a'.repeat(64)}`
-    );
-    // AC-D4-3: explorer URL schema MUST be `${blockscout.url}/tx/${txHash}`
-    expect(link.getAttribute('href')).toMatch(
-      /^https:\/\/[^/]+\/tx\/0x[0-9a-f]{64}$/
-    );
-    // Open in new tab + rel for security
-    expect(link).toHaveAttribute('target', '_blank');
-    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-  });
-
-  it('rows without txHash do not render their own explorer link', () => {
-    // Render a payload where ONLY the relay row exists — no mill row to
-    // contaminate the DOM. The relay row has no txHash so the conditional
-    // details block must not render at all.
-    const payload: EarningsPayload = {
-      ...SAMPLE_PAYLOAD,
-      items: [
-        {
-          ts: '2026-05-04T11:00:00.000Z',
-          source: 'relay',
-          asset: { symbol: 'sats', decimals: 0 },
-          amount: '100',
+  it('renders delta column when deltas are non-zero', () => {
+    const withDeltas: AggregatedEarnings = {
+      status: 'ok',
+      apex: {
+        routingFees: {
+          USD: { lifetime: '5000', today: '100', month: '500', year: '1000' },
         },
-      ],
-    };
-    render(<EarningsPanel initialData={payload} fetchEnabled={false} />);
-
-    expect(screen.queryByText(/^txid /)).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('link', {
-        name: /View transaction on block explorer/i,
-      })
-    ).not.toBeInTheDocument();
-    // The summary still renders the row, but the chevron caret is also
-    // suppressed when hasDetails is false.
-    expect(screen.queryByText('›')).not.toBeInTheDocument();
-  });
-
-  it('renders an explorer link when a Solana row has an explorerUrl', () => {
-    const sig = '5'.repeat(88);
-    const solanaRpc = 'http://localhost:28899';
-    const customUrl = encodeURIComponent(solanaRpc);
-    const payload: EarningsPayload = {
-      ...SAMPLE_PAYLOAD,
-      items: [
-        {
-          ts: '2026-05-04T11:00:00.000Z',
-          source: 'mill',
-          asset: { symbol: 'sats', decimals: 0, chain: 'solana' },
-          amount: '500',
-          txHash: sig,
-          explorerUrl: `https://explorer.solana.com/tx/${sig}?cluster=custom&customUrl=${customUrl}`,
-        },
-      ],
-    };
-
-    render(<EarningsPanel initialData={payload} fetchEnabled={false} />);
-
-    // The summary itself becomes interactable — open the row to see the
-    // link without simulating a hover (jsdom hover semantics are unstable).
-    const summary = document.querySelector('summary');
-    expect(summary).not.toBeNull();
-    summary!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-
-    const link = screen.getByRole('link', {
-      name: /View transaction on block explorer/i,
-    });
-    expect(link.getAttribute('href')).toContain('cluster=custom');
-    expect(link.getAttribute('href')).toContain(customUrl);
-  });
-
-  it('handles BigInt sats totals beyond Number.MAX_SAFE_INTEGER', () => {
-    const huge = '9007199254740993000'; // > 2^53
-    const payload: EarningsPayload = {
-      ...SAMPLE_PAYLOAD,
-      totals: { sats: huge, tokens: {} },
-      by_source: {
-        relay: { sats: huge, tokens: {} },
-        mill: { sats: '0', tokens: {} },
-        dvm: { sats: '0', tokens: {} },
-        connector: { sats: '0', tokens: {} },
       },
+      peers: [],
     };
-    render(<EarningsPanel initialData={payload} fetchEnabled={false} />);
+    render(<EarningsPanel initialData={withDeltas} fetchEnabled={false} />);
+    expect(screen.getByText(/\+100 today/i)).toBeInTheDocument();
+  });
 
-    // Format must preserve every digit — Number(huge) would round.
-    const formatted = BigInt(huge).toLocaleString('en-US');
+  it('hides delta column when all deltas are "0" (per-row check)', () => {
+    // Mixed payload: apex has non-zero deltas, peer rows have all-zero deltas.
+    // The "today" indicator must show on the apex row and be ABSENT on peer rows.
+    const mixed: AggregatedEarnings = {
+      status: 'ok',
+      apex: {
+        routingFees: {
+          USD: { lifetime: '5000', today: '100', month: '500', year: '1000' },
+        },
+      },
+      peers: [
+        {
+          id: 'peer-town-quiet',
+          type: 'town',
+          byAsset: {
+            USD: { lifetime: '200', today: '0', month: '0', year: '0' },
+          },
+        },
+      ],
+    };
+    render(<EarningsPanel initialData={mixed} fetchEnabled={false} />);
+
+    // Apex row: "+100 today" is rendered.
+    const apexSection = screen.getByRole('region', { name: 'Apex routing fees' });
+    expect(within(apexSection).getByText(/\+100 today/)).toBeInTheDocument();
+
+    // Peer row: no "today" indicator anywhere inside the peer rows.
+    const peerRows = screen.getByLabelText('Peer earnings rows');
+    expect(within(peerRows).queryByText(/today/i)).not.toBeInTheDocument();
+  });
+
+  it('renders connector_unavailable banner when wire status flips', () => {
+    const unavailable: AggregatedEarnings = {
+      status: 'connector_unavailable',
+      apex: { routingFees: {} },
+      peers: [],
+    };
+    render(<EarningsPanel initialData={unavailable} fetchEnabled={false} />);
+
+    expect(screen.getByLabelText(/Connector unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/Connector unreachable/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/earnings metric unavailable/i)).toBeInTheDocument();
+
+    // Status indicator flips to "unavailable" (not "live", not "loading…").
+    expect(screen.getByText('unavailable')).toBeInTheDocument();
+
+    // Peer table reflects the unavailable state.
     expect(
-      screen.getByLabelText(`Total sats earned: ${formatted}`)
+      screen.getByText(/Connector unavailable — no peer earnings to show\./i)
+    ).toBeInTheDocument();
+  });
+
+  it('renders external peer type correctly', () => {
+    const withExternal: AggregatedEarnings = {
+      status: 'ok',
+      apex: { routingFees: {} },
+      peers: [
+        {
+          id: 'peer-unknown-x',
+          type: 'external',
+          byAsset: {
+            USD: { lifetime: '77', today: '0', month: '0', year: '0' },
+          },
+        },
+      ],
+    };
+    render(<EarningsPanel initialData={withExternal} fetchEnabled={false} />);
+    expect(
+      screen.getByLabelText(/External peer peer-unknown-x: 77 USD lifetime/i)
     ).toBeInTheDocument();
   });
 });

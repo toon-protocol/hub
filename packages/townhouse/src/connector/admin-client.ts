@@ -19,14 +19,19 @@
  */
 
 import type {
+  ConnectorFeeEntry,
+  EarningsResponse,
+  EarningsTimestamp,
   HealthResponse,
   HsHostnameResponse,
   MetricsResponse,
+  PeerEarnings,
   PeerStatus,
   PeersResponse,
   PacketLogFilter,
   PacketLogEntry,
   PacketLogResponse,
+  RecentClaim,
 } from './types.js';
 
 /** Default request timeout in milliseconds (5 seconds) */
@@ -214,6 +219,113 @@ export class ConnectorAdminClient {
       throw new Error('Connector admin API: invalid metrics response shape');
     }
     return body as MetricsResponse;
+  }
+
+  /**
+   * GET /admin/earnings.json — returns the connector's per-peer per-asset
+   * earnings projection, mirroring `AdminEarningsJsonResponse` (connector v3.2.0+).
+   *
+   * Source of truth: @toon-protocol/connector
+   *   packages/connector/src/http/admin-api.ts:1864-1945
+   *
+   * Returns HTTP 503 when the connector is started without settlement config
+   * (accountManager / claimReceiver not wired). Townhouse's apex always wires
+   * both; 503 in production indicates connector misconfiguration.
+   *
+   * Wire-shape adaptation: the connector's `timestamp: string` field is
+   * wrapped into `{ iso: string }` on the way out (EarningsTimestamp).
+   *
+   * @throws Error when connector is not running, returns non-200, or shape is invalid
+   */
+  async getEarnings(): Promise<EarningsResponse> {
+    const response = await this.fetch('/admin/earnings.json');
+    const body: unknown = await response.json();
+    if (typeof body !== 'object' || body === null) {
+      throw new Error('Connector admin API: invalid earnings response shape');
+    }
+    const obj = body as Record<string, unknown>;
+    if (
+      typeof obj['uptimeSeconds'] !== 'number' ||
+      !Array.isArray(obj['peers']) ||
+      !Array.isArray(obj['connectorFees']) ||
+      !Array.isArray(obj['recentClaims']) ||
+      typeof obj['timestamp'] !== 'string'
+    ) {
+      throw new Error('Connector admin API: invalid earnings response shape');
+    }
+    // Inner-element shape validation — AC #3 drift coverage for named fields
+    // (peers[].byAsset[].claimsReceivedTotal, connectorFees[].assetCode, recentClaims[].direction).
+    const peers = obj['peers'] as unknown[];
+    for (const peer of peers) {
+      if (typeof peer !== 'object' || peer === null) {
+        throw new Error('Connector admin API: invalid earnings response shape');
+      }
+      const p = peer as Record<string, unknown>;
+      if (typeof p['peerId'] !== 'string' || !Array.isArray(p['byAsset'])) {
+        throw new Error('Connector admin API: invalid earnings response shape');
+      }
+      for (const asset of p['byAsset'] as unknown[]) {
+        if (typeof asset !== 'object' || asset === null) {
+          throw new Error(
+            'Connector admin API: invalid earnings response shape'
+          );
+        }
+        const a = asset as Record<string, unknown>;
+        if (
+          typeof a['assetCode'] !== 'string' ||
+          typeof a['assetScale'] !== 'number' ||
+          typeof a['claimsReceivedTotal'] !== 'string' ||
+          typeof a['claimsSentTotal'] !== 'string' ||
+          typeof a['netBalance'] !== 'string' ||
+          (a['lastClaimAt'] !== null && typeof a['lastClaimAt'] !== 'string')
+        ) {
+          throw new Error(
+            'Connector admin API: invalid earnings response shape'
+          );
+        }
+      }
+    }
+    const fees = obj['connectorFees'] as unknown[];
+    for (const fee of fees) {
+      if (typeof fee !== 'object' || fee === null) {
+        throw new Error('Connector admin API: invalid earnings response shape');
+      }
+      const f = fee as Record<string, unknown>;
+      if (
+        typeof f['assetCode'] !== 'string' ||
+        typeof f['assetScale'] !== 'number' ||
+        typeof f['total'] !== 'string'
+      ) {
+        throw new Error('Connector admin API: invalid earnings response shape');
+      }
+    }
+    const claims = obj['recentClaims'] as unknown[];
+    for (const claim of claims) {
+      if (typeof claim !== 'object' || claim === null) {
+        throw new Error('Connector admin API: invalid earnings response shape');
+      }
+      const c = claim as Record<string, unknown>;
+      if (
+        typeof c['peerId'] !== 'string' ||
+        typeof c['assetCode'] !== 'string' ||
+        typeof c['assetScale'] !== 'number' ||
+        typeof c['amount'] !== 'string' ||
+        (c['direction'] !== 'inbound' && c['direction'] !== 'outbound') ||
+        typeof c['at'] !== 'string'
+      ) {
+        throw new Error('Connector admin API: invalid earnings response shape');
+      }
+    }
+    const timestamp: EarningsTimestamp = { iso: obj['timestamp'] as string };
+    // Explicit construction (not spread) — prevents forward-compat wire fields
+    // from leaking through the typed surface.
+    return {
+      uptimeSeconds: obj['uptimeSeconds'] as number,
+      peers: peers as PeerEarnings[],
+      connectorFees: fees as ConnectorFeeEntry[],
+      recentClaims: claims as RecentClaim[],
+      timestamp,
+    };
   }
 
   /**

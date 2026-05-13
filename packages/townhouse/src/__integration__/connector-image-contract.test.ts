@@ -34,6 +34,7 @@ import type Docker from 'dockerode';
 
 import { DEFAULT_CONNECTOR_IMAGE } from '../constants.js';
 import { ConnectorAdminClient } from '../connector/admin-client.js';
+import type { EarningsResponse } from '../connector/types.js';
 
 /** Parse a Docker image reference into its name, optional tag, and optional digest. */
 function parseConnectorImage(ref: string): {
@@ -301,6 +302,33 @@ describe.skipIf(isTruthyEnv(process.env['SKIP_DOCKER']))(
       expect(typeof metrics.aggregate.bytesSent).toBe('number');
       expect(Array.isArray(metrics.peers)).toBe(true);
       expect(typeof metrics.timestamp).toBe('string');
+    }, 10_000);
+
+    it('getEarnings() returns EarningsResponse (mirrors AdminEarningsJsonResponse) with peers, connectorFees, recentClaims arrays from the connector image', async () => {
+      // Edge Case A: the minimal connector config (peers: [], routes: []) does not wire
+      // accountManager / claimReceiver (requires full EVM settlement config). The connector
+      // returns 503 with { error: 'Service Unavailable' } in that case. We accept both 200
+      // (shape coverage) and 503 (endpoint exists, subsystem disabled) to keep the canary
+      // passing without requiring a full settlement stack in the minimal test config.
+      // See story 47.1 Dev Notes "Edge Case A — accountManager / claimReceiver 503" for context.
+      let earnings: EarningsResponse | undefined;
+      try {
+        earnings = await adminClient.getEarnings();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/Connector admin API error: 503\b/.test(msg)) {
+          // accountManager/claimReceiver disabled in minimal config — endpoint is reachable,
+          // subsystem is off. This is the expected path for the standalone test container.
+          return;
+        }
+        throw err;
+      }
+      expect(typeof earnings.uptimeSeconds).toBe('number');
+      expect(earnings.uptimeSeconds).toBeGreaterThanOrEqual(0);
+      expect(Array.isArray(earnings.peers)).toBe(true);
+      expect(Array.isArray(earnings.connectorFees)).toBe(true);
+      expect(Array.isArray(earnings.recentClaims)).toBe(true);
+      expect(typeof earnings.timestamp.iso).toBe('string');
     }, 10_000);
 
     // ── Deliberate-failure ratchet (AC-8, opt-in) ─────────────────────────

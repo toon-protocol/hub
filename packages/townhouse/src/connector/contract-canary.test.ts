@@ -100,6 +100,37 @@ const PEERS_BODY = {
   ],
 };
 
+const EARNINGS_BODY = {
+  uptimeSeconds: 60,
+  peers: [
+    {
+      peerId: 'town',
+      byAsset: [
+        {
+          assetCode: 'USD',
+          assetScale: 6,
+          claimsReceivedTotal: '1000000',
+          claimsSentTotal: '0',
+          netBalance: '1000000',
+          lastClaimAt: '2026-05-12T00:00:00.000Z',
+        },
+      ],
+    },
+  ],
+  connectorFees: [{ assetCode: 'USD', assetScale: 6, total: '1000' }],
+  recentClaims: [
+    {
+      peerId: 'town',
+      assetCode: 'USD',
+      assetScale: 6,
+      amount: '500000',
+      direction: 'inbound' as const,
+      at: '2026-05-12T00:00:00.000Z',
+    },
+  ],
+  timestamp: '2026-05-12T00:00:00.000Z',
+};
+
 const client = new ConnectorAdminClient('http://localhost:9402');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -320,6 +351,163 @@ describe('getPeers() shape contract', () => {
     mockFetchAt('/admin/peers', null);
     await expect(client.getPeers()).rejects.toThrow(
       /invalid peers response shape/
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getEarnings() shape + path contract — mirrors AdminEarningsJsonResponse
+// Connector-Side Contract: GET {adminApi.port}/admin/earnings.json (connector v3.2.0+)
+// Response: EarningsResponse — { uptimeSeconds, peers, connectorFees, recentClaims, timestamp }
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('getEarnings() shape contract', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('succeeds on documented shape and requests GET /admin/earnings.json', async () => {
+    const stub = mockFetchAt('/admin/earnings.json', EARNINGS_BODY);
+    const result = await client.getEarnings();
+    expect(result.uptimeSeconds).toBe(60);
+    expect(result.peers[0]!.peerId).toBe('town');
+    expect(result.peers[0]!.byAsset[0]!.claimsReceivedTotal).toBe('1000000');
+    expect(result.connectorFees[0]!.assetCode).toBe('USD');
+    expect(Array.isArray(result.recentClaims)).toBe(true);
+    expect(stub.calls).toHaveLength(1);
+    // AC #3 canonical assertions (required by name in the acceptance criteria)
+    expect(typeof result.uptimeSeconds).toBe('number');
+    expect(typeof result.peers[0]!.byAsset[0]!.claimsReceivedTotal).toBe(
+      'string'
+    );
+    expect(typeof result.connectorFees[0]!.assetCode).toBe('string');
+    expect(Array.isArray(result.recentClaims)).toBe(true);
+  });
+
+  it('rejects when uptimeSeconds has wrong type (string instead of number)', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      ...EARNINGS_BODY,
+      uptimeSeconds: '60',
+    });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when peers is missing (key absent — mirrors JSON wire dropping undefined)', async () => {
+    const { peers: _omitPeers, ...rest } = EARNINGS_BODY;
+    mockFetchAt('/admin/earnings.json', rest);
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when connectorFees is missing (key absent)', async () => {
+    const { connectorFees: _omitFees, ...rest } = EARNINGS_BODY;
+    mockFetchAt('/admin/earnings.json', rest);
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when recentClaims is not an array', async () => {
+    mockFetchAt('/admin/earnings.json', { ...EARNINGS_BODY, recentClaims: {} });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when timestamp is missing (key absent)', async () => {
+    const { timestamp: _omitTs, ...rest } = EARNINGS_BODY;
+    mockFetchAt('/admin/earnings.json', rest);
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('accepts empty arrays — fresh connector with no claims yet', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      uptimeSeconds: 0,
+      peers: [],
+      connectorFees: [],
+      recentClaims: [],
+      timestamp: '2026-05-12T00:00:00.000Z',
+    });
+    const result = await client.getEarnings();
+    expect(result.peers).toHaveLength(0);
+    expect(result.connectorFees).toHaveLength(0);
+    expect(result.recentClaims).toHaveLength(0);
+    expect(result.uptimeSeconds).toBe(0);
+  });
+
+  it('wraps wire timestamp string into EarningsTimestamp value object', async () => {
+    mockFetchAt('/admin/earnings.json', EARNINGS_BODY);
+    const result = await client.getEarnings();
+    expect(typeof result.timestamp.iso).toBe('string');
+    expect(result.timestamp.iso).toBe('2026-05-12T00:00:00.000Z');
+  });
+
+  // Inner-element drift tests — AC #3 names these fields explicitly. The validator
+  // must reject when inner-array elements deviate from the documented shape.
+
+  it('rejects when peers[].byAsset[].claimsReceivedTotal is a number (inner type drift)', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      ...EARNINGS_BODY,
+      peers: [
+        {
+          peerId: 'town',
+          byAsset: [
+            {
+              assetCode: 'USD',
+              assetScale: 6,
+              claimsReceivedTotal: 1000000,
+              claimsSentTotal: '0',
+              netBalance: '1000000',
+              lastClaimAt: '2026-05-12T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
+    });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when connectorFees[].assetCode is missing (inner presence drift)', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      ...EARNINGS_BODY,
+      connectorFees: [{ assetScale: 6, total: '1000' }],
+    });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when recentClaims[].direction is not in the enum (inner enum drift)', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      ...EARNINGS_BODY,
+      recentClaims: [
+        {
+          peerId: 'town',
+          assetCode: 'USD',
+          assetScale: 6,
+          amount: '500000',
+          direction: 'sideways',
+          at: '2026-05-12T00:00:00.000Z',
+        },
+      ],
+    });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when peers[].byAsset is not an array (inner structural drift)', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      ...EARNINGS_BODY,
+      peers: [{ peerId: 'town', byAsset: null }],
+    });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
     );
   });
 });

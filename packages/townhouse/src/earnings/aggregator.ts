@@ -1,382 +1,283 @@
 /**
- * Earnings aggregator (Story D4).
+ * Earnings aggregator (Story 47.2).
  *
- * Pulls real per-source earnings from the four data paths the operator cares
- * about: relay, mill, dvm, connector. The aggregator is a pure(ish) function
- * over `connectorAdmin` + `orchestrator` + an optional `leasesPath`; the
- * route handler `/api/earnings` is a thin wrapper.
+ * Aggregates connector-reported earnings into the canonical
+ * `{ status, apex, peers }` shape consumed by the host-API
+ * `/api/earnings` endpoint.
  *
- * ## Source-by-source honesty notes
+ * Source of truth: `connectorAdmin.getEarnings()` (Story 47.1).
+ * Peer-type attribution via `PeerTypeResolver` (Story 46.1); the resolver
+ * buckets unmatched peerIds as `'external'` (enforcement lives in the
+ * resolver, not here — we trust its contract).
  *
- * - **relay** (town): real. The connector packet log records every paid
- *   `kind:1`/event publish that flows through the connector, attributed to
- *   the town peer's ILP address. `amount` is the ILP unit (interpreted as
- *   sats for v1 — TOON's pricing scale matches BTC sats, see
- *   `_bmad-output/planning-artifacts/research/party-mode-prepaid-protocol-decisions-2026-03-20.md`).
- *
- * - **mill**: partially real. The connector packet log has the swap-fee
- *   ILP volume going through the mill peer. The `SettlementEvent` type
- *   landed in D3 but the live emission path on the mill side is not yet
- *   wired (see `packages/mill/src/settlement-event.ts` module doc and the
- *   D3 agent's note in the build sheet). Until that lands, the `items`
- *   array will not contain `txHash` / `explorerUrl` for mill rows — they
- *   render as plain "settlement attributed via ILP packet log" entries.
- *   When live emission ships, this aggregator will read the mill's
- *   settlement-event log and merge it into the items array. Search for
- *   `TODO(D4-mill-settlement)` to find the wiring point.
- *
- * - **dvm**: real. Same connector-packet-log basis as relay. The DVM peer
- *   ILP address attributes job-payment packets.
- *
- * - **connector**: zero-by-design. The standalone connector v1 does not
- *   take a routing fee — it only forwards packets between child peers
- *   that are all owned by the same operator. The connector source is
- *   surfaced in the response shape (AC-D4-1 requires it), but its sats
- *   total is always "0" and items array always empty until the
- *   per-hop-fee feature ships. Search for `TODO(D4-connector-fees)`.
+ * Failure mode: if `getEarnings()` throws (network, 503-when-disabled,
+ * shape drift), returns the empty payload with
+ * `status: 'connector_unavailable'`. The route returns 200 either way;
+ * operators see zeros plus a UI banner rather than a 5xx. An injected
+ * `logger.warn` (Fastify / pino-compatible) is called on failure so ops
+ * can distinguish "connector outage" from "no earnings yet."
  *
  * @module
- * @since D4
+ * @since 47.2
  */
 
 import type { ConnectorAdminClient } from '../connector/index.js';
-import type { DockerOrchestrator } from '../docker/orchestrator.js';
-import type { PacketLogEntry } from '../connector/types.js';
-import type { SettlementChain } from '@toon-protocol/mill';
+import type { RecentClaim } from '../connector/types.js';
+import type { PeerTypeResolver } from '../registry/peer-type-resolver.js';
+import type { NodeType } from '../docker/types.js';
 
-import {
-  buildExplorerUrl,
-  loadLeases,
-  type AkashLeasesForExplorer,
-} from './explorer-links.js';
+export type { NodeType };
+export type { RecentClaim };
 
 /**
- * One of the four canonical earnings sources surfaced by `/api/earnings`.
- * `'connector'` is included for shape-completeness even though v1 always
- * reports zero (see module doc).
+ * Per-asset cumulative + delta breakdown. `lifetime` is the connector's
+ * cumulative `claimsReceivedTotal` (decimal-string bigint at `assetScale`
+ * decimals). `today` / `month` / `year` are deltas computed by Story 47.3's
+ * snapshot-reader; until the `deltaComputer` dep is provided, they stub
+ * to '0'. Asset-scale interpretation (USD: 6, ETH: 18, sats: 0) is the
+ * dashboard's job — the aggregator never collapses to a unit.
  */
-export type EarningsSource = 'relay' | 'mill' | 'dvm' | 'connector';
+export interface PerAsset {
+  lifetime: string;
+  today: string;
+  month: string;
+  year: string;
+}
+
+/** Per-peer earnings entry in the aggregator output. */
+export interface NodeEarnings {
+  id: string; // == connector peerId
+  type: NodeType | 'external'; // PeerTypeResolver attribution
+  byAsset: Record<string, PerAsset>; // keyed by assetCode
+  /** Max `lastClaimAt` across this peer's assets, or `null` if none. Added in 47.4. */
+  lastClaimAt: string | null;
+}
 
 /**
- * Per-asset bucket. `amount` is a BigInt-safe decimal string in raw
- * micro-units (matches the rest of the townhouse API surface — see
- * `WalletBalanceEntry.balance`). `decimals` and `symbol` give the dashboard
- * what it needs to format without re-deriving from a registry.
+ * Wire-level status for the aggregator response.
  *
- * For v1 the `'sats'` ILP unit is the only asset in `tokens` for relay /
- * mill / dvm / connector — token-denominated settlement events on EVM /
- * Solana arrive on a separate path (see {@link EarningsItem}). When mill's
- * live SettlementEvent emission ships, we'll start populating per-token
- * buckets keyed by `${chain}:${symbol}`.
+ * `'ok'` — `getEarnings()` succeeded; payload reflects connector state.
+ * `'connector_unavailable'` — `getEarnings()` threw (network, 503, shape
+ * drift); apex + peers are empty. The dashboard renders a banner.
  */
-export interface AssetBucket {
-  /** BigInt-safe decimal string in raw micro-units. */
-  amount: string;
-  /** Decimal places (e.g. 0 for sats, 6 for USDC, 18 for ETH). */
-  decimals: number;
-  /** Short asset code rendered in the dashboard (e.g. 'sats', 'USDC'). */
-  symbol: string;
-  /** Optional chain hint (e.g. 'evm', 'solana') for cross-chain disambiguation. */
-  chain?: string;
-}
+export type AggregatedEarningsStatus = 'ok' | 'connector_unavailable';
 
-export interface PerSourceTotals {
-  /** Sats accumulated through the ILP packet log, BigInt-safe decimal string. */
-  sats: string;
-  /** Per-token totals from on-chain settlement events (keyed by `${chain}:${symbol}` or just `symbol`). */
-  tokens: Record<string, AssetBucket>;
-}
-
-export interface EarningsItem {
-  /** ISO8601 timestamp of the event. */
-  ts: string;
-  source: EarningsSource;
-  /** Asset descriptor for amount interpretation. */
-  asset: { symbol: string; decimals: number; chain?: string };
-  /** BigInt-safe decimal string in raw micro-units. */
-  amount: string;
-  /** On-chain transaction hash, present only for chain-settled rows. */
-  txHash?: string;
-  /** Block-explorer URL — present iff `txHash` is set AND a lease URL resolves. */
-  explorerUrl?: string;
-}
-
-export interface EarningsPayload {
-  /** ISO8601 — the lower bound of the aggregation window. */
-  since: string;
-  totals: {
-    /** Sum of all `by_source.*.sats` as a BigInt-safe decimal string. */
-    sats: string;
-    /** Sum of all `by_source.*.tokens` keyed identically. */
-    tokens: Record<string, AssetBucket>;
+/** Top-level aggregator output. Extended in 47.4 with dashboard fields. */
+export interface AggregatedEarnings {
+  status: AggregatedEarningsStatus;
+  apex: {
+    routingFees: Record<string, PerAsset>; // keyed by assetCode
   };
-  by_source: Record<EarningsSource, PerSourceTotals>;
-  /** Recent items for the breakdown drilldown. Capped at `MAX_ITEMS`. */
-  items: EarningsItem[];
+  peers: NodeEarnings[];
+  /** Pass-through from connector `recentClaims`. Empty array on connector outage. */
+  recentClaims: RecentClaim[];
+  /** Sum of `getMetrics().peers[].packetsForwarded`. 0 on connector outage or metrics failure. */
+  eventsRelayed: number;
+  /** From `getMetrics().uptimeSeconds`. 0 on connector outage or metrics failure. */
+  uptimeSeconds: number;
 }
 
-/** Cap on the items array — keeps response size bounded under heavy load. */
-export const MAX_ITEMS = 200;
-
-/** Default aggregation window when caller doesn't pass `?since=`. */
-export const DEFAULT_SINCE_MS = 24 * 60 * 60 * 1000; // 24 hours
+/** Resolves TODAY / MONTH / YEAR deltas for a (scope, assetCode) tuple. */
+export type DeltaComputer = (params: {
+  /** Either a connector peerId or the literal `'__apex__'` for routing-fee rows. */
+  scope: string;
+  assetCode: string;
+  /** Current cumulative (matches the lifetime value in the response). */
+  currentLifetime: string;
+}) => Promise<{ today: string; month: string; year: string }>;
 
 /**
- * Inputs the aggregator needs. Concrete deps (connector, orchestrator) are
- * read from `ApiDeps` in the route layer — this struct is what the route
- * passes through.
+ * Minimal logger contract; Fastify `request.log` and pino satisfy it.
+ * Kept narrow so tests can pass a `{ warn: vi.fn() }` stub.
  */
+export interface AggregatorLogger {
+  warn(obj: object, msg?: string): void;
+}
+
 export interface AggregateEarningsInput {
   connectorAdmin: ConnectorAdminClient;
-  orchestrator: DockerOrchestrator;
-  /** Absolute path to leases.json. `null` skips lease loading entirely. */
-  leasesPath: string | null;
-  /** ms-epoch lower bound. Defaults to `Date.now() - DEFAULT_SINCE_MS`. */
-  sinceMs?: number;
+  peerTypeResolver: PeerTypeResolver;
+  /**
+   * Optional delta computer (Story 47.3). When omitted, all PerAsset
+   * `today` / `month` / `year` fields stub to '0'. The route layer (47.4)
+   * wires the snapshot-backed implementation. A rejection on a single
+   * asset stubs that asset's deltas to '0' and emits `logger.warn`; one
+   * bad asset never breaks the aggregate.
+   */
+  deltaComputer?: DeltaComputer;
+  /**
+   * Optional logger. When provided, `getEarnings()` failures and
+   * `deltaComputer` rejections are surfaced via `logger.warn` so ops can
+   * distinguish a connector outage from "no earnings yet."
+   */
+  logger?: AggregatorLogger;
 }
 
-interface PeerByType {
-  /** ILP address of the town peer (if any) */
-  town?: string;
-  /** ILP address of the mill peer (if any) */
-  mill?: string;
-  /** ILP address of the dvm peer (if any) */
-  dvm?: string;
-}
+const STUB_DELTAS = { today: '0', month: '0', year: '0' } as const;
 
-/** Map a peer.id like 'townhouse-dev-mill-01' to its NodeType, or null. */
-function peerIdToNodeType(id: string, type?: string): EarningsSource | null {
-  // Prefer the orchestrator-supplied `type` when available — it's the
-  // ground truth. Container-name parsing is the fallback for peer-only
-  // discovery (orchestrator status omits short-lived peers).
-  if (type === 'town' || type === 'mill' || type === 'dvm') return type;
-  if (id.includes('town')) return 'relay';
-  if (id.includes('mill')) return 'mill';
-  if (id.includes('dvm')) return 'dvm';
-  return null;
-}
-
-/**
- * Resolve which connector peer ILP addresses correspond to which node type.
- * Cross-references peers against the orchestrator's status snapshot for
- * type attribution, falling back to container-name heuristics for peers
- * the orchestrator doesn't report.
- */
-async function resolvePeerIlpAddresses(
-  connectorAdmin: ConnectorAdminClient,
-  orchestrator: DockerOrchestrator
-): Promise<PeerByType> {
-  let peers: { id: string; ilpAddresses: string[] }[];
+async function maybeDeltas(
+  deltaComputer: DeltaComputer | undefined,
+  scope: string,
+  assetCode: string,
+  currentLifetime: string,
+  logger: AggregatorLogger | undefined
+): Promise<{ today: string; month: string; year: string }> {
+  if (!deltaComputer) return { ...STUB_DELTAS };
   try {
-    peers = await connectorAdmin.getPeers();
-  } catch {
-    return {};
-  }
-
-  let statusByName = new Map<string, string>();
-  try {
-    const statuses = await orchestrator.status();
-    statusByName = new Map(
-      statuses.map((s: { name: string; type: string }) => [s.name, s.type])
+    return await deltaComputer({ scope, assetCode, currentLifetime });
+  } catch (err) {
+    logger?.warn(
+      { err, scope, assetCode },
+      'aggregator: deltaComputer rejected — stubbing deltas to 0 for this asset'
     );
-  } catch {
-    /* orchestrator unreachable — fall through to name heuristics */
-  }
-
-  const result: PeerByType = {};
-  for (const peer of peers) {
-    const ilp = peer.ilpAddresses[0];
-    if (!ilp) continue;
-    const orchestratorType = statusByName.get(peer.id);
-    const source = peerIdToNodeType(peer.id, orchestratorType);
-    if (source === 'relay' || source === 'town') result.town ??= ilp;
-    else if (source === 'mill') result.mill ??= ilp;
-    else if (source === 'dvm') result.dvm ??= ilp;
-  }
-  return result;
-}
-
-/**
- * Compute the source totals from a slice of the connector packet log.
- * Each fulfilled packet's `amount` is treated as sats (the v1 ILP unit).
- * Rejected/timed-out packets do NOT count toward earnings — the operator
- * was paid only for fulfilled forwards.
- */
-function packetsToBucket(packets: PacketLogEntry[]): {
-  sats: bigint;
-  count: number;
-} {
-  let sats = 0n;
-  let count = 0;
-  for (const p of packets) {
-    if (p.result !== 'fulfill') continue;
-    try {
-      sats += BigInt(p.amount ?? 0);
-      count += 1;
-    } catch {
-      /* malformed amount — skip, don't crash */
-    }
-  }
-  return { sats, count };
-}
-
-/** Convert a packet log entry into an item the dashboard can render. */
-function packetToItem(
-  source: EarningsSource,
-  packet: PacketLogEntry
-): EarningsItem {
-  return {
-    ts: new Date(packet.ts).toISOString(),
-    source,
-    asset: { symbol: 'sats', decimals: 0 },
-    amount: String(packet.amount ?? '0'),
-    // ILP-layer rows have no on-chain txHash — only mill SettlementEvent
-    // rows do, and those don't flow through this path yet.
-  };
-}
-
-/** Build an empty per-source bucket. */
-function emptyBucket(): PerSourceTotals {
-  return { sats: '0', tokens: {} };
-}
-
-/**
- * Pull per-peer earnings from the connector packet log for one peer ILP
- * address. Returns the bucket + items. Tolerates connector errors by
- * returning empty results.
- */
-async function fetchPacketLogForPeer(
-  connectorAdmin: ConnectorAdminClient,
-  ilpAddress: string,
-  sinceMs: number
-): Promise<{ bucket: PerSourceTotals; packets: PacketLogEntry[] }> {
-  try {
-    const packets = await connectorAdmin.getPacketLog({
-      ilpAddress,
-      since: sinceMs,
-      limit: 10_000,
-    });
-    const { sats } = packetsToBucket(packets);
-    return {
-      bucket: { sats: sats.toString(), tokens: {} },
-      packets,
-    };
-  } catch {
-    return { bucket: emptyBucket(), packets: [] };
+    return { ...STUB_DELTAS };
   }
 }
 
 /**
- * The main aggregator. Stitches together the four sources into the response
- * shape contracted by AC-D4-1.
+ * Aggregate connector-reported earnings into the canonical
+ * `{ status, apex, peers }` shape.
  *
- * Failure mode philosophy: every source is independently try/catch'd so
- * that one source going down doesn't blank the whole panel. A connector
- * outage zeros relay/mill/dvm; a missing leases.json zeros explorerUrl on
- * items but keeps the rest intact.
+ * Failure mode: any throw from `getEarnings()` returns the empty payload
+ * with `status: 'connector_unavailable'` — operators see zeros + a banner,
+ * not a 5xx. `deltaComputer` opt-in: when provided, today/month/year are
+ * computed per-asset via concurrent `Promise.all` fan-out within each peer;
+ * when omitted (or when an individual asset's delta rejects), the fields
+ * stub to '0'. Story 47.3 ships the computer; Story 47.4 wires it.
  */
 export async function aggregateEarnings(
   input: AggregateEarningsInput
-): Promise<EarningsPayload> {
-  const sinceMs = input.sinceMs ?? Date.now() - DEFAULT_SINCE_MS;
-  const since = new Date(sinceMs).toISOString();
-
-  const leases: AkashLeasesForExplorer | null = loadLeases(input.leasesPath);
-
-  // Resolve ILP peer addresses by node type.
-  const peerIlp = await resolvePeerIlpAddresses(
-    input.connectorAdmin,
-    input.orchestrator
-  );
-
-  // Per-source packet-log fetches.
-  const items: EarningsItem[] = [];
-
-  let relayBucket = emptyBucket();
-  if (peerIlp.town) {
-    const { bucket, packets } = await fetchPacketLogForPeer(
-      input.connectorAdmin,
-      peerIlp.town,
-      sinceMs
+): Promise<AggregatedEarnings> {
+  let earnings: Awaited<ReturnType<typeof input.connectorAdmin.getEarnings>>;
+  try {
+    earnings = await input.connectorAdmin.getEarnings();
+  } catch (err) {
+    input.logger?.warn(
+      { err },
+      'aggregator: connectorAdmin.getEarnings failed — returning status=connector_unavailable'
     );
-    relayBucket = bucket;
-    for (const p of packets) {
-      if (p.result === 'fulfill') items.push(packetToItem('relay', p));
-    }
+    return {
+      status: 'connector_unavailable',
+      apex: { routingFees: {} },
+      peers: [],
+      recentClaims: [],
+      eventsRelayed: 0,
+      uptimeSeconds: 0,
+    };
   }
 
-  let millBucket = emptyBucket();
-  if (peerIlp.mill) {
-    const { bucket, packets } = await fetchPacketLogForPeer(
-      input.connectorAdmin,
-      peerIlp.mill,
-      sinceMs
+  // Apex routing fees: connector-level fees keyed by assetCode.
+  const buildRoutingFees = async (): Promise<Record<string, PerAsset>> => {
+    const out: Record<string, PerAsset> = {};
+    await Promise.all(
+      earnings.connectorFees.map(async (fee) => {
+        const deltas = await maybeDeltas(
+          input.deltaComputer,
+          '__apex__',
+          fee.assetCode,
+          fee.total,
+          input.logger
+        );
+        out[fee.assetCode] = { lifetime: fee.total, ...deltas };
+      })
     );
-    millBucket = bucket;
-    for (const p of packets) {
-      if (p.result === 'fulfill') items.push(packetToItem('mill', p));
-    }
-    // TODO(D4-mill-settlement): when mill emits live SettlementEvents
-    // (D3 type is locked, live wiring is downstream — see settlement-event.ts
-    // module doc), read them here and merge into items with txHash +
-    // explorerUrl populated. For now, leases is loaded but unused on the
-    // mill path; reference it to keep TS happy and document the wiring.
-    void leases;
-  }
+    return out;
+  };
 
-  let dvmBucket = emptyBucket();
-  if (peerIlp.dvm) {
-    const { bucket, packets } = await fetchPacketLogForPeer(
-      input.connectorAdmin,
-      peerIlp.dvm,
-      sinceMs
+  // Per-peer earnings: type attributed via PeerTypeResolver; the resolver
+  // returns `'external'` for any peerId not in nodes.yaml, so we never
+  // drop peers here.
+  const buildPeers = async (): Promise<NodeEarnings[]> =>
+    Promise.all(
+      earnings.peers.map(async (peer) => {
+        const type = input.peerTypeResolver.resolvePeerType(peer.peerId);
+
+        // Shape conversion: connector ships `byAsset` as an array
+        // (`AssetEarnings[]`); the aggregator output is a
+        // `Record<assetCode, PerAsset>`. Delta calls fan out concurrently
+        // across this peer's assets.
+        const byAsset: Record<string, PerAsset> = {};
+        await Promise.all(
+          peer.byAsset.map(async (a) => {
+            const deltas = await maybeDeltas(
+              input.deltaComputer,
+              peer.peerId,
+              a.assetCode,
+              a.claimsReceivedTotal,
+              input.logger
+            );
+            byAsset[a.assetCode] = {
+              lifetime: a.claimsReceivedTotal,
+              ...deltas,
+            };
+          })
+        );
+
+        // lastClaimAt: temporally-latest non-null timestamp across this peer's
+        // assets. Uses `Date.parse` rather than raw string compare so the result
+        // is stable under ISO-8601 format drift (millisecond-precision variance,
+        // timezone-offset suffix). Unparseable strings are skipped — never crash
+        // the response on a connector format regression.
+        const lastClaimAt = peer.byAsset.reduce<string | null>((acc, a) => {
+          const v = a.lastClaimAt;
+          if (!v) return acc;
+          const vMs = Date.parse(v);
+          if (!Number.isFinite(vMs)) return acc;
+          if (acc === null) return v;
+          const accMs = Date.parse(acc);
+          if (!Number.isFinite(accMs)) return v;
+          return vMs > accMs ? v : acc;
+        }, null);
+
+        return { id: peer.peerId, type, byAsset, lastClaimAt };
+      })
     );
-    dvmBucket = bucket;
-    for (const p of packets) {
-      if (p.result === 'fulfill') items.push(packetToItem('dvm', p));
+
+  // Fan out: routing fees + peers + metrics concurrently.
+  // Reachable only after getEarnings() succeeded — early return above guards the failure path.
+  const metricsPromise = input.connectorAdmin.getMetrics().catch((err) => {
+    input.logger?.warn(
+      { err },
+      'aggregator: getMetrics failed — eventsRelayed/uptimeSeconds defaulting to 0'
+    );
+    return null;
+  });
+
+  const [routingFees, peers, metricsResult] = await Promise.all([
+    buildRoutingFees(),
+    buildPeers(),
+    metricsPromise,
+  ]);
+
+  // eventsRelayed:
+  //   - primary: sum of peers[].packetsForwarded (AC #2 verbatim)
+  //   - fallback: aggregate.packetsForwarded when peers[] is empty
+  //     (early-boot case per Task 1.8 — connector returns 200 with peers: []
+  //     before any peer has registered, but aggregate counts may already be > 0)
+  // Both sources are clamped to non-negative finite integers — schema declares
+  // `{ type: 'integer', minimum: 0 }` but Fastify response is a serializer,
+  // not a validator, so we clamp at the source.
+  const clampInt = (n: number): number =>
+    Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+  let eventsRelayed = 0;
+  if (metricsResult) {
+    if (metricsResult.peers.length === 0) {
+      eventsRelayed = clampInt(metricsResult.aggregate.packetsForwarded);
+    } else {
+      eventsRelayed = metricsResult.peers.reduce(
+        (sum, p) => sum + clampInt(p.packetsForwarded),
+        0
+      );
     }
   }
-
-  // TODO(D4-connector-fees): the v1 connector does not collect routing fees —
-  // it forwards between child peers all owned by the same operator. When a
-  // routing-fee feature ships (or when a /admin/settlement endpoint exposes
-  // per-peer settle deltas), populate this bucket. We surface the source
-  // for shape-completeness so the dashboard layout is stable.
-  const connectorBucket = emptyBucket();
-
-  // Sort items newest-first and cap. The connector returns packets in
-  // insertion order, which we don't fully trust to be timestamp-sorted
-  // across multiple peers, so re-sort.
-  items.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
-  if (items.length > MAX_ITEMS) items.length = MAX_ITEMS;
-
-  // Annotate items with explorer URLs only when txHash + chain present
-  // (currently never, but the loop is here for D4-mill-settlement).
-  for (const item of items) {
-    const chain = (item as { chain?: SettlementChain }).chain;
-    if (item.txHash && chain) {
-      const url = buildExplorerUrl(chain, item.txHash, leases);
-      if (url) item.explorerUrl = url;
-    }
-  }
-
-  // Totals — sum sats across all sources. BigInt sum to avoid precision loss
-  // on long-running operators.
-  const totalSats =
-    BigInt(relayBucket.sats) +
-    BigInt(millBucket.sats) +
-    BigInt(dvmBucket.sats) +
-    BigInt(connectorBucket.sats);
+  const uptimeSeconds = clampInt(metricsResult?.uptimeSeconds ?? 0);
 
   return {
-    since,
-    totals: { sats: totalSats.toString(), tokens: {} },
-    by_source: {
-      relay: relayBucket,
-      mill: millBucket,
-      dvm: dvmBucket,
-      connector: connectorBucket,
-    },
-    items,
+    status: 'ok',
+    apex: { routingFees },
+    peers,
+    recentClaims: earnings.recentClaims,
+    eventsRelayed,
+    uptimeSeconds,
   };
 }

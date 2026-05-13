@@ -149,6 +149,25 @@ export class ConnectorConfigGenerator {
       routes: [],
     };
 
+    // Epic 47 BUG-1 fix (D2): emit chainProviders when configured so the
+    // connector's settlement subsystem initializes. Without it,
+    // /admin/earnings.json returns 503 and Townhouse's earnings data plane
+    // (Epic 47.1–47.5) silently degrades. `hs-config-writer.ts` injects
+    // `DEFAULT_HS_CHAIN_PROVIDERS` when the operator hasn't configured this.
+    if (
+      this.config.chainProviders !== undefined &&
+      this.config.chainProviders.length > 0
+    ) {
+      yamlObj['chainProviders'] = this.config.chainProviders.map((p) => ({
+        chainType: p.chainType,
+        chainId: p.chainId,
+        rpcUrl: p.rpcUrl,
+        registryAddress: p.registryAddress,
+        tokenAddress: p.tokenAddress,
+        keyId: p.keyId,
+      }));
+    }
+
     return yamlStringify(yamlObj);
   }
 

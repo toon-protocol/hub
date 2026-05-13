@@ -134,4 +134,64 @@ describe('writeHsConnectorConfig', () => {
     const mode = statSync(yamlPath).mode & 0o777;
     expect(mode).toBe(0o600);
   });
+
+  // ── chainProviders injection (Epic 47 BUG-1 product fix, D2) ─────────────
+  // Without at least one chainProviders entry, the connector's settlement
+  // subsystem (AccountManager + ClaimReceiver) does not initialize and
+  // /admin/earnings.json returns 503. HS-mode injects defaults so the
+  // earnings data plane works out of the box.
+
+  it('injects DEFAULT_HS_CHAIN_PROVIDERS when config has no chainProviders', () => {
+    const config = getDefaultConfig();
+    // config has no chainProviders
+    const { yamlPath } = writeHsConnectorConfig(tmpDir, config);
+
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const chainProviders = parsed['chainProviders'] as Record<
+      string,
+      unknown
+    >[];
+    expect(Array.isArray(chainProviders)).toBe(true);
+    expect(chainProviders.length).toBeGreaterThanOrEqual(1);
+    const first = chainProviders[0] ?? {};
+    expect(first['chainType']).toBe('evm');
+    expect(typeof first['chainId']).toBe('string');
+    expect(typeof first['rpcUrl']).toBe('string');
+    expect(typeof first['registryAddress']).toBe('string');
+    expect(typeof first['tokenAddress']).toBe('string');
+    expect(typeof first['keyId']).toBe('string');
+  });
+
+  it('honors operator-provided chainProviders (no defaults override)', () => {
+    const config = getDefaultConfig();
+    config.chainProviders = [
+      {
+        chainType: 'evm',
+        chainId: 'evm:base:8453',
+        rpcUrl: 'https://mainnet.base.org',
+        registryAddress: '0xaaaa1725E7734CE288F8367e1Bb143E90bb3F0512',
+        tokenAddress: '0xbbbbb2315678afecb367f032d93F642f64180aa3',
+        keyId:
+          '0xccccc118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+      },
+    ];
+
+    const { yamlPath } = writeHsConnectorConfig(tmpDir, config, {
+      force: true,
+    });
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const chainProviders = parsed['chainProviders'] as Record<
+      string,
+      unknown
+    >[];
+    expect(chainProviders).toHaveLength(1);
+    expect(chainProviders[0]?.['chainId']).toBe('evm:base:8453');
+    expect(chainProviders[0]?.['rpcUrl']).toBe('https://mainnet.base.org');
+  });
 });

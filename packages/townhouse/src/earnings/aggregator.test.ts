@@ -1,54 +1,73 @@
 /**
- * Unit tests for the earnings aggregator (Story D4).
+ * Unit tests for the earnings aggregator (Story 47.2).
  *
- * Test gate matrix (AC requires ≥3 cases — we run more):
- *   1. Empty sources — connector reports no peers, all buckets are zero.
- *   2. Full sources — one peer per node type, packet log has fulfilled
- *      packets, totals match expected sum.
- *   3. Partial sources — only town + dvm registered, mill bucket is zero
- *      (no fake numbers per the no-mock policy).
- *
- * Plus: rejected packets are excluded from sats totals; items array is
- * capped + sorted newest-first; connector unavailable degrades gracefully.
+ * Test gate matrix (AC-47.2-6 requires ≥7 cases; expanded to 10 post-review):
+ *   1.  Empty earnings — apex/peers empty, status 'ok'.
+ *   2.  Full earnings, all known peers — also asserts `getPacketLog` was NEVER
+ *       called (AC #5 belt-and-suspenders).
+ *   3.  Unknown peer → 'external'; peer is NOT dropped.
+ *   4.  Connector throws — empty payload, status 'connector_unavailable'.
+ *   5.  503 error — empty payload, status 'connector_unavailable'.
+ *   6.  deltaComputer threads today/month/year through apex + peer.
+ *   7.  deltaComputer concurrency — proves `Promise.all` fan-out covers
+ *       apex AND peer assets in the same wave (4 concurrent calls).
+ *   8.  Peer with empty `byAsset: []` — emits `byAsset: {}`, type resolved.
+ *   9.  Mixed known + unknown peers — known resolves to its NodeType, unknown
+ *       buckets 'external'; both appear in the result.
+ *   10. deltaComputer rejects on one asset — that asset's deltas stub to '0',
+ *       other assets proceed normally, status stays 'ok'.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import type { ConnectorAdminClient } from '../connector/index.js';
-import type { DockerOrchestrator } from '../docker/orchestrator.js';
-import type { PacketLogEntry } from '../connector/types.js';
+import type {
+  EarningsResponse,
+  AssetEarnings,
+  MetricsResponse,
+} from '../connector/types.js';
+import type { NodeType } from '../docker/types.js';
 
-import { aggregateEarnings, MAX_ITEMS } from './aggregator.js';
+import { PeerTypeResolver } from '../registry/peer-type-resolver.js';
+import {
+  aggregateEarnings,
+  type AggregatorLogger,
+  type DeltaComputer,
+} from './aggregator.js';
 
 // ── Test doubles ───────────────────────────────────────────────────────────
 
-interface MockConfig {
-  peers?: { id: string; ilpAddresses: string[] }[];
-  packetsByIlp?: Record<string, PacketLogEntry[]>;
-  /** When true, getPeers throws. */
-  peersThrow?: boolean;
-  /** When true, getPacketLog throws. */
-  packetsThrow?: boolean;
-  /** Statuses returned by orchestrator.status(). */
-  statuses?: { name: string; type: string }[];
-}
+const ENABLED_AT = '2026-01-01T00:00:00Z';
 
-function makeConnector(cfg: MockConfig): ConnectorAdminClient {
+function makeConnector(
+  earningsResponse?: EarningsResponse | 'throw' | '503',
+  metricsOverride?: MetricsResponse | 'throw'
+): ConnectorAdminClient {
+  const defaultMetrics: MetricsResponse = {
+    uptimeSeconds: 0,
+    aggregate: { packetsForwarded: 0, packetsRejected: 0, bytesSent: 0 },
+    peers: [],
+    timestamp: '',
+  };
+
   return {
-    getPeers: vi.fn(async () => {
-      if (cfg.peersThrow) throw new Error('connector down');
-      return cfg.peers ?? [];
+    getEarnings: vi.fn(async () => {
+      if (earningsResponse === 'throw') throw new Error('connector down');
+      if (earningsResponse === '503')
+        throw new Error('Connector admin API error: 503 Service Unavailable');
+      return (
+        earningsResponse ?? {
+          uptimeSeconds: 0,
+          peers: [],
+          connectorFees: [],
+          recentClaims: [],
+          timestamp: { iso: '' },
+        }
+      );
     }),
-    getPacketLog: vi.fn(async (filter: { ilpAddress?: string }) => {
-      if (cfg.packetsThrow) throw new Error('packets endpoint down');
-      const ilp = filter.ilpAddress ?? '';
-      return cfg.packetsByIlp?.[ilp] ?? [];
+    getMetrics: vi.fn(async () => {
+      if (metricsOverride === 'throw') throw new Error('metrics down');
+      return metricsOverride ?? defaultMetrics;
     }),
-    getMetrics: vi.fn(async () => ({
-      uptimeSeconds: 0,
-      aggregate: { packetsForwarded: 0, packetsRejected: 0, bytesSent: 0 },
-      peers: [],
-      timestamp: '',
-    })),
     getHealth: vi.fn(async () => ({
       status: 'healthy' as const,
       uptime: 0,
@@ -56,238 +75,615 @@ function makeConnector(cfg: MockConfig): ConnectorAdminClient {
       totalPeers: 0,
       timestamp: '',
     })),
+    getPeers: vi.fn(async () => []),
+    getPacketLog: vi.fn(async () => []),
   } as unknown as ConnectorAdminClient;
 }
 
-function makeOrchestrator(cfg: MockConfig): DockerOrchestrator {
-  return {
-    status: vi.fn(async () => cfg.statuses ?? []),
-  } as unknown as DockerOrchestrator;
+function makeResolver(
+  entries: { peerId: string; type: NodeType }[]
+): PeerTypeResolver {
+  return new PeerTypeResolver({
+    entries: entries.map((e, i) => ({
+      id: `node-${i}`,
+      type: e.type,
+      peerId: e.peerId,
+      ilpAddress: `g.toon.test.${i}`,
+      derivationIndex: i,
+      enabledAt: ENABLED_AT,
+      lastSeenAt: null,
+    })),
+  });
 }
 
-function pkt(
-  ts: number,
-  ilpTo: string,
-  amount: string | number,
-  result: 'fulfill' | 'reject' | 'timeout' = 'fulfill'
-): PacketLogEntry {
+function makeLogger(): AggregatorLogger & { warn: ReturnType<typeof vi.fn> } {
+  return { warn: vi.fn() };
+}
+
+function assetEntry(
+  assetCode: string,
+  claimsReceivedTotal: string
+): AssetEarnings {
   return {
-    ts,
-    ilpAddressFrom: 'g.test.client',
-    ilpAddressTo: ilpTo,
-    amount: String(amount),
-    result,
+    assetCode,
+    assetScale: 6,
+    claimsReceivedTotal,
+    claimsSentTotal: '0',
+    netBalance: claimsReceivedTotal,
+    lastClaimAt: null,
   };
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('aggregateEarnings', () => {
-  it('[case 1] empty sources — all buckets zero, items empty', async () => {
-    const cfg: MockConfig = { peers: [], statuses: [] };
+  it('[case 1] empty earnings — apex and peers both empty, status ok', async () => {
     const result = await aggregateEarnings({
-      connectorAdmin: makeConnector(cfg),
-      orchestrator: makeOrchestrator(cfg),
-      leasesPath: null,
+      connectorAdmin: makeConnector(),
+      peerTypeResolver: makeResolver([]),
     });
 
-    expect(result.totals.sats).toBe('0');
-    expect(result.by_source.relay.sats).toBe('0');
-    expect(result.by_source.mill.sats).toBe('0');
-    expect(result.by_source.dvm.sats).toBe('0');
-    expect(result.by_source.connector.sats).toBe('0');
-    expect(result.items).toEqual([]);
-    expect(typeof result.since).toBe('string');
+    expect(result.status).toBe('ok');
+    expect(result.apex.routingFees).toEqual({});
+    expect(result.peers).toEqual([]);
+    expect(result.recentClaims).toEqual([]);
+    expect(result.eventsRelayed).toBe(0);
+    expect(result.uptimeSeconds).toBe(0);
   });
 
-  it('[case 2] full sources — totals match per-source sum', async () => {
-    const cfg: MockConfig = {
+  it('[case 2] full earnings, all known peers — never touches getPacketLog (AC #5)', async () => {
+    const earnings: EarningsResponse = {
+      uptimeSeconds: 10,
+      connectorFees: [{ assetCode: 'USD', assetScale: 6, total: '1000' }],
+      recentClaims: [],
+      timestamp: { iso: '2026-05-12T00:00:00Z' },
       peers: [
-        { id: 'townhouse-dev-town-01', ilpAddresses: ['g.test.town-01'] },
-        { id: 'townhouse-dev-mill-01', ilpAddresses: ['g.test.mill-01'] },
-        { id: 'townhouse-dev-dvm-01', ilpAddresses: ['g.test.dvm-01'] },
+        {
+          peerId: 'peer-town',
+          byAsset: [assetEntry('USD', '500'), assetEntry('ETH', '200')],
+        },
+        {
+          peerId: 'peer-mill',
+          byAsset: [assetEntry('USD', '300'), assetEntry('ETH', '100')],
+        },
+        {
+          peerId: 'peer-dvm',
+          byAsset: [assetEntry('USD', '800'), assetEntry('ETH', '50')],
+        },
       ],
-      statuses: [
-        { name: 'townhouse-dev-town-01', type: 'town' },
-        { name: 'townhouse-dev-mill-01', type: 'mill' },
-        { name: 'townhouse-dev-dvm-01', type: 'dvm' },
-      ],
-      packetsByIlp: {
-        'g.test.town-01': [
-          pkt(Date.now() - 5_000, 'g.test.town-01', 100),
-          pkt(Date.now() - 4_000, 'g.test.town-01', 50),
-        ],
-        'g.test.mill-01': [pkt(Date.now() - 3_000, 'g.test.mill-01', 1000)],
-        'g.test.dvm-01': [
-          pkt(Date.now() - 2_000, 'g.test.dvm-01', 200),
-          pkt(Date.now() - 1_000, 'g.test.dvm-01', 300),
-        ],
-      },
     };
+    const resolver = makeResolver([
+      { peerId: 'peer-town', type: 'town' },
+      { peerId: 'peer-mill', type: 'mill' },
+      { peerId: 'peer-dvm', type: 'dvm' },
+    ]);
+    const connector = makeConnector(earnings);
+
     const result = await aggregateEarnings({
-      connectorAdmin: makeConnector(cfg),
-      orchestrator: makeOrchestrator(cfg),
-      leasesPath: null,
+      connectorAdmin: connector,
+      peerTypeResolver: resolver,
     });
 
-    expect(result.by_source.relay.sats).toBe('150'); // 100 + 50
-    expect(result.by_source.mill.sats).toBe('1000');
-    expect(result.by_source.dvm.sats).toBe('500'); // 200 + 300
-    expect(result.by_source.connector.sats).toBe('0'); // not yet wired
-    expect(result.totals.sats).toBe('1650');
-    expect(result.items).toHaveLength(5);
+    expect(result.status).toBe('ok');
 
-    // Items must be sorted newest-first.
-    for (let i = 1; i < result.items.length; i++) {
-      expect(result.items[i - 1].ts >= result.items[i].ts).toBe(true);
+    // Apex routing fees
+    expect(result.apex.routingFees['USD'].lifetime).toBe('1000');
+    expect(result.apex.routingFees['USD'].today).toBe('0');
+
+    // Peers
+    expect(result.peers).toHaveLength(3);
+    const byId = Object.fromEntries(result.peers.map((p) => [p.id, p]));
+    expect(byId['peer-town'].type).toBe('town');
+    expect(byId['peer-mill'].type).toBe('mill');
+    expect(byId['peer-dvm'].type).toBe('dvm');
+    expect(byId['peer-town'].byAsset['USD'].lifetime).toBe('500');
+    expect(byId['peer-town'].byAsset['ETH'].lifetime).toBe('200');
+    expect(byId['peer-mill'].byAsset['USD'].lifetime).toBe('300');
+
+    // All delta fields default to '0' when no deltaComputer.
+    for (const peer of result.peers) {
+      expect(peer.lastClaimAt).toBeNull();
+      for (const asset of Object.values(peer.byAsset)) {
+        expect(asset.today).toBe('0');
+        expect(asset.month).toBe('0');
+        expect(asset.year).toBe('0');
+      }
     }
 
-    // No txHash / explorerUrl on ILP-layer rows (D3 wiring downstream).
-    for (const item of result.items) {
-      expect(item.txHash).toBeUndefined();
-      expect(item.explorerUrl).toBeUndefined();
-    }
+    expect(result.recentClaims).toEqual([]);
+    expect(result.eventsRelayed).toBe(0);
+    expect(result.uptimeSeconds).toBe(0);
+
+    // AC #5 belt-and-suspenders: aggregator must not pull packet log.
+    expect(connector.getPacketLog).not.toHaveBeenCalled();
   });
 
-  it('[case 3] partial sources — only town + dvm registered', async () => {
-    const cfg: MockConfig = {
+  it('[case 3] unknown peer → type "external", peer NOT dropped, status ok', async () => {
+    const earnings: EarningsResponse = {
+      uptimeSeconds: 0,
+      connectorFees: [],
+      recentClaims: [],
+      timestamp: { iso: '' },
       peers: [
-        { id: 'townhouse-dev-town-01', ilpAddresses: ['g.test.town-01'] },
-        { id: 'townhouse-dev-dvm-01', ilpAddresses: ['g.test.dvm-01'] },
+        { peerId: 'peer-external-x', byAsset: [assetEntry('USD', '99')] },
       ],
-      statuses: [
-        { name: 'townhouse-dev-town-01', type: 'town' },
-        { name: 'townhouse-dev-dvm-01', type: 'dvm' },
-      ],
-      packetsByIlp: {
-        'g.test.town-01': [pkt(Date.now() - 1_000, 'g.test.town-01', 42)],
-        'g.test.dvm-01': [pkt(Date.now() - 500, 'g.test.dvm-01', 99)],
-      },
     };
+
     const result = await aggregateEarnings({
-      connectorAdmin: makeConnector(cfg),
-      orchestrator: makeOrchestrator(cfg),
-      leasesPath: null,
+      connectorAdmin: makeConnector(earnings),
+      peerTypeResolver: makeResolver([]), // no entries — all external
     });
 
-    expect(result.by_source.relay.sats).toBe('42');
-    expect(result.by_source.mill.sats).toBe('0'); // no mill peer
-    expect(result.by_source.dvm.sats).toBe('99');
-    expect(result.totals.sats).toBe('141');
-    expect(result.items).toHaveLength(2);
+    expect(result.status).toBe('ok');
+    expect(result.peers).toHaveLength(1);
+    expect(result.peers[0].type).toBe('external');
+    expect(result.peers[0].id).toBe('peer-external-x');
+    expect(result.peers[0].byAsset['USD'].lifetime).toBe('99');
+    expect(result.peers[0].lastClaimAt).toBeNull();
+    expect(result.recentClaims).toEqual([]);
+    expect(result.eventsRelayed).toBe(0);
+    expect(result.uptimeSeconds).toBe(0);
   });
 
-  it('rejected and timed-out packets are excluded from sats totals', async () => {
-    const cfg: MockConfig = {
+  it('[case 4] connector throws — status connector_unavailable, logger warned', async () => {
+    const logger = makeLogger();
+    const result = await aggregateEarnings({
+      connectorAdmin: makeConnector('throw'),
+      peerTypeResolver: makeResolver([]),
+      logger,
+    });
+
+    expect(result).toEqual({
+      status: 'connector_unavailable',
+      apex: { routingFees: {} },
+      peers: [],
+      recentClaims: [],
+      eventsRelayed: 0,
+      uptimeSeconds: 0,
+    });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const [obj] = logger.warn.mock.calls[0];
+    expect((obj as { err: unknown }).err).toBeInstanceOf(Error);
+  });
+
+  it('[case 5] 503 connector error — status connector_unavailable', async () => {
+    const result = await aggregateEarnings({
+      connectorAdmin: makeConnector('503'),
+      peerTypeResolver: makeResolver([]),
+    });
+
+    expect(result).toEqual({
+      status: 'connector_unavailable',
+      apex: { routingFees: {} },
+      peers: [],
+      recentClaims: [],
+      eventsRelayed: 0,
+      uptimeSeconds: 0,
+    });
+  });
+
+  it('[case 6] deltaComputer is invoked and threads through apex + peer', async () => {
+    const deltaComputer: DeltaComputer = vi.fn(async () => ({
+      today: '1',
+      month: '2',
+      year: '3',
+    }));
+
+    const earnings: EarningsResponse = {
+      uptimeSeconds: 0,
+      connectorFees: [{ assetCode: 'USD', assetScale: 6, total: '500' }],
+      recentClaims: [],
+      timestamp: { iso: '' },
+      peers: [{ peerId: 'peer-a', byAsset: [assetEntry('USD', '200')] }],
+    };
+    const resolver = makeResolver([{ peerId: 'peer-a', type: 'town' }]);
+
+    const result = await aggregateEarnings({
+      connectorAdmin: makeConnector(earnings),
+      peerTypeResolver: resolver,
+      deltaComputer,
+    });
+
+    expect(result.status).toBe('ok');
+    expect(result.apex.routingFees['USD'].today).toBe('1');
+    expect(result.peers[0].byAsset['USD'].today).toBe('1');
+    expect(result.peers[0].byAsset['USD'].year).toBe('3');
+    expect(result.recentClaims).toEqual([]);
+    expect(result.eventsRelayed).toBe(0);
+    expect(result.uptimeSeconds).toBe(0);
+
+    expect(deltaComputer).toHaveBeenCalledTimes(2);
+    const calls = (deltaComputer as ReturnType<typeof vi.fn>).mock.calls as [
+      Parameters<DeltaComputer>[0],
+    ][];
+    const scopes = calls.map(([p]) => p.scope);
+    expect(scopes).toContain('__apex__');
+    expect(scopes).toContain('peer-a');
+  });
+
+  it('[case 7] deltaComputer fans out concurrently across apex + peer assets', async () => {
+    // 1 apex fee + 1 peer with 3 assets = 4 concurrent delta calls. If any
+    // step were serial, `await allStarted` would block before all 4 calls
+    // entered the function — reaching the assertion proves concurrency.
+    // Concurrency also lifts across the apex/peer boundary because the
+    // aggregator launches both `Promise.all` blocks via the same outer
+    // microtask (we await them in parallel below).
+    let pendingCount = 0;
+    let resolveAll!: () => void;
+    const allStarted = new Promise<void>((resolve) => {
+      resolveAll = resolve;
+    });
+    const observedAssets = new Set<string>();
+
+    const deltaComputer: DeltaComputer = async ({ scope, assetCode }) => {
+      pendingCount++;
+      observedAssets.add(`${scope}:${assetCode}`);
+      if (pendingCount === 4) resolveAll();
+      await allStarted;
+      return { today: assetCode, month: '0', year: '0' };
+    };
+
+    const earnings: EarningsResponse = {
+      uptimeSeconds: 0,
+      connectorFees: [{ assetCode: 'APEX', assetScale: 6, total: '10' }],
+      recentClaims: [],
+      timestamp: { iso: '' },
       peers: [
-        { id: 'townhouse-dev-town-01', ilpAddresses: ['g.test.town-01'] },
+        {
+          peerId: 'peer-multi',
+          byAsset: [
+            assetEntry('A', '1'),
+            assetEntry('B', '2'),
+            assetEntry('C', '3'),
+          ],
+        },
       ],
-      statuses: [{ name: 'townhouse-dev-town-01', type: 'town' }],
-      packetsByIlp: {
-        'g.test.town-01': [
-          pkt(Date.now() - 1000, 'g.test.town-01', 100, 'fulfill'),
-          pkt(Date.now() - 900, 'g.test.town-01', 999, 'reject'),
-          pkt(Date.now() - 800, 'g.test.town-01', 9999, 'timeout'),
-          pkt(Date.now() - 700, 'g.test.town-01', 50, 'fulfill'),
-        ],
-      },
     };
+    const resolver = makeResolver([{ peerId: 'peer-multi', type: 'town' }]);
+
     const result = await aggregateEarnings({
-      connectorAdmin: makeConnector(cfg),
-      orchestrator: makeOrchestrator(cfg),
-      leasesPath: null,
+      connectorAdmin: makeConnector(earnings),
+      peerTypeResolver: resolver,
+      deltaComputer,
     });
 
-    expect(result.by_source.relay.sats).toBe('150'); // 100 + 50
-    expect(result.items).toHaveLength(2);
-  });
-
-  it('connector unavailable degrades to all-zero, no throw', async () => {
-    const cfg: MockConfig = { peersThrow: true };
-    const result = await aggregateEarnings({
-      connectorAdmin: makeConnector(cfg),
-      orchestrator: makeOrchestrator(cfg),
-      leasesPath: null,
-    });
-
-    expect(result.totals.sats).toBe('0');
-    expect(result.items).toEqual([]);
-  });
-
-  it('items array is capped at MAX_ITEMS', async () => {
-    const many: PacketLogEntry[] = Array.from(
-      { length: MAX_ITEMS + 50 },
-      (_, i) => pkt(Date.now() - i * 1_000, 'g.test.town-01', 1)
+    // Concurrency: all 4 calls (1 apex + 3 peer) entered before any resolved.
+    expect(pendingCount).toBe(4);
+    expect(observedAssets).toEqual(
+      new Set(['__apex__:APEX', 'peer-multi:A', 'peer-multi:B', 'peer-multi:C'])
     );
-    const cfg: MockConfig = {
+
+    // Resolved values reach the output (not just "calls were started").
+    expect(result.apex.routingFees['APEX'].today).toBe('APEX');
+    expect(result.peers[0].byAsset['A'].today).toBe('A');
+    expect(result.peers[0].byAsset['B'].today).toBe('B');
+    expect(result.peers[0].byAsset['C'].today).toBe('C');
+    expect(result.recentClaims).toEqual([]);
+    expect(result.eventsRelayed).toBe(0);
+    expect(result.uptimeSeconds).toBe(0);
+  });
+
+  it('[case 8] peer with empty byAsset — emits byAsset: {}, type resolved', async () => {
+    const earnings: EarningsResponse = {
+      uptimeSeconds: 0,
+      connectorFees: [],
+      recentClaims: [],
+      timestamp: { iso: '' },
+      peers: [{ peerId: 'peer-quiet', byAsset: [] }],
+    };
+    const resolver = makeResolver([{ peerId: 'peer-quiet', type: 'town' }]);
+
+    const result = await aggregateEarnings({
+      connectorAdmin: makeConnector(earnings),
+      peerTypeResolver: resolver,
+    });
+
+    expect(result.status).toBe('ok');
+    expect(result.peers).toHaveLength(1);
+    expect(result.peers[0]).toEqual({
+      id: 'peer-quiet',
+      type: 'town',
+      byAsset: {},
+      lastClaimAt: null,
+    });
+  });
+
+  it('[case 9] mixed known + unknown peers — both appear in the result', async () => {
+    const earnings: EarningsResponse = {
+      uptimeSeconds: 0,
+      connectorFees: [],
+      recentClaims: [],
+      timestamp: { iso: '' },
       peers: [
-        { id: 'townhouse-dev-town-01', ilpAddresses: ['g.test.town-01'] },
+        { peerId: 'peer-known', byAsset: [assetEntry('USD', '111')] },
+        { peerId: 'peer-stranger', byAsset: [assetEntry('USD', '222')] },
       ],
-      statuses: [{ name: 'townhouse-dev-town-01', type: 'town' }],
-      packetsByIlp: { 'g.test.town-01': many },
     };
+    const resolver = makeResolver([{ peerId: 'peer-known', type: 'mill' }]);
+
     const result = await aggregateEarnings({
-      connectorAdmin: makeConnector(cfg),
-      orchestrator: makeOrchestrator(cfg),
-      leasesPath: null,
+      connectorAdmin: makeConnector(earnings),
+      peerTypeResolver: resolver,
     });
 
-    expect(result.items.length).toBe(MAX_ITEMS);
-    // Total sats reflects ALL packets, not just the visible items.
-    expect(result.by_source.relay.sats).toBe(String(MAX_ITEMS + 50));
+    expect(result.status).toBe('ok');
+    expect(result.peers).toHaveLength(2);
+    const byId = Object.fromEntries(result.peers.map((p) => [p.id, p]));
+    expect(byId['peer-known'].type).toBe('mill');
+    expect(byId['peer-stranger'].type).toBe('external');
   });
 
-  it('falls back to peer-id heuristic when orchestrator status is empty', async () => {
-    // Some peers exist on the connector but the orchestrator doesn't list
-    // them (e.g. the demo image was started outside Townhouse). The peer-id
-    // string contains 'mill' — heuristic attribution should kick in.
-    const cfg: MockConfig = {
-      peers: [{ id: 'standalone-mill', ilpAddresses: ['g.test.mill-x'] }],
-      statuses: [], // orchestrator says nothing
-      packetsByIlp: {
-        'g.test.mill-x': [pkt(Date.now() - 100, 'g.test.mill-x', 7)],
-      },
-    };
-    const result = await aggregateEarnings({
-      connectorAdmin: makeConnector(cfg),
-      orchestrator: makeOrchestrator(cfg),
-      leasesPath: null,
+  it('[case 10] deltaComputer rejects on one asset — that asset stubs, others proceed, status ok', async () => {
+    const logger = makeLogger();
+    const deltaComputer: DeltaComputer = vi.fn(async ({ assetCode }) => {
+      if (assetCode === 'BAD') throw new Error('snapshot read failed');
+      return { today: '7', month: '7', year: '7' };
     });
 
-    expect(result.by_source.mill.sats).toBe('7');
+    const earnings: EarningsResponse = {
+      uptimeSeconds: 0,
+      connectorFees: [],
+      recentClaims: [],
+      timestamp: { iso: '' },
+      peers: [
+        {
+          peerId: 'peer-mixed',
+          byAsset: [assetEntry('USD', '100'), assetEntry('BAD', '999')],
+        },
+      ],
+    };
+    const resolver = makeResolver([{ peerId: 'peer-mixed', type: 'town' }]);
+
+    const result = await aggregateEarnings({
+      connectorAdmin: makeConnector(earnings),
+      peerTypeResolver: resolver,
+      deltaComputer,
+      logger,
+    });
+
+    // Status still 'ok' — connector itself succeeded; only a single delta failed.
+    expect(result.status).toBe('ok');
+
+    // BAD asset stubs to '0'; USD asset gets the deltas.
+    expect(result.peers[0].byAsset['BAD']).toEqual({
+      lifetime: '999',
+      today: '0',
+      month: '0',
+      year: '0',
+    });
+    expect(result.peers[0].byAsset['USD']).toEqual({
+      lifetime: '100',
+      today: '7',
+      month: '7',
+      year: '7',
+    });
+
+    // Logger was called for the BAD asset rejection.
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const [obj] = logger.warn.mock.calls[0];
+    expect((obj as { assetCode: string }).assetCode).toBe('BAD');
   });
 
-  it('respects sinceMs for the lower-bound timestamp', async () => {
-    const fixedSince = 1700000000000;
-    const cfg: MockConfig = { peers: [], statuses: [] };
+  it('[case 11] eventsRelayed sums getMetrics().peers[].packetsForwarded', async () => {
+    const metrics: MetricsResponse = {
+      uptimeSeconds: 3600,
+      aggregate: { packetsForwarded: 350, packetsRejected: 0, bytesSent: 0 },
+      peers: [
+        {
+          peerId: 'p1',
+          connected: true,
+          packetsForwarded: 100,
+          packetsRejected: 0,
+          bytesSent: 0,
+          lastPacketAt: null,
+        },
+        {
+          peerId: 'p2',
+          connected: true,
+          packetsForwarded: 200,
+          packetsRejected: 0,
+          bytesSent: 0,
+          lastPacketAt: null,
+        },
+        {
+          peerId: 'p3',
+          connected: false,
+          packetsForwarded: 50,
+          packetsRejected: 0,
+          bytesSent: 0,
+          lastPacketAt: null,
+        },
+      ],
+      timestamp: '',
+    };
+
     const result = await aggregateEarnings({
-      connectorAdmin: makeConnector(cfg),
-      orchestrator: makeOrchestrator(cfg),
-      leasesPath: null,
-      sinceMs: fixedSince,
+      connectorAdmin: makeConnector(undefined, metrics),
+      peerTypeResolver: makeResolver([]),
     });
 
-    expect(result.since).toBe(new Date(fixedSince).toISOString());
+    expect(result.status).toBe('ok');
+    // Sum of peers[].packetsForwarded (100+200+50=350), NOT aggregate.packetsForwarded.
+    expect(result.eventsRelayed).toBe(350);
+    expect(result.uptimeSeconds).toBe(3600);
   });
 
-  it('orchestrator unavailable degrades to peer-name heuristics', async () => {
-    const cfg: MockConfig = {
-      peers: [{ id: 'town-prod', ilpAddresses: ['g.test.town-prod'] }],
-      packetsByIlp: {
-        'g.test.town-prod': [pkt(Date.now() - 100, 'g.test.town-prod', 5)],
-      },
+  it('[case 12] getMetrics throws → graceful zero, getEarnings happy path proceeds', async () => {
+    const logger = makeLogger();
+    const earnings: EarningsResponse = {
+      uptimeSeconds: 0,
+      connectorFees: [],
+      recentClaims: [],
+      timestamp: { iso: '' },
+      peers: [{ peerId: 'peer-x', byAsset: [assetEntry('USD', '100')] }],
     };
-    const orchestrator = {
-      status: vi.fn(async () => {
-        throw new Error('docker down');
-      }),
-    } as unknown as DockerOrchestrator;
+
     const result = await aggregateEarnings({
-      connectorAdmin: makeConnector(cfg),
-      orchestrator,
-      leasesPath: null,
+      connectorAdmin: makeConnector(earnings, 'throw'),
+      peerTypeResolver: makeResolver([{ peerId: 'peer-x', type: 'town' }]),
+      logger,
     });
 
-    expect(result.by_source.relay.sats).toBe('5');
+    expect(result.status).toBe('ok');
+    expect(result.eventsRelayed).toBe(0);
+    expect(result.uptimeSeconds).toBe(0);
+    expect(result.peers).toHaveLength(1);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const [logObj, logMsg] = logger.warn.mock.calls[0];
+    expect(logMsg).toContain('getMetrics failed');
+    expect((logObj as { err: unknown }).err).toBeInstanceOf(Error);
+  });
+
+  it('[case 13] lastClaimAt is temporal max across peer assets (Date.parse comparator)', async () => {
+    const earnings: EarningsResponse = {
+      uptimeSeconds: 0,
+      connectorFees: [],
+      recentClaims: [],
+      timestamp: { iso: '' },
+      peers: [
+        {
+          peerId: 'peer-multi-asset',
+          byAsset: [
+            { ...assetEntry('USD', '100'), lastClaimAt: null },
+            {
+              ...assetEntry('ETH', '200'),
+              lastClaimAt: '2026-05-12T10:00:00.000Z',
+            },
+            {
+              ...assetEntry('SOL', '300'),
+              lastClaimAt: '2026-05-13T05:00:00.000Z',
+            },
+          ],
+        },
+        {
+          peerId: 'peer-all-null',
+          byAsset: [
+            { ...assetEntry('USD', '50'), lastClaimAt: null },
+            { ...assetEntry('ETH', '50'), lastClaimAt: null },
+          ],
+        },
+      ],
+    };
+
+    const result = await aggregateEarnings({
+      connectorAdmin: makeConnector(earnings),
+      peerTypeResolver: makeResolver([
+        { peerId: 'peer-multi-asset', type: 'town' },
+        { peerId: 'peer-all-null', type: 'mill' },
+      ]),
+    });
+
+    expect(result.status).toBe('ok');
+    const byId = Object.fromEntries(result.peers.map((p) => [p.id, p]));
+    expect(byId['peer-multi-asset'].lastClaimAt).toBe(
+      '2026-05-13T05:00:00.000Z'
+    );
+    expect(byId['peer-all-null'].lastClaimAt).toBeNull();
+  });
+
+  it('[case 14] lastClaimAt picks temporal max across heterogeneous ISO formats', async () => {
+    // Drift-resilience: same instant across millisecond-precision and offset-suffix variants.
+    // Raw string compare would pick '2026-05-13T05:00:00.000Z' over '2026-05-13T05:00:00Z'
+    // (`.` < `Z`); Date.parse normalizes the comparison.
+    const earnings: EarningsResponse = {
+      uptimeSeconds: 0,
+      connectorFees: [],
+      recentClaims: [],
+      timestamp: { iso: '' },
+      peers: [
+        {
+          peerId: 'peer-iso-mix',
+          byAsset: [
+            // No millis, Z suffix — earlier in real time
+            { ...assetEntry('USD', '1'), lastClaimAt: '2026-05-13T05:00:00Z' },
+            // Same instant + 1ms — should win
+            {
+              ...assetEntry('ETH', '2'),
+              lastClaimAt: '2026-05-13T05:00:00.001Z',
+            },
+            // Offset suffix, earlier instant — must NOT lexicographically beat .001Z
+            {
+              ...assetEntry('SOL', '3'),
+              lastClaimAt: '2026-05-13T04:00:00+00:00',
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = await aggregateEarnings({
+      connectorAdmin: makeConnector(earnings),
+      peerTypeResolver: makeResolver([
+        { peerId: 'peer-iso-mix', type: 'town' },
+      ]),
+    });
+
+    expect(result.peers[0].lastClaimAt).toBe('2026-05-13T05:00:00.001Z');
+  });
+
+  it('[case 15] eventsRelayed falls back to aggregate.packetsForwarded when peers[] empty', async () => {
+    // Early-boot scenario per Task 1.8: connector returns 200 with peers: [] but
+    // aggregate.packetsForwarded > 0 because counters tick before peer registration.
+    const metrics: MetricsResponse = {
+      uptimeSeconds: 600,
+      aggregate: { packetsForwarded: 4096, packetsRejected: 0, bytesSent: 0 },
+      peers: [],
+      timestamp: '',
+    };
+
+    const result = await aggregateEarnings({
+      connectorAdmin: makeConnector(undefined, metrics),
+      peerTypeResolver: makeResolver([]),
+    });
+
+    expect(result.status).toBe('ok');
+    expect(result.eventsRelayed).toBe(4096);
+    expect(result.uptimeSeconds).toBe(600);
+  });
+
+  it('[case 16] eventsRelayed clamps negative / non-finite metric values to 0', async () => {
+    // Defense-in-depth: connector contract says nonneg int; if a regression ships
+    // a negative or NaN value, schema rejects it but Fastify response = serializer
+    // (would ship garbage). Clamp at the source.
+    const metrics: MetricsResponse = {
+      uptimeSeconds: -1,
+      aggregate: { packetsForwarded: 0, packetsRejected: 0, bytesSent: 0 },
+      peers: [
+        {
+          peerId: 'p1',
+          connected: true,
+          packetsForwarded: 100,
+          packetsRejected: 0,
+          bytesSent: 0,
+          lastPacketAt: null,
+        },
+        {
+          peerId: 'p2',
+          connected: true,
+          packetsForwarded: Number.NaN,
+          packetsRejected: 0,
+          bytesSent: 0,
+          lastPacketAt: null,
+        },
+        {
+          peerId: 'p3',
+          connected: true,
+          packetsForwarded: -50,
+          packetsRejected: 0,
+          bytesSent: 0,
+          lastPacketAt: null,
+        },
+      ],
+      timestamp: '',
+    };
+
+    const result = await aggregateEarnings({
+      connectorAdmin: makeConnector(undefined, metrics),
+      peerTypeResolver: makeResolver([]),
+    });
+
+    // Only the valid 100 counts; NaN + -50 clamp to 0.
+    expect(result.eventsRelayed).toBe(100);
+    expect(result.uptimeSeconds).toBe(0);
   });
 });

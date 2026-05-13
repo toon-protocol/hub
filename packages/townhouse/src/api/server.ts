@@ -5,9 +5,11 @@
  * Set TOWNHOUSE_API_ALLOW_REMOTE=1 to override this security boundary.
  */
 
+import { join, dirname } from 'node:path';
 import { WebSocket } from 'ws';
 import { buildFastifyApp } from './build-app.js';
 import type { ApiServer, ApiDeps } from './types.js';
+import { SnapshotWriter } from '../earnings/snapshot-writer.js';
 import { registerNodeRoutes } from './routes/nodes.js';
 import { registerWalletRoutes } from './routes/wallet.js';
 import { registerWalletBalancesRoutes } from './routes/wallet-balances.js';
@@ -30,6 +32,16 @@ import { registerLogsRoutes } from './routes/logs.js';
  */
 export async function createApiServer(deps: ApiDeps): Promise<ApiServer> {
   const { config, logger } = deps;
+
+  const snapshotPath = join(
+    dirname(deps.configPath),
+    'earnings-snapshots.jsonl'
+  );
+  const snapshotWriter = new SnapshotWriter({
+    connectorAdmin: deps.connectorAdmin,
+    snapshotPath,
+    logger: logger as { warn(obj: object, msg?: string): void } | undefined,
+  });
 
   const app = await buildFastifyApp({
     logger: logger ?? true,
@@ -61,8 +73,15 @@ export async function createApiServer(deps: ApiDeps): Promise<ApiServer> {
   registerLogsRoutes(app, deps);
   registerMetricsWsRoutes(app, deps);
 
+  snapshotWriter.start();
+
   const CLOSE_TIMEOUT_MS = 5000;
   async function close(): Promise<void> {
+    try {
+      snapshotWriter.stop();
+    } catch {
+      /* best-effort */
+    }
     try {
       deps.transportProbe.stop();
     } catch {

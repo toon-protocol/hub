@@ -314,4 +314,90 @@ describe('validateConfig', () => {
     expect(config.transport.externalUrl).toBeUndefined();
     expect(config.transport.hiddenService).toBeDefined();
   });
+
+  // ── chainProviders validation (Epic 47 BUG-1 product fix, D2) ────────────
+
+  it('accepts config without chainProviders (optional field)', () => {
+    const raw = validRaw();
+    const config = validateConfig(raw);
+    expect(config.chainProviders).toBeUndefined();
+  });
+
+  it('accepts config with a valid evm chainProvider entry', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = [
+      {
+        chainType: 'evm',
+        chainId: 'evm:base:31337',
+        rpcUrl: 'http://127.0.0.1:8545',
+        registryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+        tokenAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+        keyId:
+          '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+      },
+    ];
+    const config = validateConfig(raw);
+    expect(config.chainProviders).toHaveLength(1);
+    expect(config.chainProviders?.[0]?.chainId).toBe('evm:base:31337');
+  });
+
+  it('rejects chainProviders when not an array', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = { chainType: 'evm' };
+    expect(() => validateConfig(raw)).toThrow(
+      'config.chainProviders must be an array'
+    );
+  });
+
+  it('rejects chainProvider with unsupported chainType', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = [
+      {
+        chainType: 'solana',
+        chainId: 'solana:mainnet:1',
+        rpcUrl: 'https://api.mainnet-beta.solana.com',
+        registryAddress: '0x0000000000000000000000000000000000000000',
+        tokenAddress: '0x0000000000000000000000000000000000000000',
+        keyId: '0x0000000000000000000000000000000000000000',
+      },
+    ];
+    expect(() => validateConfig(raw)).toThrow(
+      'config.chainProviders[0].chainType must be one of: evm'
+    );
+  });
+
+  it('rejects chainProvider with non-hex registryAddress', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = [
+      {
+        chainType: 'evm',
+        chainId: 'evm:base:31337',
+        rpcUrl: 'http://127.0.0.1:8545',
+        registryAddress: 'not-a-hex-address',
+        tokenAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+        keyId:
+          '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+      },
+    ];
+    expect(() => validateConfig(raw)).toThrow(
+      'config.chainProviders[0].registryAddress must match'
+    );
+  });
+
+  it('rejects chainProvider with missing keyId', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = [
+      {
+        chainType: 'evm',
+        chainId: 'evm:base:31337',
+        rpcUrl: 'http://127.0.0.1:8545',
+        registryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+        tokenAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+        // keyId omitted
+      },
+    ];
+    expect(() => validateConfig(raw)).toThrow(
+      'config.chainProviders[0].keyId must be a string'
+    );
+  });
 });

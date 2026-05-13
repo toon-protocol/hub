@@ -219,3 +219,105 @@ export interface HsHostnameResponse {
 
 /** Node types that can be registered as peers */
 export type { NodeType };
+
+// ── Earnings response types (endpoint added in connector v3.2.0; consumed by Townhouse from v3.3.3+) ──
+//
+// Source of truth: @toon-protocol/connector
+//   packages/connector/src/http/admin-api.ts (AdminEarnings* interfaces)
+//
+// These are re-declared here (NOT re-exported from @toon-protocol/connector)
+// because the connector's public lib.ts exports settlement/channel/payment
+// types only — AdminEarnings* types are intentionally absent from its public
+// surface (connector CONNECTOR_RELEASE_CONTRACT.md §admin-API). Re-declaring
+// mirrors the established pattern for HealthResponse, MetricsResponse,
+// PeersResponse, HsHostnameResponse, and PacketLogEntry.
+//
+// The stub canary in `connector/contract-canary.test.ts` and the real-image
+// canary in `__integration__/connector-image-contract.test.ts` assert that
+// the connector still serves this shape at runtime.
+
+/**
+ * Per-asset earnings row from GET /admin/earnings.json (endpoint added in connector v3.2.0).
+ * Mirrors `AdminEarningsByAsset` from `@toon-protocol/connector` admin-api.
+ *
+ * Cumulative amounts are decimal-string bigints (JSON-safe for any asset scale).
+ * `claimsReceivedTotal` tracks value received from the peer (they paid us);
+ * `claimsSentTotal` tracks value forwarded to the peer (they earned).
+ */
+export interface AssetEarnings {
+  assetCode: string;
+  assetScale: number;
+  claimsReceivedTotal: string;
+  claimsSentTotal: string;
+  netBalance: string;
+  lastClaimAt: string | null;
+}
+
+/**
+ * Per-peer earnings entry from GET /admin/earnings.json.
+ * Mirrors `AdminEarningsJsonPeer` from
+ * `@toon-protocol/connector packages/connector/src/http/admin-api.ts:278-281`.
+ */
+export interface PeerEarnings {
+  peerId: string;
+  byAsset: AssetEarnings[];
+}
+
+/**
+ * Connector fee rollup from GET /admin/earnings.json.
+ * Mirrors `AdminEarningsConnectorFee` from
+ * `@toon-protocol/connector packages/connector/src/http/admin-api.ts:283-287`.
+ */
+export interface ConnectorFeeEntry {
+  assetCode: string;
+  assetScale: number;
+  total: string;
+}
+
+/**
+ * A single recent claim entry from GET /admin/earnings.json.
+ * Mirrors `AdminEarningsRecentClaim` from
+ * `@toon-protocol/connector packages/connector/src/http/admin-api.ts:289-296`.
+ */
+export interface RecentClaim {
+  peerId: string;
+  assetCode: string;
+  assetScale: number;
+  amount: string;
+  direction: 'inbound' | 'outbound';
+  at: string;
+}
+
+/**
+ * Typed wrapper around the connector's wire-level `timestamp: string` field.
+ * The connector's `AdminEarningsJsonResponse` carries a plain ISO-8601 string
+ * (`packages/connector/src/http/admin-api.ts:298-304`). Townhouse wraps it as
+ * a value object so dashboard consumers have a typed handle and the field can
+ * be extended (`epoch?`, `timezone?`) without breaking callers.
+ *
+ * `ConnectorAdminClient.getEarnings()` performs the wrap on the way out:
+ * `timestamp: { iso: rawString }`.
+ */
+export interface EarningsTimestamp {
+  iso: string;
+}
+
+/**
+ * Response from GET /admin/earnings.json on the connector's adminApi port.
+ * Mirrors `AdminEarningsJsonResponse` from
+ * `@toon-protocol/connector packages/connector/src/http/admin-api.ts:298-304`.
+ *
+ * NOTE: The connector's wire shape carries `timestamp: string`. Townhouse's
+ * `getEarnings()` adapts it to `timestamp: EarningsTimestamp` (value object).
+ *
+ * Returns HTTP 503 when the connector is started without settlement config
+ * (accountManager / claimReceiver not wired). Townhouse's apex always wires
+ * both; 503 in production indicates connector misconfiguration.
+ */
+export interface EarningsResponse {
+  uptimeSeconds: number;
+  peers: PeerEarnings[];
+  connectorFees: ConnectorFeeEntry[];
+  recentClaims: RecentClaim[];
+  timestamp: EarningsTimestamp;
+}
