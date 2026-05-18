@@ -497,3 +497,7 @@ but the connector at 3.3.x reads a discriminated union keyed on `type`
 defaulting to direct — operators toggling ATOR got direct traffic anyway.
 The current generator emits the correct `type: 'socks5'` shape with
 `externalUrl`, `managed`, and `managedOptions` per the connector contract.
+
+## Notes
+
+`townhouse status --units=sats` exists as an undocumented power-user flag for Bitcoin-native operators. It converts the earnings block to integer sats using a CLI-supplied rate (`--rate <sats-per-usdc>`) or the `TOWNHOUSE_SATS_PER_USDC` environment variable; if neither is set, the command exits 1. There is no built-in price oracle — this is intentionally a manual conversion. USDC remains the canonical denomination across every other Townhouse surface (TUI hero band, drill subcommands like `townhouse peer` and `townhouse channels`); this flag is absent from `townhouse --help` per design decision D44-002.

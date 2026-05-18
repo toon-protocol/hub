@@ -59,6 +59,18 @@ import {
   NODE_REMOVE_HELP,
   NODE_LIST_HELP,
 } from './cli/node-commands.js';
+import { dispatchDrillCommand } from './cli/drill-commands.js';
+import {
+  renderEarningsSection,
+  resolveSatsRate,
+} from './cli/status-earnings.js';
+import {
+  aggregateEarnings,
+  type AggregatedEarnings,
+} from './earnings/aggregator.js';
+import { readNodesYaml } from './state/nodes-yaml.js';
+import { PeerTypeResolver } from './registry/peer-type-resolver.js';
+import { createDeltaComputer } from './earnings/snapshot-reader.js';
 import {
   WalletManager,
   encryptWallet,
@@ -66,6 +78,7 @@ import {
   saveWallet,
   loadWallet,
 } from './wallet/index.js';
+import { shouldRenderInk } from './tui/tty-detect.js';
 
 /**
  * Error thrown when `main()` is invoked with `--help`. Callers (tests) can
@@ -89,11 +102,15 @@ Usage:
   townhouse status [-c <path>]                   Show node status
   townhouse metrics [-c <path>]                  Show connector metrics
   townhouse wallet show [-c <path>] [--password <pw>]  Show derived addresses
-  townhouse hs up [--password <pw>] [-c <path>]                Boot apex (connector + .anyone HS)
+  townhouse hs up [--password <pw>] [-c <path>]                Boot apex (connector + .anyone HS) (launches dashboard TUI in TTY mode)
   townhouse hs down [--rotate-keys] [-c <path>]               Stop apex (--rotate-keys deletes .anyone keypair)
   townhouse node add [<type>] [--json] [-c <path>]    Provision a child node (default: town)
   townhouse node remove <id> [--yes] [--json] [-c <path>]   Deprovision a child node
   townhouse node list [--json] [-c <path>]            List provisioned nodes
+  townhouse channels [--json]                    Show open payment channels
+  townhouse logs <node-id> [-f|--follow] [--lines N] [--json]   Tail logs for a node (Ctrl-C to stop)
+  townhouse peer <id> [--json]                   Show per-peer detail card
+  townhouse health [--json]                      Probe apex/api/nodes/.anyone health
   townhouse --help                               Show this help
 
 Flags:
@@ -106,7 +123,9 @@ Flags:
   --port         Override the API port (setup command, default 9400)
   --preset       Init from a named preset (init only). Supported: demo
   --yes          Non-interactive (init only); with --preset=demo uses demo password if --password absent
-  --json         Machine-readable JSON output (node commands)
+  --json         Machine-readable JSON output (node commands; NDJSON for \`logs\`)
+  --lines        Number of historical log lines to fetch on attach (logs command, default 50)
+  -f|--follow    Accepted for \`tail -f\` muscle memory on \`logs\` (no-op — follow is default)
   If no flags given, starts all enabled nodes from config.`;
 
 /**
@@ -415,9 +434,69 @@ async function handleWalletShow(
   walletManager.lock();
 }
 
+async function resolveEarnings(
+  adminUrl: string,
+  configPath: string
+): Promise<AggregatedEarnings> {
+  const base = dirname(configPath);
+  try {
+    const yaml = await readNodesYaml(join(base, 'nodes.yaml'));
+    return await aggregateEarnings({
+      connectorAdmin: new ConnectorAdminClient(adminUrl),
+      peerTypeResolver: new PeerTypeResolver(yaml),
+      deltaComputer: createDeltaComputer({
+        snapshotPath: join(base, 'earnings-snapshots.jsonl'),
+      }),
+    });
+  } catch (err) {
+    // Distinguish local config/snapshot errors from connector outage:
+    // aggregateEarnings handles connector failures internally, so anything
+    // surfaced here is a nodes.yaml / snapshot-file / resolver problem.
+    console.error(`Earnings unavailable: ${formatLocalEarningsError(err)}`);
+    return {
+      status: 'connector_unavailable',
+      apex: { routingFees: {} },
+      peers: [],
+      recentClaims: [],
+      eventsRelayed: 0,
+      uptimeSeconds: 0,
+    };
+  }
+}
+
+// Render a one-line breadcrumb from a thrown error, collapsing Zod issue
+// lists (multi-line JSON) into `path: message` segments joined by `; `.
+function formatLocalEarningsError(err: unknown): string {
+  if (
+    err !== null &&
+    typeof err === 'object' &&
+    'issues' in err &&
+    Array.isArray((err as { issues: unknown }).issues)
+  ) {
+    const issues = (err as { issues: { path?: unknown; message?: unknown }[] })
+      .issues;
+    const parts = issues
+      .map((i) => {
+        const path =
+          Array.isArray(i.path) && i.path.length > 0
+            ? i.path.join('.')
+            : '<root>';
+        const msg = typeof i.message === 'string' ? i.message : 'invalid';
+        return `${path}: ${msg}`;
+      })
+      .join('; ');
+    if (parts) return parts;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 async function handleStatus(
   docker: Docker,
-  config: TownhouseConfig
+  config: TownhouseConfig,
+  opts: { units: 'usdc' | 'sats'; satsPerUsdc?: number; configPath: string } = {
+    units: 'usdc',
+    configPath: DEFAULT_CONFIG_PATH,
+  }
 ): Promise<void> {
   const orchestrator = new DockerOrchestrator(docker, config, undefined, {
     profile: 'dev',
@@ -473,44 +552,21 @@ async function handleStatus(
     console.log('');
     console.log('Connector Metrics: unavailable');
   }
-}
 
-async function handleMetrics(config: TownhouseConfig): Promise<void> {
-  const adminClient = new ConnectorAdminClient(
-    `http://127.0.0.1:${config.connector.adminPort}`
+  if (opts.units === 'sats' && opts.satsPerUsdc === undefined) return;
+  const earnings = await resolveEarnings(
+    `http://127.0.0.1:${config.connector.adminPort}`,
+    opts.configPath
   );
-
-  try {
-    const metrics = await adminClient.getMetrics();
-    const peers = await adminClient.getPeers();
-
-    // Per-peer packet counters live on /admin/metrics.json (peers[]),
-    // not /admin/peers — index by peerId so we can show counts inline.
-    const peerMetrics = new Map(metrics.peers.map((p) => [p.peerId, p]));
-
-    console.log('Connector Metrics:');
-    console.log('------------------');
-    console.log(`  Packets forwarded: ${metrics.aggregate.packetsForwarded}`);
-    console.log(`  Packets rejected:  ${metrics.aggregate.packetsRejected}`);
-    console.log(`  Bytes sent:        ${metrics.aggregate.bytesSent}`);
-    console.log('');
-    console.log('Peers:');
-    console.log('------');
-    if (peers.length === 0) {
-      console.log('  No peers connected');
-    } else {
-      for (const peer of peers) {
-        const status = peer.connected ? 'connected' : 'disconnected';
-        const packets = peerMetrics.get(peer.id)?.packetsForwarded ?? 0;
-        console.log(`  ${peer.id.padEnd(12)} ${status}  (${packets} packets)`);
-      }
-    }
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error(`Failed to fetch connector metrics: ${msg}`);
-    process.exitCode = 1;
-  }
+  for (const line of renderEarningsSection({
+    earnings,
+    units: opts.units,
+    satsPerUsdc: opts.satsPerUsdc,
+  }))
+    console.log(line);
 }
+
+// handleMetrics moved to cli/drill-commands.ts (Story 48.5)
 
 /**
  * Determine which node profiles to start based on CLI flags and config.
@@ -1071,6 +1127,20 @@ async function handleHsUp(
     // hostname from the connector already includes the .anyone suffix.
     // ribbon.start('live', hostname) prints: "Apex live at <hostname>" as the FINAL stdout line.
     ribbon.start('live', hostname);
+
+    // Story 48.1: foreground Ink TUI when stdout is a TTY.
+    // Dynamic import keeps Ink + React out of non-TTY startup path (faster --help).
+    // On non-TTY the process exits naturally after this block (Story 45.4 AC #11).
+    if (shouldRenderInk()) {
+      const { mountTui } = await import('./tui/index.js');
+      // P27 (D1): thread HS_TOWNHOUSE_API_URL env override into the TUI so
+      // operators on a non-default Fastify port don't see eternal fetch_failed.
+      const apiUrlOverride = process.env['HS_TOWNHOUSE_API_URL'];
+      const mountOpts =
+        apiUrlOverride !== undefined ? { apiUrl: apiUrlOverride } : {};
+      const instance = mountTui(mountOpts);
+      await instance.waitUntilExit();
+    }
   } catch (err: unknown) {
     const { exitCode } = renderFailure(err);
     process.exitCode = exitCode;
@@ -1329,6 +1399,11 @@ export async function main(
       yes: { type: 'boolean' },
       'rotate-keys': { type: 'boolean' },
       json: { type: 'boolean' },
+      'json-compact': { type: 'boolean' },
+      lines: { type: 'string' },
+      follow: { type: 'boolean', short: 'f' },
+      units: { type: 'string' },
+      rate: { type: 'string' },
     },
     strict: false,
     allowPositionals: true,
@@ -1412,10 +1487,32 @@ export async function main(
       break;
     }
     case 'status': {
-      const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
-      const config = loadConfig(configPath);
-      const docker = dockerInstance ?? new Docker();
-      await handleStatus(docker, config);
+      const configPath = (values['config'] as string) ?? DEFAULT_CONFIG_PATH;
+      const rawUnits = (values['units'] as string | undefined) ?? 'usdc';
+      if (rawUnits !== 'usdc' && rawUnits !== 'sats') {
+        console.error(`--units must be 'usdc' or 'sats'`);
+        process.exitCode = 1;
+        break;
+      }
+      let satsPerUsdc: number | undefined;
+      if (rawUnits === 'sats') {
+        const r = resolveSatsRate(
+          values as Record<string, unknown>,
+          process.env
+        );
+        if ('error' in r) {
+          console.error(r.error);
+          process.exitCode = 1;
+        } else {
+          satsPerUsdc = r.rate;
+        }
+      }
+      const units = rawUnits as 'usdc' | 'sats';
+      await handleStatus(
+        dockerInstance ?? new Docker(),
+        loadConfig(configPath),
+        { units, satsPerUsdc, configPath }
+      );
       break;
     }
     case 'up': {
@@ -1440,10 +1537,18 @@ export async function main(
       await handleDown(config, docker);
       break;
     }
-    case 'metrics': {
-      const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
-      const config = loadConfig(configPath);
-      await handleMetrics(config);
+    case 'channels':
+    case 'metrics':
+    case 'logs':
+    case 'peer':
+    case 'health': {
+      await dispatchDrillCommand(command, {
+        adminUrl: HS_CONNECTOR_ADMIN_URL,
+        apiUrl: HS_TOWNHOUSE_API_URL,
+        values: values as Record<string, unknown>,
+        positionals,
+        docker: dockerInstance,
+      });
       break;
     }
     case 'hs': {

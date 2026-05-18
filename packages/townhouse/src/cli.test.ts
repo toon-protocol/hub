@@ -165,6 +165,14 @@ describe('CLI', () => {
       expect(output).toContain('townhouse node remove');
       expect(output).toContain('townhouse node list');
     });
+
+    it('help text does NOT mention --units, --rate, or sats (Story 48.6 undocumented flag)', async () => {
+      await expect(main(['--help'])).rejects.toThrow(CliHelpRequested);
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(output).not.toContain('--units');
+      expect(output).not.toContain('--rate');
+      expect(output).not.toContain('sats');
+    });
   });
 
   describe('init (T-001, T-004)', () => {
@@ -709,6 +717,242 @@ logging:
         expect(output).toContain('Node Status');
         // Should show metrics unavailable, not throw
         expect(output).toContain('unavailable');
+        // Story 48.6: earnings section also degrades gracefully
+        expect(output).toContain('Earnings (USDC): unavailable');
+        expect(output).not.toContain('$');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // ── Story 48.6: USDC earnings block + --units=sats power-user flag ──
+
+    function makeEarningsFetchResponse(totalUsdc: string) {
+      return {
+        ok: true,
+        json: async () => ({
+          uptimeSeconds: 60,
+          peers: [],
+          connectorFees: [
+            { assetCode: 'USDC', assetScale: 6, total: totalUsdc },
+          ],
+          recentClaims: [],
+          timestamp: '2026-05-15T10:00:00.000Z',
+        }),
+      };
+    }
+
+    function makeStatusFetchMock(earningsTotal: string) {
+      return vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/admin/metrics.json'))
+          return {
+            ok: true,
+            json: async () => ({
+              uptimeSeconds: 60,
+              aggregate: {
+                packetsForwarded: 10,
+                packetsRejected: 0,
+                bytesSent: 500,
+              },
+              peers: [],
+              timestamp: '2026-05-15T10:00:00.000Z',
+            }),
+          };
+        if (url.includes('/admin/peers'))
+          return {
+            ok: true,
+            json: async () => ({
+              nodeId: 'canary',
+              peerCount: 0,
+              connectedCount: 0,
+              peers: [],
+            }),
+          };
+        if (url.includes('/admin/earnings.json'))
+          return makeEarningsFetchResponse(earningsTotal);
+        return { ok: true, json: async () => ({}) };
+      });
+    }
+
+    it('status prints USDC earnings block with all four labels when earnings exist', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+      writeFileSync(join(dir, 'nodes.yaml'), 'entries: []\n', 'utf-8');
+      vi.stubGlobal('fetch', makeStatusFetchMock('1000000'));
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['status', '-c', configPath]);
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('TODAY');
+        expect(output).toContain('MONTH');
+        expect(output).toContain('YEAR');
+        expect(output).toContain('LIFETIME');
+        expect(output).toContain('$');
+        expect(output).toContain('$1.00');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('status prints $0.00 for all rows when earnings are zero', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+      writeFileSync(join(dir, 'nodes.yaml'), 'entries: []\n', 'utf-8');
+      vi.stubGlobal('fetch', makeStatusFetchMock('0'));
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['status', '-c', configPath]);
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('Earnings (USDC):');
+        expect(output.split('$0.00').length - 1).toBe(4); // 4 rows
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('status --units=sats --rate 1500 prints sats header and 1,500 sats for $1.00', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+      writeFileSync(join(dir, 'nodes.yaml'), 'entries: []\n', 'utf-8');
+      vi.stubGlobal('fetch', makeStatusFetchMock('1000000'));
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main([
+          'status',
+          '--units=sats',
+          '--rate',
+          '1500',
+          '-c',
+          configPath,
+        ]);
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('Earnings (sats @ 1500/USDC):');
+        expect(output).toContain('1,500 sats');
+        expect(output).not.toContain('$');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('status --units=sats without rate exits 1 with stderr --rate and still prints Node Status', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+      const fetchMock = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['status', '--units=sats', '-c', configPath]);
+        const errOutput = consoleErrorSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(errOutput).toContain('--rate');
+        expect(process.exitCode).toBe(1);
+        expect(output).toContain('Node Status');
+      } finally {
+        process.exitCode = 0;
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('status --units=sats with TOWNHOUSE_SATS_PER_USDC env var uses env rate', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+      writeFileSync(join(dir, 'nodes.yaml'), 'entries: []\n', 'utf-8');
+      vi.stubGlobal('fetch', makeStatusFetchMock('1000000'));
+      vi.stubEnv('TOWNHOUSE_SATS_PER_USDC', '2500');
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['status', '--units=sats', '-c', configPath]);
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('@ 2500/USDC');
+      } finally {
+        vi.unstubAllEnvs();
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('status --units=foo exits 1 with stderr --units must be', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['status', '--units=foo', '-c', configPath]);
+        const errOutput = consoleErrorSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(errOutput).toContain('--units must be');
+        expect(process.exitCode).toBe(1);
+      } finally {
+        process.exitCode = 0;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('status logs a stderr breadcrumb when nodes.yaml is corrupt (not a silent connector_unavailable)', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+      // Malformed nodes.yaml (schema error, not ENOENT) forces resolveEarnings' catch.
+      writeFileSync(
+        join(dir, 'nodes.yaml'),
+        'entries: "not-an-array"\n',
+        'utf-8'
+      );
+      vi.stubGlobal('fetch', makeStatusFetchMock('1000000'));
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['status', '-c', configPath]);
+        const stderr = consoleErrorSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        const stdout = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        // Breadcrumb on stderr so the operator can debug the local fault
+        expect(stderr).toContain('Earnings unavailable');
+        // ZodError-style errors should render as a one-liner, not multi-line JSON
+        const breadcrumbLine =
+          stderr
+            .split('\n')
+            .find((l) => l.startsWith('Earnings unavailable')) ?? '';
+        expect(breadcrumbLine).not.toContain('{');
+        expect(breadcrumbLine).not.toContain('[');
+        // Still degrades to the canonical 'unavailable' line on stdout
+        expect(stdout).toContain('Earnings (USDC): unavailable');
+      } finally {
+        vi.unstubAllGlobals();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('metrics --units=sats does not output sats (canonical-USDC invariant AC#5)', async () => {
+      const dir = makeTempDir();
+      const configPath = join(dir, 'config.yaml');
+      vi.stubGlobal('fetch', makeStatusFetchMock('1000000'));
+      try {
+        writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
+        await main(['metrics', '--units=sats', '-c', configPath]);
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).not.toContain('sats');
+        expect(output).toContain('Packets forwarded');
       } finally {
         vi.unstubAllGlobals();
         rmSync(dir, { recursive: true, force: true });
@@ -1012,6 +1256,96 @@ logging:
         expect(output).toMatch(/stopped/i);
       } finally {
         rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // ── Story 48.5: Drill subcommand routing ──────────────────────────────────────
+
+  describe('drill subcommand routing (Story 48.5)', () => {
+    it('channels routes to handleChannels — calls /admin/channels and prints CHANNEL column', async () => {
+      const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/admin/channels')) {
+          return { ok: true, json: async () => [] };
+        }
+        return { ok: true, json: async () => ({}) };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        await main(['channels']);
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('No channels open');
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('logs requires a positional node-id and exits 1 when missing', async () => {
+      await main(['logs']);
+      const errOutput = consoleErrorSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
+      expect(errOutput).toContain('Usage: townhouse logs');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('logs --lines with non-integer value exits 1', async () => {
+      await main(['logs', 'connector', '--lines', 'abc']);
+      const errOutput = consoleErrorSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
+      expect(errOutput).toContain('--lines must be an integer');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('peer requires a positional id and exits 1 when missing', async () => {
+      await main(['peer']);
+      const errOutput = consoleErrorSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
+      expect(errOutput).toContain('Usage: townhouse peer');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('health runs without args and calls connector /health probe', async () => {
+      const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/admin/hs-hostname')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              hostname: 'abc123.anon',
+              publishedAt: '2026-05-14T10:00:00.000Z',
+            }),
+          };
+        }
+        if (url.includes('/health')) {
+          return {
+            ok: true,
+            json: async () => ({
+              status: 'healthy',
+              uptime: 100,
+              startedAt: '2026-05-14T00:00:00.000Z',
+              version: '0.1.0-rc5',
+            }),
+          };
+        }
+        if (url.includes('/api/nodes')) {
+          return { ok: true, json: async () => ({ nodes: [] }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        await main(['health']);
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('Overall:');
+      } finally {
+        vi.unstubAllGlobals();
       }
     });
   });

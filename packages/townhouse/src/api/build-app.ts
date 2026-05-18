@@ -10,7 +10,13 @@ import Fastify, {
 } from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
+import { createRequire } from 'node:module';
 import { buildCorsOptions } from './cors.js';
+
+const STARTED_AT = new Date().toISOString();
+const _pkgVersion: string = (
+  createRequire(import.meta.url)('../../package.json') as { version: string }
+)['version'];
 
 /** Allowed loopback hosts */
 export const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'];
@@ -134,6 +140,13 @@ export async function buildFastifyApp(
 
   await app.register(cors, buildCorsOptions());
   await app.register(websocket);
+
+  app.get('/health', async () => ({
+    status: 'healthy' as const,
+    uptime: Math.floor(process.uptime()),
+    startedAt: STARTED_AT,
+    version: _pkgVersion,
+  }));
 
   return app;
 }

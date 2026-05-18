@@ -19,6 +19,7 @@
  */
 
 import type {
+  ChannelSummary,
   ConnectorFeeEntry,
   EarningsResponse,
   EarningsTimestamp,
@@ -49,6 +50,36 @@ export class ConnectorAdminClient {
     // Strip trailing slash to avoid double-slash in URL construction
     this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
     this.timeoutMs = timeoutMs;
+  }
+
+  /** Public read of the configured base URL (used by drill-command probes to derive a sibling client). */
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
+  /**
+   * GET /health on the admin-API port — checks HTTP reachability of the
+   * connector without validating the rich HealthStatus shape. Use this from
+   * the drill-command health probe when only the admin URL is available
+   * (port 9401), not the healthCheckPort (8080). The admin server's /health
+   * returns `{status:'healthy', service:'admin-api', nodeId, timestamp}` —
+   * a different shape from `getHealth()`'s validator. This method returns
+   * a coarse status from a 200 response and reads `nodeId` if present.
+   *
+   * @throws Error when connector is unreachable or returns non-2xx.
+   */
+  async pingAdminLive(): Promise<{ status: 'healthy'; nodeId?: string }> {
+    const response = await this.fetch('/health');
+    const body: unknown = await response.json().catch(() => ({}));
+    const nodeId =
+      typeof body === 'object' &&
+      body !== null &&
+      typeof (body as Record<string, unknown>)['nodeId'] === 'string'
+        ? ((body as Record<string, unknown>)['nodeId'] as string)
+        : undefined;
+    return nodeId !== undefined
+      ? { status: 'healthy', nodeId }
+      : { status: 'healthy' };
   }
 
   /**
@@ -346,6 +377,38 @@ export class ConnectorAdminClient {
       throw new Error('Connector admin API: invalid peers response shape');
     }
     return (body as PeersResponse).peers;
+  }
+
+  /**
+   * GET /admin/channels — returns the connector's payment-channel summaries
+   * across all registered chain providers. Multi-chain: one entry per channel
+   * regardless of chain.
+   *
+   * @throws Error when connector is not running, returns non-200, or shape is invalid
+   */
+  async getChannels(): Promise<ChannelSummary[]> {
+    const response = await this.fetch('/admin/channels');
+    const body: unknown = await response.json();
+    if (!Array.isArray(body)) {
+      throw new Error('Connector admin API: invalid channels response shape');
+    }
+    for (const entry of body) {
+      if (typeof entry !== 'object' || entry === null) {
+        throw new Error('Connector admin API: invalid channels response shape');
+      }
+      const e = entry as Record<string, unknown>;
+      if (
+        typeof e['channelId'] !== 'string' ||
+        typeof e['peerId'] !== 'string' ||
+        typeof e['chain'] !== 'string' ||
+        typeof e['status'] !== 'string' ||
+        typeof e['deposit'] !== 'string' ||
+        typeof e['lastActivity'] !== 'string'
+      ) {
+        throw new Error('Connector admin API: invalid channels response shape');
+      }
+    }
+    return body as ChannelSummary[];
   }
 
   /**

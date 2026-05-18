@@ -429,4 +429,93 @@ describe('ConnectorAdminClient', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });
+
+  describe('getChannels() (Story 48.5 / AC #6)', () => {
+    const CHANNELS_BODY = [
+      {
+        channelId: 'chan-abc-123-def-456',
+        peerId: 'town',
+        chain: 'evm:1',
+        status: 'open',
+        deposit: '1000000',
+        lastActivity: '2026-05-14T00:00:00.000Z',
+      },
+    ];
+
+    it('returns parsed ChannelSummary[] from /admin/channels', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => CHANNELS_BODY,
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9402');
+      const channels = await client.getChannels();
+
+      expect(channels).toHaveLength(1);
+      expect(channels[0]).toMatchObject({
+        channelId: 'chan-abc-123-def-456',
+        peerId: 'town',
+        chain: 'evm:1',
+        status: 'open',
+        deposit: '1000000',
+        lastActivity: '2026-05-14T00:00:00.000Z',
+      });
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:9402/admin/channels',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+    });
+
+    it('returns empty array when no channels are open', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => [] });
+
+      const client = new ConnectorAdminClient('http://localhost:9402');
+      const channels = await client.getChannels();
+
+      expect(channels).toHaveLength(0);
+    });
+
+    it('throws when connector is not running (connection refused)', async () => {
+      fetchMock.mockRejectedValue(new Error('fetch failed: ECONNREFUSED'));
+
+      const client = new ConnectorAdminClient('http://localhost:9402');
+
+      await expect(client.getChannels()).rejects.toThrow(/connection refused/i);
+    });
+
+    it('throws on invalid shape — channelId is a number, not string', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => [
+          {
+            channelId: 42,
+            peerId: 'town',
+            chain: 'evm:1',
+            status: 'open',
+            deposit: '0',
+            lastActivity: '2026-05-14T00:00:00.000Z',
+          },
+        ],
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9402');
+
+      await expect(client.getChannels()).rejects.toThrow(
+        /invalid channels response shape/
+      );
+    });
+
+    it('throws when response is not an array', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({ error: 'not an array' }),
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9402');
+
+      await expect(client.getChannels()).rejects.toThrow(
+        /invalid channels response shape/
+      );
+    });
+  });
 });

@@ -682,3 +682,72 @@ describe('ConnectorConfigGenerator env-var contract', () => {
     expect(roundTripped).toEqual(envVars);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getChannels() shape + path contract — mirrors GET /admin/channels
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CHANNELS_BODY = [
+  {
+    channelId: 'ch-001',
+    peerId: 'town',
+    chain: 'evm:1',
+    status: 'open',
+    deposit: '1000000',
+    lastActivity: '2026-05-14T00:00:00.000Z',
+  },
+];
+
+describe('getChannels() shape contract', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('succeeds on ChannelSummary[] shape and requests GET /admin/channels', async () => {
+    const stub = mockFetchAt('/admin/channels', CHANNELS_BODY);
+    const channels = await client.getChannels();
+    expect(channels).toHaveLength(1);
+    expect(channels[0]!.channelId).toBe('ch-001');
+    expect(channels[0]!.peerId).toBe('town');
+    expect(channels[0]!.chain).toBe('evm:1');
+    expect(channels[0]!.status).toBe('open');
+    expect(channels[0]!.deposit).toBe('1000000');
+    expect(channels[0]!.lastActivity).toBe('2026-05-14T00:00:00.000Z');
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it('returns empty array when no channels are open', async () => {
+    mockFetchAt('/admin/channels', []);
+    const channels = await client.getChannels();
+    expect(channels).toEqual([]);
+  });
+
+  it('rejects when body is not an array (shape drift indicator)', async () => {
+    mockFetchAt('/admin/channels', { channels: CHANNELS_BODY });
+    await expect(client.getChannels()).rejects.toThrow(
+      /invalid channels response shape/
+    );
+  });
+
+  it('rejects when channelId is missing from an entry (field drift indicator)', async () => {
+    mockFetchAt('/admin/channels', [
+      {
+        peerId: 'town',
+        chain: 'evm:1',
+        status: 'open',
+        deposit: '0',
+        lastActivity: '2026-05-14T00:00:00.000Z',
+      },
+    ]);
+    await expect(client.getChannels()).rejects.toThrow(
+      /invalid channels response shape/
+    );
+  });
+
+  it('rejects when deposit is a number instead of string (type drift indicator)', async () => {
+    mockFetchAt('/admin/channels', [
+      { ...CHANNELS_BODY[0]!, deposit: 1000000 },
+    ]);
+    await expect(client.getChannels()).rejects.toThrow(
+      /invalid channels response shape/
+    );
+  });
+});

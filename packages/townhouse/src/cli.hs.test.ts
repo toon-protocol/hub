@@ -19,6 +19,16 @@ import { randomBytes } from 'node:crypto';
 import { main } from './cli.js';
 import { WalletManager, encryptWallet, saveWallet } from './wallet/index.js';
 import type { CliHsOverrides } from './cli.js';
+import { mountTui } from './tui/index.js';
+
+// Mock the TUI module so tests never actually render Ink.
+// vi.mock is hoisted before imports — the dynamic import inside handleHsUp
+// gets this mock when process.stdout.isTTY is true.
+vi.mock('./tui/index.js', () => ({
+  mountTui: vi.fn(() => ({
+    waitUntilExit: () => Promise.resolve(),
+  })),
+}));
 
 const WALLET_PASSWORD = 'hs-test-password';
 
@@ -780,6 +790,168 @@ describe('CLI hs subcommand', () => {
       expect(process.exitCode).toBe(1);
       stderrSpy.mockRestore();
     } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // ── TUI mount gate (Story 48.1, AC #1 + AC #2) ───────────────────────────
+
+  it('hs up with isTTY=true calls mountTui and awaits waitUntilExit', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    const origIsTTY = process.stdout.isTTY;
+    const origCI = process.env['CI'];
+    const origNO_TUI = process.env['NO_TUI'];
+    const origTERM = process.env['TERM'];
+    const origApiUrl = process.env['HS_TOWNHOUSE_API_URL'];
+    try {
+      Object.defineProperty(process.stdout, 'isTTY', {
+        value: true,
+        writable: true,
+        configurable: true,
+      });
+      delete process.env['CI'];
+      delete process.env['NO_TUI'];
+      delete process.env['HS_TOWNHOUSE_API_URL'];
+      process.env['TERM'] = 'xterm-256color';
+
+      vi.mocked(mountTui).mockClear();
+
+      // P12: prove `await instance.waitUntilExit()` is actually awaited.
+      // The instrumented waitUntilExit flips a flag synchronously, then resolves.
+      // If the CLI forgets the await, main() returns before waitUntilExit's
+      // resolved continuation runs — but we can't distinguish that from the
+      // immediate-await case without timing. Instead we assert the flag is
+      // set by the time main() returns (which only happens after await).
+      let waitUntilExitCalled = false;
+      vi.mocked(mountTui).mockImplementation(
+        () =>
+          ({
+            waitUntilExit: () => {
+              waitUntilExitCalled = true;
+              return Promise.resolve();
+            },
+          }) as ReturnType<typeof mountTui>
+      );
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        makeHsOverrides({})
+      );
+
+      expect(vi.mocked(mountTui)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(mountTui)).toHaveBeenCalledWith({});
+      expect(waitUntilExitCalled).toBe(true);
+    } finally {
+      if (origApiUrl === undefined) {
+        delete process.env['HS_TOWNHOUSE_API_URL'];
+      } else {
+        process.env['HS_TOWNHOUSE_API_URL'] = origApiUrl;
+      }
+      Object.defineProperty(process.stdout, 'isTTY', {
+        value: origIsTTY,
+        writable: true,
+        configurable: true,
+      });
+      if (origCI === undefined) {
+        delete process.env['CI'];
+      } else {
+        process.env['CI'] = origCI;
+      }
+      if (origNO_TUI === undefined) {
+        delete process.env['NO_TUI'];
+      } else {
+        process.env['NO_TUI'] = origNO_TUI;
+      }
+      if (origTERM === undefined) {
+        delete process.env['TERM'];
+      } else {
+        process.env['TERM'] = origTERM;
+      }
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up with isTTY=false does NOT call mountTui and exits 0', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      // process.stdout.isTTY is undefined/falsy by default in test environment
+      vi.mocked(mountTui).mockClear();
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        makeHsOverrides({})
+      );
+
+      expect(vi.mocked(mountTui)).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up with HS_TOWNHOUSE_API_URL env override threads through mountTui (P27)', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    const origIsTTY = process.stdout.isTTY;
+    const origCI = process.env['CI'];
+    const origNO_TUI = process.env['NO_TUI'];
+    const origTERM = process.env['TERM'];
+    const origApiUrl = process.env['HS_TOWNHOUSE_API_URL'];
+    try {
+      Object.defineProperty(process.stdout, 'isTTY', {
+        value: true,
+        writable: true,
+        configurable: true,
+      });
+      delete process.env['CI'];
+      delete process.env['NO_TUI'];
+      process.env['TERM'] = 'xterm-256color';
+      process.env['HS_TOWNHOUSE_API_URL'] = 'http://127.0.0.1:39999';
+
+      vi.mocked(mountTui).mockClear();
+      vi.mocked(mountTui).mockReturnValue({
+        waitUntilExit: () => Promise.resolve(),
+      } as ReturnType<typeof mountTui>);
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        makeHsOverrides({})
+      );
+
+      expect(vi.mocked(mountTui)).toHaveBeenCalledWith({
+        apiUrl: 'http://127.0.0.1:39999',
+      });
+    } finally {
+      if (origApiUrl === undefined) {
+        delete process.env['HS_TOWNHOUSE_API_URL'];
+      } else {
+        process.env['HS_TOWNHOUSE_API_URL'] = origApiUrl;
+      }
+      Object.defineProperty(process.stdout, 'isTTY', {
+        value: origIsTTY,
+        writable: true,
+        configurable: true,
+      });
+      if (origCI === undefined) {
+        delete process.env['CI'];
+      } else {
+        process.env['CI'] = origCI;
+      }
+      if (origNO_TUI === undefined) {
+        delete process.env['NO_TUI'];
+      } else {
+        process.env['NO_TUI'] = origNO_TUI;
+      }
+      if (origTERM === undefined) {
+        delete process.env['TERM'];
+      } else {
+        process.env['TERM'] = origTERM;
+      }
       rmSync(configDir, { recursive: true, force: true });
     }
   });

@@ -180,6 +180,23 @@ export interface PeersResponse {
 }
 
 /**
+ * Channel summary entry from GET /admin/channels on the connector's adminApi port.
+ * Mirrors `ChannelSummary` from `@toon-protocol/connector`
+ * (packages/connector/src/http/admin-api.ts ChannelSummary at v3.x).
+ *
+ * `status` is kept as `string` (not a union) because the connector's enum may
+ * grow without warning — the contract canary catches shape drift, not enum domain.
+ */
+export interface ChannelSummary {
+  channelId: string;
+  peerId: string;
+  chain: string;
+  status: string;
+  deposit: string;
+  lastActivity: string;
+}
+
+/**
  * Filter params for GET /packets on the connector admin API.
  *
  * Townhouse-Side Contract (§getPacketLog) — added in story 21.10.

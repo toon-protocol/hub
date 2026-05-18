@@ -58,7 +58,9 @@
     "@toon-protocol/mill": "workspace:^",
     "dockerode": "^4.0.0",
     "fastify": "^5.0.0",
+    "ink": "^5.0.0",
     "nostr-tools": "^2.23.1",
+    "react": "^18.3.1",
     "viem": "^2.0.0",
     "yaml": "^2.7.0",
     "zod": "^3.25.0"
@@ -66,9 +68,11 @@
   "devDependencies": {
     "@types/dockerode": "^3.3.0",
     "@types/node": "^20.0.0",
+    "@types/react": "^18.3.3",
     "ajv": "^8.0.0",
     "ajv-formats": "^3.0.0",
     "fast-check": "^3.21.0",
+    "ink-testing-library": "^4.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.3.0",
     "vitest": "^1.0.0"
