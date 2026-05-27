@@ -138,6 +138,10 @@ export interface MetricsPeerEntry {
   packetsForwarded: number;
   packetsRejected: number;
   bytesSent: number;
+  /** Connector v3.7.0+ (toon-protocol/connector#73). Counts packets accepted
+   *  via the self-delivery code path (route nextHop === connector's own
+   *  nodeId). Older connectors omit this field — default to 0 at consumers. */
+  packetsLocallyDelivered?: number;
   lastPacketAt: string | null;
 }
 
@@ -151,6 +155,8 @@ export interface MetricsResponse {
     packetsForwarded: number;
     packetsRejected: number;
     bytesSent: number;
+    /** Connector v3.7.0+ — see MetricsPeerEntry.packetsLocallyDelivered. */
+    packetsLocallyDelivered?: number;
   };
   peers: MetricsPeerEntry[];
   timestamp: string;

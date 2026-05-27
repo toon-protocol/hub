@@ -102,6 +102,17 @@ interface HsOverrideOptions {
   reconcileSpy?: ReturnType<typeof vi.fn>;
   /** If true, the reconciler stub throws — verifies non-fatal handling. */
   reconcileThrows?: boolean;
+  /**
+   * Pull-progress events to emit from each `pullImage(ref)` call. Indexed
+   * by image ref. When omitted, `pullImage` resolves silently.
+   * (Epic 49 Followup D.)
+   */
+  pullEventsByImage?: Record<
+    string,
+    { status: string; id?: string; progress?: string }[]
+  >;
+  /** If true, the next pullImage call rejects (verifies non-fatal degrade). */
+  pullImageThrows?: boolean;
 }
 
 /** Build a minimal CliHsOverrides stub for unit testing. */
@@ -113,6 +124,8 @@ function makeHsOverrides({
   emitContainerStateOnUp = false,
   reconcileSpy,
   reconcileThrows = false,
+  pullEventsByImage,
+  pullImageThrows = false,
 }: HsOverrideOptions = {}): CliHsOverrides {
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
   let adminClientCallCount = 0;
@@ -129,6 +142,26 @@ function makeHsOverrides({
     });
   const orchDown = down ?? vi.fn(async () => undefined);
 
+  // Stub pullImage: synthesizes `pullProgress` events from the supplied
+  // map and resolves. Drives Followup D narration assertions.
+  const pullImage = vi.fn(async (image: string) => {
+    if (pullImageThrows) {
+      throw new Error(`stub pull failed for ${image}`);
+    }
+    const events = pullEventsByImage?.[image] ?? [];
+    const handlers = listeners.get('pullProgress') ?? [];
+    for (const event of events) {
+      for (const h of handlers) {
+        h({
+          image,
+          status: event.status,
+          id: event.id,
+          progress: event.progress,
+        });
+      }
+    }
+  });
+
   return {
     materializeComposeTemplate: vi.fn(() => ({
       composePath: '/tmp/fake/townhouse-hs.yml',
@@ -142,6 +175,7 @@ function makeHsOverrides({
         existing.push(handler);
         listeners.set(event, existing);
       },
+      pullImage: pullImage as (image: string) => Promise<void>,
     })),
     createAdminClient: vi.fn(() => {
       adminClientCallCount++;
@@ -170,6 +204,10 @@ function makeHsOverrides({
     runComposeDown: vi.fn(
       async (_composePath: string, _withVolumes: boolean) => undefined
     ),
+    // Port-collision preflight stub (Epic 49 Followup B): default to "no
+    // collisions" so happy-path tests don't get blocked by ports actually
+    // bound on the host running CI.
+    checkPortCollisions: vi.fn(async () => []),
     createReconciler: vi.fn((_nodesYamlPath: string, _logPath: string) => ({
       reconcile:
         reconcileSpy ??
@@ -952,6 +990,421 @@ describe('CLI hs subcommand', () => {
       } else {
         process.env['TERM'] = origTERM;
       }
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // ── Port-collision preflight (Epic 49 Followup B) ─────────────────────────
+
+  it('hs up exits 1 BEFORE wallet unlock when preflight reports collisions', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const stderrSpy = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation(() => true);
+      const overrides = makeHsOverrides({});
+      // Override the preflight stub to report a collision.
+      overrides.checkPortCollisions = vi.fn(async () => [
+        {
+          port: 9401,
+          containerName: 'townhouse-hs-connector',
+          composeProject: 'compose',
+          status: 'Up 5 hours',
+        },
+        { port: 3100 },
+      ]);
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      expect(process.exitCode).toBe(1);
+      // Preflight ran before any orchestrator was constructed.
+      expect(overrides.createOrchestrator).not.toHaveBeenCalled();
+      expect(overrides.materializeComposeTemplate).not.toHaveBeenCalled();
+      // Preflight wallet-unlock did NOT happen — the wallet decrypt path
+      // would have called createAdminClient for the idempotency probe.
+      expect(overrides.createAdminClient).not.toHaveBeenCalled();
+
+      const stderrOut = stderrSpy.mock.calls
+        .map((c) => c[0] as string)
+        .join('');
+      expect(stderrOut).toContain(
+        'townhouse hs up: cannot start — host ports already in use:'
+      );
+      expect(stderrOut).toContain('127.0.0.1:9401');
+      expect(stderrOut).toContain("'townhouse-hs-connector'");
+      expect(stderrOut).toContain("(compose project 'compose'");
+      expect(stderrOut).toContain('127.0.0.1:3100');
+      expect(stderrOut).toContain('docker compose -p compose down');
+      expect(stderrOut).toContain(
+        'Re-run with --skip-preflight to bypass this check.'
+      );
+      stderrSpy.mockRestore();
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up --skip-preflight bypasses the preflight check entirely', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const overrides = makeHsOverrides({});
+      const preflightSpy = vi.fn(async () => [
+        { port: 9401, containerName: 'x', composeProject: 'y', status: 'Up' },
+      ]);
+      overrides.checkPortCollisions = preflightSpy;
+
+      await main(
+        ['hs', 'up', '-c', configPath, '--skip-preflight'],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      // Preflight stub never invoked when --skip-preflight is set.
+      expect(preflightSpy).not.toHaveBeenCalled();
+      // Boot proceeded.
+      expect(overrides.createOrchestrator).toHaveBeenCalled();
+      expect(process.exitCode).not.toBe(1);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up: preflight returning [] proceeds to cold-boot normally', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const overrides = makeHsOverrides({});
+      overrides.checkPortCollisions = vi.fn(async () => []);
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      expect(overrides.checkPortCollisions).toHaveBeenCalledTimes(1);
+      expect(overrides.createOrchestrator).toHaveBeenCalled();
+      expect(process.exitCode).not.toBe(1);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up: preflight error is non-fatal (logs and continues)', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const overrides = makeHsOverrides({});
+      overrides.checkPortCollisions = vi.fn(async () => {
+        throw new Error('kernel: out of file descriptors');
+      });
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      // Non-fatal: boot continued and exit code is NOT 1.
+      expect(overrides.createOrchestrator).toHaveBeenCalled();
+      expect(process.exitCode).not.toBe(1);
+      const errOutput = consoleErrorSpy.mock.calls
+        .map((c) => c[0] as string)
+        .join('\n');
+      expect(errOutput).toContain('port preflight skipped (non-fatal)');
+      expect(errOutput).toContain('out of file descriptors');
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // ── Cold image-pull progress narration (Epic 49 Followup D) ─────────────
+
+  /** Write a valid image-manifest.json into the configDir so handleHsUp's
+   * collectApexImageRefs returns the two apex images.
+   */
+  function writeApexManifest(configDir: string): {
+    connectorRef: string;
+    apiRef: string;
+  } {
+    const connectorDigest =
+      'sha256:1111111111111111111111111111111111111111111111111111111111111111';
+    const apiDigest =
+      'sha256:2222222222222222222222222222222222222222222222222222222222222222';
+    const manifest = {
+      schemaVersion: 1,
+      townhouseVersion: '0.0.1-test',
+      builtAt: '2026-05-21T00:00:00.000Z',
+      images: {
+        'townhouse-api': {
+          name: 'ghcr.io/toon-protocol/townhouse-api',
+          tag: '0.0.1-test',
+          digest: apiDigest,
+        },
+        town: {
+          name: 'ghcr.io/toon-protocol/town',
+          tag: '0.0.1-test',
+          digest:
+            'sha256:3333333333333333333333333333333333333333333333333333333333333333',
+        },
+        mill: {
+          name: 'ghcr.io/toon-protocol/mill',
+          tag: '0.0.1-test',
+          digest:
+            'sha256:4444444444444444444444444444444444444444444444444444444444444444',
+        },
+        dvm: {
+          name: 'ghcr.io/toon-protocol/dvm',
+          tag: '0.0.1-test',
+          digest:
+            'sha256:5555555555555555555555555555555555555555555555555555555555555555',
+        },
+        connector: {
+          name: 'ghcr.io/toon-protocol/connector',
+          tag: '0.0.1-test',
+          digest: connectorDigest,
+        },
+      },
+    };
+    writeFileSync(
+      join(configDir, 'image-manifest.json'),
+      JSON.stringify(manifest, null, 2),
+      'utf-8'
+    );
+    return {
+      connectorRef: `ghcr.io/toon-protocol/connector@${connectorDigest}`,
+      apiRef: `ghcr.io/toon-protocol/townhouse-api@${apiDigest}`,
+    };
+  }
+
+  it('hs up: pre-pulls apex images and prints "Pulling N of M" preamble', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const { connectorRef, apiRef } = writeApexManifest(configDir);
+      const overrides = makeHsOverrides({
+        pullEventsByImage: {
+          [connectorRef]: [
+            { status: 'Pulling fs layer', id: 'layer-1' },
+            { status: 'Pull complete', id: 'layer-1' },
+          ],
+          [apiRef]: [
+            { status: 'Pulling fs layer', id: 'layer-2' },
+            { status: 'Pull complete', id: 'layer-2' },
+          ],
+        },
+      });
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      const stdout = consoleSpy.mock.calls
+        .map((c) => c[0] as string)
+        .join('\n');
+
+      expect(stdout).toContain('Pulling 2 apex images...');
+      expect(stdout).toContain(`[1/2] ${connectorRef}`);
+      expect(stdout).toContain(`[2/2] ${apiRef}`);
+      expect(stdout).toContain(`[pull] ${connectorRef}: Pulling fs layer`);
+      expect(stdout).toContain(`[pull] ${connectorRef}: Pull complete`);
+      expect(stdout).toContain(`[pull] ${apiRef}: Pulling fs layer`);
+      expect(stdout).toContain(`[pull] ${apiRef}: Pull complete`);
+      expect(process.exitCode).not.toBe(1);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up: dedupes repeated Downloading events to one line per layer-state transition', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const { connectorRef, apiRef } = writeApexManifest(configDir);
+      const overrides = makeHsOverrides({
+        pullEventsByImage: {
+          [connectorRef]: [
+            { status: 'Pulling fs layer', id: 'l1' },
+            // Many Downloading events back-to-back — only the FIRST should
+            // print (transition Pulling fs layer → Downloading). Subsequent
+            // ones land in the throttle window (< 1 s elapsed in same tick).
+            { status: 'Downloading', id: 'l1', progress: '1MB' },
+            { status: 'Downloading', id: 'l1', progress: '2MB' },
+            { status: 'Downloading', id: 'l1', progress: '3MB' },
+            { status: 'Downloading', id: 'l1', progress: '4MB' },
+            { status: 'Extracting', id: 'l1', progress: '1MB' },
+            { status: 'Pull complete', id: 'l1' },
+          ],
+          [apiRef]: [{ status: 'Already exists', id: 'l2' }],
+        },
+      });
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      const pullLines = consoleSpy.mock.calls
+        .map((c) => c[0] as string)
+        .filter((line) => line.includes('[pull]'));
+
+      // Connector: 4 lines expected — Pulling fs layer, Downloading (1st),
+      // Extracting (transition), Pull complete. The 3 redundant Downloading
+      // events are throttled out.
+      const connectorLines = pullLines.filter((l) => l.includes(connectorRef));
+      expect(connectorLines).toEqual([
+        `  [pull] ${connectorRef}: Pulling fs layer`,
+        `  [pull] ${connectorRef}: Downloading 1MB`,
+        `  [pull] ${connectorRef}: Extracting 1MB`,
+        `  [pull] ${connectorRef}: Pull complete`,
+      ]);
+
+      // API: single "Already exists" line.
+      const apiLines = pullLines.filter((l) => l.includes(apiRef));
+      expect(apiLines).toEqual([`  [pull] ${apiRef}: Already exists`]);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up: missing image-manifest.json silently skips pre-pull (no narration, no error)', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    // Intentionally NOT writing image-manifest.json.
+    try {
+      const overrides = makeHsOverrides({});
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      const stdout = consoleSpy.mock.calls
+        .map((c) => c[0] as string)
+        .join('\n');
+      // No pre-pull preamble. No `[pull]` lines.
+      expect(stdout).not.toContain('Pulling');
+      expect(stdout).not.toContain('[pull]');
+      // Boot still succeeds.
+      expect(process.exitCode).not.toBe(1);
+      expect(overrides.createOrchestrator).toHaveBeenCalled();
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up: pullImage rejection is non-fatal — logs and continues to compose-up', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      writeApexManifest(configDir);
+      const overrides = makeHsOverrides({ pullImageThrows: true });
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      const errOutput = consoleErrorSpy.mock.calls
+        .map((c) => c[0] as string)
+        .join('\n');
+      expect(errOutput).toContain('pre-pull skipped (non-fatal');
+      // Boot still proceeded to orchestrator.up — see createOrchestrator was
+      // called and the orchestrator stub's up was invoked.
+      const orchInstance = (
+        overrides.createOrchestrator as ReturnType<typeof vi.fn>
+      ).mock.results[0]?.value;
+      expect(orchInstance.up).toHaveBeenCalled();
+      expect(process.exitCode).not.toBe(1);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up: ATOR bootstrap timeout retries up to 3× and succeeds on 3rd attempt', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const { OrchestratorError } = await import('./docker/orchestrator.js');
+      let upCallCount = 0;
+      const downFn = vi.fn(async () => undefined);
+      const upFn = vi.fn(async () => {
+        upCallCount++;
+        if (upCallCount < 3) {
+          throw new OrchestratorError('docker compose up failed (exit 1)', {
+            stderr:
+              'dependency failed to start: container townhouse-hs-connector is unhealthy',
+          });
+        }
+        // 3rd attempt succeeds — no throw
+      });
+
+      const overrides = makeHsOverrides({ up: upFn, down: downFn });
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      // up() called 3 times (2 bootstrap timeouts + 1 success)
+      expect(upFn).toHaveBeenCalledTimes(3);
+      // down() called between retries — exactly 2 times (after attempt 1 and 2)
+      expect(downFn).toHaveBeenCalledTimes(2);
+      // retry log messages emitted for each failure
+      const errOutput = consoleErrorSpy.mock.calls
+        .map((c) => c[0] as string)
+        .join('\n');
+      expect(errOutput).toContain('ATOR bootstrap timed out (attempt 1/3)');
+      expect(errOutput).toContain('ATOR bootstrap timed out (attempt 2/3)');
+      expect(process.exitCode).not.toBe(1);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up: ATOR bootstrap timeout exhausted (3 failures) propagates error', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const stderrSpy = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation(() => true);
+      const { OrchestratorError } = await import('./docker/orchestrator.js');
+      const downFn = vi.fn(async () => undefined);
+      const upFn = vi.fn(async () => {
+        throw new OrchestratorError('docker compose up failed (exit 1)', {
+          stderr:
+            'dependency failed to start: container townhouse-hs-connector is unhealthy',
+        });
+      });
+
+      const overrides = makeHsOverrides({ up: upFn, down: downFn });
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      // All 3 attempts were made
+      expect(upFn).toHaveBeenCalledTimes(3);
+      // down() called after attempt 1 and 2 (not after the final throw)
+      expect(downFn).toHaveBeenCalledTimes(2);
+      expect(process.exitCode).toBe(1);
+      stderrSpy.mockRestore();
+    } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
   });

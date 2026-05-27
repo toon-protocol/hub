@@ -27,11 +27,12 @@ import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { stringify } from 'yaml';
 import Docker from 'dockerode';
+import { nip19 } from 'nostr-tools';
 
 import { getDefaultConfig } from './config/defaults.js';
 import { loadConfig } from './config/loader.js';
 import type { TownhouseConfig } from './config/schema.js';
-import { DockerOrchestrator } from './docker/index.js';
+import { DockerOrchestrator, OrchestratorError } from './docker/index.js';
 import type { NodeType } from './docker/types.js';
 import {
   ConnectorAdminClient,
@@ -50,6 +51,13 @@ import type { BrowserOpener } from './cli/browser-opener.js';
 import { OnboardingRibbon } from './cli/onboarding-ribbon.js';
 import { renderFailure } from './cli/failure-copy.js';
 import { promptPassword } from './cli/password-prompt.js';
+import {
+  checkHsPortCollisions,
+  formatCollisionMessage,
+  type PortCollision,
+} from './cli/preflight-ports.js';
+import { PullNarrator } from './cli/pull-narrator.js';
+import { readImageManifest } from './state/image-manifest.js';
 import {
   handleNodeAdd,
   handleNodeRemove,
@@ -78,6 +86,11 @@ import {
   saveWallet,
   loadWallet,
 } from './wallet/index.js';
+import type { NodeKeyInfo } from './wallet/index.js';
+import type { TurboTokenId } from './wallet/turbo-signer.js';
+import { buyCredits } from './credits/buy.js';
+import { getCreditBalance } from './credits/balance.js';
+import { formatTokenAmount, formatWincAsBytes } from './credits/units.js';
 import { shouldRenderInk } from './tui/tty-detect.js';
 
 /**
@@ -101,8 +114,12 @@ Usage:
   townhouse down [-c <path>]                     Stop all nodes
   townhouse status [-c <path>]                   Show node status
   townhouse metrics [-c <path>]                  Show connector metrics
-  townhouse wallet show [-c <path>] [--password <pw>]  Show derived addresses
-  townhouse hs up [--password <pw>] [-c <path>]                Boot apex (connector + .anyone HS) (launches dashboard TUI in TTY mode)
+  townhouse wallet show [--json] [--hex] [--paths] [-c <path>] [--password <pw>]  Show derived addresses
+  townhouse wallet seed --confirm [-c <path>] [--password <pw>]    Print the BIP-39 seed phrase (password-gated, requires --confirm)
+  townhouse credits buy --token <id> --amount <decimal> [--fee-multiplier <n>] [--quote-only] [--yes] [-c <path>] [--password <pw>]
+                                                 Buy Arweave upload credits (token: eth|sol|pol|base-eth|base-usdc|usdc-eth|usdc-pol)
+  townhouse credits balance --token <id> [-c <path>] [--password <pw>]  Show Turbo credit balance for the funding address
+  townhouse hs up [--password <pw>] [--skip-preflight] [-c <path>]  Boot apex (connector + .anyone HS) (launches dashboard TUI in TTY mode)
   townhouse hs down [--rotate-keys] [-c <path>]               Stop apex (--rotate-keys deletes .anyone keypair)
   townhouse node add [<type>] [--json] [-c <path>]    Provision a child node (default: town)
   townhouse node remove <id> [--yes] [--json] [-c <path>]   Deprovision a child node
@@ -119,6 +136,7 @@ Flags:
   --dvm          Start DVM (compute) node
   --password     Wallet password (non-interactive mode)
   --rotate-keys  Delete the .anyone keypair volume on hs down (produces a new address on next hs up)
+  --skip-preflight  Skip the port-collision preflight check on hs up (escape hatch)
   --no-browser   Skip opening the browser automatically (setup command)
   --port         Override the API port (setup command, default 9400)
   --preset       Init from a named preset (init only). Supported: demo
@@ -148,6 +166,12 @@ export interface CliHsOverrides {
     up: (profiles: NodeType[]) => Promise<void>;
     down: () => Promise<void>;
     on: (event: string, handler: (...args: unknown[]) => void) => unknown;
+    /**
+     * Pre-pull a single image ref (Epic 49 Followup D).
+     * Optional on the stub interface — when omitted on a real orchestrator,
+     * the cold-pull narration phase is skipped (silent degrade).
+     */
+    pullImage?: (image: string) => Promise<void>;
   };
   /** Override ConnectorAdminClient construction (avoids real HTTP in tests). */
   createAdminClient?: (
@@ -171,6 +195,15 @@ export interface CliHsOverrides {
     nodesYamlPath: string,
     reconcilerLogPath: string
   ) => { reconcile: () => Promise<void> };
+  /**
+   * Override the port-collision preflight check (Epic 49 Followup B).
+   * Default invokes `checkHsPortCollisions(docker)` from
+   * `./cli/preflight-ports.js`. Tests inject a stub that returns either
+   * `[]` (happy path) or a fabricated PortCollision[] (collision path) so
+   * the production socket-bind + Docker enrichment is not exercised in
+   * unit tests.
+   */
+  checkPortCollisions?: (docker: Docker) => Promise<PortCollision[]>;
 }
 
 /**
@@ -377,9 +410,209 @@ async function handleSetup(
   });
 }
 
+/**
+ * Per-node role description shown above the address rows in the cards layout.
+ * Mirrors Sally's round-4 wallet-show sketch.
+ */
+const NODE_ROLE_DESCRIPTIONS: Record<NodeType, string> = {
+  town: 'Nostr relay — earns ILP fees per event relayed.',
+  mill: 'Multi-chain swap peer — settles cross-chain swaps for fees.',
+  dvm: 'Compute / DVM worker — collects job payments, signs Arweave uploads.',
+};
+
+/** Per-address purpose labels (one per key type per node). */
+interface AddressRow {
+  label: string; // e.g. "Nostr", "EVM", "SOL", "Mina", "AR"
+  value: string; // e.g. npub1..., 0x..., base58..., AR address, or "—"
+  purpose: string; // short trailing parenthetical
+  hex?: string | undefined; // raw hex pubkey shown under npub when --hex
+  path?: string | undefined; // derivation path shown when --paths
+}
+
+/**
+ * Build the per-row address records for one node's card. Returns rows in
+ * fixed presentation order (Nostr → EVM → chain rows). Optional rows render
+ * as `—` when the underlying key is absent (e.g. Town has no SOL).
+ */
+function buildNodeRows(
+  info: NodeKeyInfo,
+  options: { hex: boolean; paths: boolean }
+): AddressRow[] {
+  const rows: AddressRow[] = [];
+
+  // Nostr — always present. Encode as NIP-19 npub for the primary display.
+  const npub = nip19.npubEncode(info.nostrPubkey);
+  const nostrPurposeByNode: Record<NodeType, string> = {
+    town: 'share this to be found',
+    mill: 'announces swap quotes',
+    dvm: 'offers DVM services',
+  };
+  rows.push({
+    label: 'Nostr',
+    value: npub,
+    purpose: nostrPurposeByNode[info.nodeType],
+    hex: options.hex ? info.nostrPubkey : undefined,
+    path: options.paths ? info.nostrDerivationPath : undefined,
+  });
+
+  // EVM — always present.
+  const evmPurposeByNode: Record<NodeType, string> = {
+    town: 'receives ILP earnings',
+    mill: 'settles EVM swaps',
+    dvm: 'collects job payments',
+  };
+  rows.push({
+    label: 'EVM',
+    value: info.evmAddress,
+    purpose: evmPurposeByNode[info.nodeType],
+    path: options.paths ? info.evmDerivationPath : undefined,
+  });
+
+  // SOL — present for every node after Phase 1 (graceful fallback if absent).
+  const solPurposeByNode: Record<NodeType, string> = {
+    town: 'receives swap fills',
+    mill: 'settles SOL swaps',
+    dvm: 'spends Arweave credits',
+  };
+  rows.push({
+    label: 'SOL',
+    value: info.solanaAddress ?? '—',
+    purpose: solPurposeByNode[info.nodeType],
+    path: options.paths ? info.solanaDerivationPath : undefined,
+  });
+
+  // Mill-only: Mina row after SOL.
+  if (info.nodeType === 'mill') {
+    rows.push({
+      label: 'Mina',
+      value: info.minaAddress ?? '—',
+      purpose: 'settles Mina swaps',
+      // Mina derivation path is not currently surfaced through NodeKeyInfo.
+    });
+  }
+
+  // DVM-only: Arweave row appended after SOL.
+  if (info.nodeType === 'dvm') {
+    rows.push({
+      label: 'AR',
+      value: info.arweaveAddress ?? '—',
+      purpose: 'signs Arweave uploads',
+      path: options.paths ? info.arweaveDerivationPath : undefined,
+    });
+  }
+
+  return rows;
+}
+
+/**
+ * Render one node card to stdout using box-drawing characters consistent
+ * with the existing CLI aesthetic (see HELP_TEXT, status output).
+ *
+ *   ┌─ TOWN ──── Nostr relay — earns ILP fees ────────┐
+ *   │ Nostr   npub1abc...                              │
+ *   │   (share this to be found)                       │
+ *   │ EVM     0xAbC...                                 │
+ *   │   (receives ILP earnings)                        │
+ *   └──────────────────────────────────────────────────┘
+ *
+ * Width is calculated from the widest row; the border auto-fits.
+ */
+function renderNodeCard(info: NodeKeyInfo, rows: AddressRow[]): string {
+  // Compose inner content lines (no border yet, no leading "│ ").
+  const role = NODE_ROLE_DESCRIPTIONS[info.nodeType];
+  const labelWidth = Math.max(...rows.map((r) => r.label.length));
+  const headerLine = `${info.nodeType.toUpperCase()} — ${role}`;
+
+  const bodyLines: string[] = [];
+  for (const row of rows) {
+    bodyLines.push(`${row.label.padEnd(labelWidth)}  ${row.value}`);
+    bodyLines.push(`${' '.repeat(labelWidth)}    (${row.purpose})`);
+    if (row.hex) {
+      bodyLines.push(`${' '.repeat(labelWidth)}    hex: ${row.hex}`);
+    }
+    if (row.path) {
+      bodyLines.push(`${' '.repeat(labelWidth)}    path: ${row.path}`);
+    }
+  }
+
+  const innerWidth = Math.max(
+    headerLine.length,
+    ...bodyLines.map((l) => l.length)
+  );
+  // Leave 1 char of padding on each side.
+  const totalInner = innerWidth + 2;
+  const horizontal = '─'.repeat(totalInner);
+  const top = `┌${horizontal}┐`;
+  const bottom = `└${horizontal}┘`;
+
+  const lines: string[] = [];
+  lines.push(top);
+  lines.push(`│ ${headerLine.padEnd(innerWidth)} │`);
+  // Separator under the header to set off the role text from rows.
+  lines.push(`├${horizontal}┤`);
+  for (const body of bodyLines) {
+    lines.push(`│ ${body.padEnd(innerWidth)} │`);
+  }
+  lines.push(bottom);
+  return lines.join('\n');
+}
+
+/**
+ * Build the structured JSON payload for `wallet show --json`. Schema is
+ * documented in the plan; consumers like `jq` rely on the field names below.
+ */
+function buildWalletJson(allKeys: NodeKeyInfo[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const info of allKeys) {
+    const node: Record<string, unknown> = {
+      nostr: {
+        npub: nip19.npubEncode(info.nostrPubkey),
+        hex: info.nostrPubkey,
+        path: info.nostrDerivationPath,
+      },
+      evm: { address: info.evmAddress, path: info.evmDerivationPath },
+    };
+    if (info.solanaAddress) {
+      node['sol'] = {
+        address: info.solanaAddress,
+        path: info.solanaDerivationPath,
+      };
+    }
+    if (info.nodeType === 'mill' && info.minaAddress) {
+      node['mina'] = { address: info.minaAddress };
+    }
+    if (info.nodeType === 'dvm' && info.arweaveAddress) {
+      node['arweave'] = {
+        address: info.arweaveAddress,
+        path: info.arweaveDerivationPath,
+      };
+    }
+    out[info.nodeType] = node;
+  }
+  return out;
+}
+
+/**
+ * Extended `townhouse wallet show` (epic-49, Phase 3).
+ *
+ * Default output: cards layout (one card per node) using box-drawing
+ * characters. Shows NIP-19 npub by default; hex hidden unless --hex.
+ * Per Sally's round-4 sketch: role description line above the rows, plus
+ * per-row purpose labels (e.g. "receives ILP earnings").
+ *
+ * Flags:
+ *   --json   structured machine-readable output instead of cards
+ *   --hex    append a hex pubkey line under each Nostr npub
+ *   --paths  append a derivation-path line under each address
+ *
+ * Side effects: triggers `ensureArweaveKey('dvm')` once — RSA-4096 derivation
+ * is 5–30s on first call per unlocked session, then cached. A "deriving…"
+ * status line is printed to stderr so the operator knows why it's pausing.
+ */
 async function handleWalletShow(
   config: TownhouseConfig,
-  password?: string
+  password?: string,
+  options: { json?: boolean; hex?: boolean; paths?: boolean } = {}
 ): Promise<void> {
   const walletPath = config.wallet.encrypted_path;
   const result = await loadWallet(walletPath);
@@ -417,21 +650,467 @@ async function handleWalletShow(
     return;
   }
 
-  console.log(
-    'Node Type  | Nostr Pubkey                                                     | EVM Address                                | Derivation Path'
-  );
-  console.log(
-    '-----------|------------------------------------------------------------------|--------------------------------------------|--------------------------'
-  );
-  const allKeys = walletManager.getAllKeys();
-  for (const info of allKeys) {
+  try {
+    // Derive DVM's Arweave key before rendering so the AR address row is
+    // populated. RSA-4096 generation is 5–30s on first call per unlocked
+    // session — emit a status line to stderr so the operator knows why
+    // we're pausing. Subsequent calls in the same session are instant.
+    // On failure (unsupported platform, etc.) we degrade gracefully and
+    // render the AR row as `—` rather than aborting `wallet show`.
+    const arStartMs = Date.now();
+    // Spinner-style status — only worth emitting if the call actually pauses.
+    // Cache hit returns in <100ms; cold derivation pays the 5–30s. We can't
+    // know up front which path will run, so we set a 200ms timer that prints
+    // the status only when needed, and clear it on completion.
+    const arStatusTimer = setTimeout(() => {
+      process.stderr.write('deriving Arweave key (first run, ~15s)...\n');
+    }, 200);
+    try {
+      await walletManager.ensureArweaveKey('dvm', walletPassword);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `Warning: Arweave key derivation failed (${msg}). AR address will display as '—'.`
+      );
+    } finally {
+      clearTimeout(arStatusTimer);
+      void arStartMs; // keep var alive for potential timing log
+    }
+
+    const allKeys = walletManager.getAllKeys();
+
+    if (options.json) {
+      console.log(JSON.stringify(buildWalletJson(allKeys), null, 2));
+      return;
+    }
+
+    const renderOpts = {
+      hex: options.hex === true,
+      paths: options.paths === true,
+    };
+    for (const info of allKeys) {
+      const rows = buildNodeRows(info, renderOpts);
+      console.log(renderNodeCard(info, rows));
+      console.log(''); // blank line between cards
+    }
+
+    // Trailing tips block — guides the operator to scripting and the
+    // related credit-funding command added in Phase 2.
+    console.log('Tip: townhouse wallet show --json   for scripting');
+    console.log('     townhouse wallet show --hex    to see raw hex pubkeys');
+    console.log('     townhouse wallet show --paths  to see derivation paths');
     console.log(
-      `${info.nodeType.padEnd(10)} | ${info.nostrPubkey} | ${info.evmAddress} | ${info.nostrDerivationPath}`
+      '     townhouse credits buy --token sol --amount <n>  to fund Arweave uploads'
     );
+  } finally {
+    // Zero key material immediately after display
+    walletManager.lock();
+  }
+}
+
+/**
+ * `townhouse wallet seed --confirm` (epic-49, Phase 3).
+ *
+ * Reveals the BIP-39 mnemonic for recovery. Requires --confirm so it's
+ * impossible to leak the seed by typing the wrong subcommand at a public
+ * terminal. Same password-sourcing chain as the rest of the wallet commands.
+ *
+ * Closes the "I scrolled past the init banner in tmux" footgun without
+ * inventing a new backup channel (clipboard, QR, encrypted USB, etc.).
+ */
+async function handleWalletSeed(
+  config: TownhouseConfig,
+  password: string | undefined,
+  confirm: boolean
+): Promise<void> {
+  if (!confirm) {
+    console.error(
+      'This command will print your seed phrase to your terminal. Re-run with --confirm to acknowledge.'
+    );
+    process.exitCode = 1;
+    return;
   }
 
-  // Zero key material immediately after display
-  walletManager.lock();
+  const walletPath = config.wallet.encrypted_path;
+  const result = await loadWallet(walletPath);
+  if (!result) {
+    console.error('No wallet found. Run `townhouse init` first.');
+    process.exitCode = 1;
+    return;
+  }
+  if (result.permissionsWarning) {
+    console.error(result.permissionsWarning);
+  }
+
+  const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
+  if (!walletPassword) {
+    console.error(
+      'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const walletManager = new WalletManager({ encryptedPath: walletPath });
+  try {
+    await walletManager.fromMnemonic(
+      decryptWallet(result.wallet, walletPassword)
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to decrypt wallet: ${msg}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    const mnemonic = walletManager.getMnemonic();
+    if (!mnemonic) {
+      // Shouldn't happen — fromMnemonic just succeeded — but defend against
+      // races with concurrent lock() calls in long-running test processes.
+      console.error('Internal error: mnemonic unavailable after unlock.');
+      process.exitCode = 1;
+      return;
+    }
+
+    // ASCII-only warning banner — CLAUDE.md forbids emojis unless requested.
+    console.log(
+      '============================================================='
+    );
+    console.log(' [!] Anyone who sees this seed owns your townhouse identity.');
+    console.log(' [!] Anyone who records this terminal owns your earnings.');
+    console.log(
+      ' [!] Shoulder-surf, screen-shares, and tmux logs are vectors.'
+    );
+    console.log(
+      '============================================================='
+    );
+    console.log('');
+    console.log('');
+    console.log(`  ${mnemonic}`);
+    console.log('');
+    console.log('');
+    console.log(
+      'This is the same 12 words shown at `townhouse init`. Storing them elsewhere is your responsibility.'
+    );
+  } finally {
+    walletManager.lock();
+  }
+}
+
+// ── Credits commands (epic-49, Phase 2) ────────────────────────────────────
+
+/**
+ * Set of valid `--token` values for credits commands. Must stay in sync with
+ * `TurboTokenId` in wallet/turbo-signer.ts.
+ */
+const VALID_TURBO_TOKENS: ReadonlySet<TurboTokenId> = new Set([
+  'eth',
+  'pol',
+  'base-eth',
+  'base-usdc',
+  'usdc-eth',
+  'usdc-pol',
+  'sol',
+  'ar',
+]);
+
+function isTurboTokenId(value: string): value is TurboTokenId {
+  return VALID_TURBO_TOKENS.has(value as TurboTokenId);
+}
+
+/**
+ * Resolve the wallet password from --password → env var → TTY prompt → error.
+ * Returns the resolved password string OR null when no source is available
+ * (caller should set exitCode=1 and return).
+ */
+async function resolveWalletPassword(
+  flagPassword: string | undefined
+): Promise<string | null> {
+  const envPassword = process.env['TOWNHOUSE_WALLET_PASSWORD'];
+  if (flagPassword) return flagPassword;
+  if (envPassword) return envPassword;
+  if (process.stdin.isTTY) {
+    return await promptPassword('Wallet password: ');
+  }
+  return null;
+}
+
+/**
+ * Read a single y/N answer from stdin, defaulting to N on empty input.
+ * Mirrors the existing readline-based prompt in `hs down --rotate-keys`.
+ */
+async function promptYesNo(question: string): Promise<boolean> {
+  const { createInterface } = await import('node:readline');
+  const answer = await new Promise<string>((resolve) => {
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question(question, (ans) => {
+      rl.close();
+      resolve(ans);
+    });
+  });
+  return ['y', 'yes'].includes(answer.trim().toLowerCase());
+}
+
+/**
+ * Handle `townhouse credits buy --token <id> --amount <decimal> [...]`.
+ *
+ * Flow: parse argv → resolve password → unlock wallet → fetch quote →
+ * (unless --yes) ask for confirmation → submit topUpWithTokens → stream
+ * status to stdout.
+ *
+ * For the testable contract: returns void, sets process.exitCode on failure
+ * paths, writes status to stdout. Pure infrastructure happens in
+ * `credits/buy.ts`.
+ */
+async function handleCreditsBuy(
+  config: TownhouseConfig,
+  values: Record<string, unknown>,
+  nodeType: NodeType = 'dvm'
+): Promise<void> {
+  // ── 1. Argv validation ──
+  const tokenRaw = values['token'] as string | undefined;
+  const amountRaw = values['amount'] as string | undefined;
+  if (!tokenRaw || !amountRaw) {
+    console.error(
+      'Usage: townhouse credits buy --token <id> --amount <decimal> [--fee-multiplier <n>] [--credit-destination <addr>] [--quote-only] [--yes]'
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (!isTurboTokenId(tokenRaw)) {
+    console.error(
+      `Unknown token '${tokenRaw}'. Supported: ${Array.from(VALID_TURBO_TOKENS).join(', ')}`
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const token: TurboTokenId = tokenRaw;
+
+  let feeMultiplier: number | undefined;
+  const feeRaw = values['fee-multiplier'] as string | undefined;
+  if (feeRaw !== undefined) {
+    const parsed = Number(feeRaw);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      console.error(
+        `--fee-multiplier must be a positive number, got '${feeRaw}'`
+      );
+      process.exitCode = 1;
+      return;
+    }
+    feeMultiplier = parsed;
+  }
+  const quoteOnly = values['quote-only'] === true;
+  const skipConfirm = values['yes'] === true;
+  const destinationOverride = values['credit-destination'] as
+    | string
+    | undefined;
+
+  // ── 2. Wallet unlock ──
+  const walletPath = config.wallet.encrypted_path;
+  const loaded = await loadWallet(walletPath);
+  if (!loaded) {
+    console.error(
+      `No wallet found at ${walletPath}. Run \`townhouse init\` first.`
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (loaded.permissionsWarning) console.error(loaded.permissionsWarning);
+
+  const resolvedPassword = await resolveWalletPassword(
+    values['password'] as string | undefined
+  );
+  if (!resolvedPassword) {
+    console.error(
+      'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const wallet = new WalletManager({ encryptedPath: walletPath });
+  try {
+    await wallet.fromMnemonic(decryptWallet(loaded.wallet, resolvedPassword));
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to decrypt wallet: ${msg}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    // ── 3. Resolve credit destination ──
+    // Funding from EVM/SOL must route credits to the DVM's Arweave address so
+    // the DVM container's ArweaveSigner can spend them. Funding from `ar`
+    // already targets that address natively (signer === destination). An
+    // explicit --credit-destination flag overrides both behaviors.
+    let destinationAddress: string | undefined;
+    if (destinationOverride) {
+      destinationAddress = destinationOverride;
+    } else if (token !== 'ar' && nodeType === 'dvm') {
+      process.stdout.write(
+        `Resolving DVM Arweave credit address (first run, ~10s)...\n`
+      );
+      await wallet.ensureArweaveKey('dvm', resolvedPassword);
+      const dvmKeys = wallet.getNodeKeys('dvm');
+      if (!dvmKeys.arweaveAddress) {
+        throw new Error(
+          'DVM Arweave address not populated after ensureArweaveKey'
+        );
+      }
+      destinationAddress = dvmKeys.arweaveAddress;
+    }
+
+    // ── 4. Quote step ──
+    process.stdout.write(
+      `Quoting ${amountRaw} ${token} for ${nodeType}'s credit address...\n`
+    );
+    const quote = await buyCredits({
+      wallet,
+      nodeType,
+      token,
+      amount: amountRaw,
+      quoteOnly: true,
+      ...(destinationAddress ? { destinationAddress } : {}),
+    });
+    if (quote.kind !== 'quote') {
+      throw new Error('Internal error: quoteOnly returned non-quote result');
+    }
+    const quotedDisplay = `${quote.winc.toString()} winc (${formatWincAsBytes(quote.winc)})`;
+    process.stdout.write(
+      `Quote: ${formatTokenAmount(token, quote.baseAmount)} → ${quotedDisplay}\n`
+    );
+    process.stdout.write(`Source address (${token}): ${quote.fromAddress}\n`);
+    process.stdout.write(`Credit recipient: ${quote.creditAddress}\n`);
+
+    if (quoteOnly) {
+      process.stdout.write('Quote-only; no on-chain transaction submitted.\n');
+      return;
+    }
+
+    // ── 5. Confirmation ──
+    if (!skipConfirm) {
+      const ok = await promptYesNo('Proceed? [y/N] ');
+      if (!ok) {
+        process.stdout.write('Aborted. No transaction submitted.\n');
+        process.exitCode = 1;
+        return;
+      }
+    }
+
+    // ── 6. Submit ──
+    process.stdout.write('Submitting on-chain transaction...\n');
+    const result = await buyCredits({
+      wallet,
+      nodeType,
+      token,
+      amount: amountRaw,
+      ...(feeMultiplier !== undefined ? { feeMultiplier } : {}),
+      ...(destinationAddress ? { destinationAddress } : {}),
+    });
+    if (result.kind !== 'submit') {
+      throw new Error('Internal error: submit path returned non-submit result');
+    }
+    process.stdout.write(`Transaction submitted: ${result.id}\n`);
+    process.stdout.write(`Status: ${result.status}\n`);
+    process.stdout.write(
+      `Credited: ${result.winc.toString()} winc (${formatWincAsBytes(result.winc)})\n`
+    );
+    if (result.block !== undefined) {
+      process.stdout.write(`Block: ${result.block}\n`);
+    }
+    process.stdout.write('Done.\n');
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`credits buy failed: ${msg}`);
+    process.exitCode = 1;
+  } finally {
+    wallet.lock();
+  }
+}
+
+/**
+ * Handle `townhouse credits balance --token <id>`.
+ *
+ * Per AC#6 (plan): require --token explicitly. The funding identity differs
+ * per token family (EVM vs SOL vs AR), so there is no sensible default.
+ */
+async function handleCreditsBalance(
+  config: TownhouseConfig,
+  values: Record<string, unknown>,
+  nodeType: NodeType = 'dvm'
+): Promise<void> {
+  const tokenRaw = values['token'] as string | undefined;
+  if (!tokenRaw) {
+    console.error(
+      'Usage: townhouse credits balance --token <id> [-c <path>] [--password <pw>]'
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (!isTurboTokenId(tokenRaw)) {
+    console.error(
+      `Unknown token '${tokenRaw}'. Supported: ${Array.from(VALID_TURBO_TOKENS).join(', ')}`
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const token: TurboTokenId = tokenRaw;
+
+  const walletPath = config.wallet.encrypted_path;
+  const loaded = await loadWallet(walletPath);
+  if (!loaded) {
+    console.error(
+      `No wallet found at ${walletPath}. Run \`townhouse init\` first.`
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (loaded.permissionsWarning) console.error(loaded.permissionsWarning);
+
+  const resolvedPassword = await resolveWalletPassword(
+    values['password'] as string | undefined
+  );
+  if (!resolvedPassword) {
+    console.error(
+      'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const wallet = new WalletManager({ encryptedPath: walletPath });
+  try {
+    await wallet.fromMnemonic(decryptWallet(loaded.wallet, resolvedPassword));
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to decrypt wallet: ${msg}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    const balance = await getCreditBalance({ wallet, nodeType, token });
+    process.stdout.write(`Address (${token}): ${balance.address}\n`);
+    process.stdout.write(
+      `Balance: ${balance.winc.toString()} winc (${formatWincAsBytes(balance.winc)})\n`
+    );
+    if (balance.effectiveBalance !== balance.winc) {
+      process.stdout.write(
+        `Effective (incl. received approvals): ${balance.effectiveBalance.toString()} winc (${formatWincAsBytes(balance.effectiveBalance)})\n`
+      );
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`credits balance failed: ${msg}`);
+    process.exitCode = 1;
+  } finally {
+    wallet.lock();
+  }
 }
 
 async function resolveEarnings(
@@ -644,6 +1323,23 @@ async function handleUp(
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`Failed to decrypt wallet: ${msg}`);
+    }
+
+    // Pre-warm AR cache when DVM is in the boot set. The orchestrator's later
+    // ensureArweaveKey('dvm') call (without password) would otherwise pay the
+    // full 5–30s RSA cost AND not write back to disk. Calling here with the
+    // password populates both the in-memory + on-disk caches once and lets
+    // every subsequent invocation be sub-second (epic-49 Followup A).
+    if (profiles.includes('dvm')) {
+      try {
+        await walletManager.ensureArweaveKey('dvm', walletPassword);
+      } catch (err: unknown) {
+        // Non-fatal: orchestrator's own ensureArweaveKey call will retry.
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[townhouse up] AR pre-warm failed (non-fatal, orchestrator will retry): ${msg}`
+        );
+      }
     }
   }
 
@@ -871,6 +1567,46 @@ async function reconcileWithBriefRetry(
  * Idempotent: if the apex is already running, re-prints the hostname and exits 0.
  * After the apex is live, writes `~/.townhouse/host.json` and prints the final line.
  */
+/**
+ * Collect the apex image refs (digest-pinned) that `hs up` should pre-pull
+ * before invoking `docker compose up -d`.
+ *
+ * Apex always-on services (Story 45.2 / 45.4) are connector + townhouse-api.
+ * Profile-gated services (town/mill/dvm) are lazy-provisioned via
+ * `POST /api/nodes` and excluded here.
+ *
+ * Returns `[]` (and never throws) if:
+ *   - `image-manifest.json` is absent under `<configDir>` (local-dev tree
+ *     without a CI-produced manifest), OR
+ *   - the manifest exists but cannot be parsed (corrupt file). The caller
+ *     treats `[]` as "skip pre-pull narration" and lets compose handle it.
+ */
+async function collectApexImageRefs(configDir: string): Promise<string[]> {
+  const manifestPath = join(configDir, 'image-manifest.json');
+  if (!existsSync(manifestPath)) return [];
+  try {
+    const manifest = await readImageManifest(manifestPath);
+    return [
+      `${manifest.images.connector.name}@${manifest.images.connector.digest}`,
+      `${manifest.images['townhouse-api'].name}@${manifest.images['townhouse-api'].digest}`,
+    ];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Returns true when an OrchestratorError is caused by the ATOR anon SDK's
+ * hardcoded 60s bootstrap timeout (@anyone-protocol/anyone-client@1.1.x
+ * `setupTimeoutHandler`). The connector container goes unhealthy and compose
+ * exits 1 — the retry loop in handleHsUp restarts the stack on this signal.
+ */
+function isAnonBootstrapTimeout(err: unknown): boolean {
+  if (!(err instanceof OrchestratorError)) return false;
+  const text = `${err.message}\n${err.stderr ?? ''}`;
+  return /connector.*unhealthy|dependency.*connector.*fail/i.test(text);
+}
+
 async function handleHsUp(
   _configPath: string,
   configDir: string,
@@ -879,10 +1615,48 @@ async function handleHsUp(
   options: {
     password?: string;
     force?: boolean;
+    skipPreflight?: boolean;
     hsOverrides?: CliHsOverrides;
   }
 ): Promise<void> {
-  const { password, force, hsOverrides } = options;
+  const { password, force, skipPreflight, hsOverrides } = options;
+
+  // ── Preflight: port-collision check (Epic 49 Followup B) ────────────────────
+  // Runs BEFORE wallet unlock and before any Docker call — catches the most
+  // common operator footgun (contributor dev stack still up, another hs up
+  // instance, or an unrelated process bound to the canonical ports) and
+  // surfaces an actionable error instead of a cryptic mid-boot EADDRINUSE.
+  //
+  // `--skip-preflight` bypasses the check (escape hatch for operators who
+  // know what they're doing — e.g. running two HS stacks on different
+  // network interfaces; rare but harmless).
+  if (!skipPreflight) {
+    const preflight =
+      hsOverrides?.checkPortCollisions ??
+      ((d: Docker) => checkHsPortCollisions(d));
+    try {
+      const collisions = await preflight(docker);
+      if (collisions.length > 0) {
+        const msg = formatCollisionMessage(collisions);
+        // Write directly to stderr (multi-line message — console.error adds
+        // an extra newline per call which would shred the formatting).
+        process.stderr.write(msg);
+        process.exitCode = 1;
+        return;
+      }
+    } catch (preflightErr: unknown) {
+      // Preflight itself failed unexpectedly (e.g. kernel out of fds). Log
+      // and continue rather than block boot — the existing Docker-level
+      // EADDRINUSE handler is still there as a fallback.
+      const detail =
+        preflightErr instanceof Error
+          ? preflightErr.message
+          : String(preflightErr);
+      console.error(
+        `[townhouse hs up] port preflight skipped (non-fatal): ${detail}`
+      );
+    }
+  }
 
   // Resolve wallet password (AC #10): --password → env var → interactive prompt → reject
   const walletPath = config.wallet.encrypted_path;
@@ -993,6 +1767,27 @@ async function handleHsUp(
       composePath,
     });
 
+    // ── pullProgress narration (Epic 49 Followup D) ───────────────────────
+    // Subscribe BEFORE any pulls so we never miss the first events. Uses
+    // the throttled narrator to dedupe Downloading/Extracting noise.
+    const narrator = new PullNarrator();
+    orch.on('pullProgress', (event: unknown) => {
+      const ev = event as {
+        image?: string;
+        status?: string;
+        id?: string;
+        progress?: string;
+      };
+      if (!ev.image || !ev.status) return;
+      const line = narrator.format({
+        image: ev.image,
+        status: ev.status,
+        id: ev.id,
+        progress: ev.progress,
+      });
+      if (line !== null) console.log(line);
+    });
+
     // Transition ribbon to bootstrap phase when a container starts creating.
     let bootstrapStarted = false;
     orch.on('containerState', (event: unknown) => {
@@ -1005,6 +1800,44 @@ async function handleHsUp(
         ribbon.start('bootstrap');
       }
     });
+
+    // ── Cold-pull pre-warm (Epic 49 Followup D) ───────────────────────────
+    // Compose's `up -d` with inheritStdio=true is essentially silent on a
+    // cold image cache — operators experience a 5-minute black hole. We
+    // pre-pull apex images via dockerode (which emits pullProgress) so the
+    // narrator above can render layer-state transitions to stdout. The
+    // subsequent `docker compose up -d` finds the images cached and proceeds
+    // without re-pulling.
+    //
+    // Image list comes from the materialized image-manifest.json. If the
+    // manifest is missing (local dev tree, not an npm install) or pullImage
+    // is absent (stale stub), we silently skip the pre-pull and let compose's
+    // own pull behaviour stand. The "Apex live at <hostname>" success message
+    // remains the canonical completion signal.
+    if (typeof orch.pullImage === 'function') {
+      try {
+        const apexImages = await collectApexImageRefs(configDir);
+        if (apexImages.length > 0) {
+          console.log(
+            `Pulling ${apexImages.length} apex ${apexImages.length === 1 ? 'image' : 'images'}...`
+          );
+          let pulled = 0;
+          for (const ref of apexImages) {
+            pulled++;
+            console.log(`  [${pulled}/${apexImages.length}] ${ref}`);
+            await orch.pullImage(ref);
+          }
+        }
+      } catch (pullErr: unknown) {
+        // Degrade silently per Followup D spec — compose up will retry the
+        // pull and surface a real error if it fails permanently.
+        const detail =
+          pullErr instanceof Error ? pullErr.message : String(pullErr);
+        console.error(
+          `[townhouse hs up] pre-pull skipped (non-fatal, compose will retry): ${detail}`
+        );
+      }
+    }
 
     // Step 5: up (always-on services only — empty profile array).
     // Inject env vars that Docker Compose interpolates in townhouse-hs.yml:
@@ -1042,8 +1875,26 @@ async function handleHsUp(
       resolve(config.wallet.encrypted_path)
     );
     process.env['TOWNHOUSE_DOCKER_GID'] = String(dockerSockGid);
+    // Retry up to 3×: the ATOR anon SDK (@anyone-protocol/anyone-client@1.1.x)
+    // has a hardcoded 60s bootstrap timeout that fires when relay descriptor
+    // loading is slow. `downHs` omits --volumes so the keypair is preserved.
+    const MAX_ANON_RETRIES = 3;
     try {
-      await orch.up([]);
+      for (let attempt = 1; attempt <= MAX_ANON_RETRIES; attempt++) {
+        try {
+          await orch.up([]);
+          break;
+        } catch (err: unknown) {
+          if (isAnonBootstrapTimeout(err) && attempt < MAX_ANON_RETRIES) {
+            console.error(
+              `[townhouse hs up] ATOR bootstrap timed out (attempt ${attempt}/${MAX_ANON_RETRIES}) — retrying...`
+            );
+            await orch.down().catch(() => undefined);
+            continue;
+          }
+          throw err;
+        }
+      }
     } finally {
       if (prevTownhouseHome === undefined) {
         delete process.env['TOWNHOUSE_HOME'];
@@ -1398,12 +2249,23 @@ export async function main(
       preset: { type: 'string' },
       yes: { type: 'boolean' },
       'rotate-keys': { type: 'boolean' },
+      'skip-preflight': { type: 'boolean' },
       json: { type: 'boolean' },
       'json-compact': { type: 'boolean' },
       lines: { type: 'string' },
       follow: { type: 'boolean', short: 'f' },
       units: { type: 'string' },
       rate: { type: 'string' },
+      // credits buy / credits balance (epic-49, Phase 2)
+      token: { type: 'string' },
+      amount: { type: 'string' },
+      'fee-multiplier': { type: 'string' },
+      'quote-only': { type: 'boolean' },
+      'credit-destination': { type: 'string' },
+      // wallet show / wallet seed (epic-49, Phase 3)
+      hex: { type: 'boolean' },
+      paths: { type: 'boolean' },
+      confirm: { type: 'boolean' },
     },
     strict: false,
     allowPositionals: true,
@@ -1477,10 +2339,42 @@ export async function main(
       if (subCommand === 'show') {
         const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
         const config = loadConfig(configPath);
-        await handleWalletShow(config, values.password as string | undefined);
+        await handleWalletShow(config, values.password as string | undefined, {
+          json: values.json === true,
+          hex: values.hex === true,
+          paths: values.paths === true,
+        });
+      } else if (subCommand === 'seed') {
+        const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
+        const config = loadConfig(configPath);
+        await handleWalletSeed(
+          config,
+          values.password as string | undefined,
+          values.confirm === true
+        );
       } else {
         console.error(
-          'Usage: townhouse wallet show [-c <path>] [--password <pw>]'
+          'Usage:\n' +
+            '  townhouse wallet show [--json] [--hex] [--paths] [-c <path>] [--password <pw>]\n' +
+            '  townhouse wallet seed --confirm [-c <path>] [--password <pw>]'
+        );
+        process.exitCode = 1;
+      }
+      break;
+    }
+    case 'credits': {
+      const subCommand = positionals[1];
+      const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
+      const config = loadConfig(configPath);
+      if (subCommand === 'buy') {
+        await handleCreditsBuy(config, values as Record<string, unknown>);
+      } else if (subCommand === 'balance') {
+        await handleCreditsBalance(config, values as Record<string, unknown>);
+      } else {
+        console.error(
+          'Usage:\n' +
+            '  townhouse credits buy --token <id> --amount <decimal> [--fee-multiplier <n>] [--quote-only] [--yes] [-c <path>] [--password <pw>]\n' +
+            '  townhouse credits balance --token <id> [-c <path>] [--password <pw>]'
         );
         process.exitCode = 1;
       }
@@ -1561,6 +2455,7 @@ export async function main(
         await handleHsUp(configPath, configDir, config, docker, {
           password: values.password as string | undefined,
           force: values.force === true,
+          skipPreflight: values['skip-preflight'] === true,
           hsOverrides,
         });
       } else if (action === 'down') {

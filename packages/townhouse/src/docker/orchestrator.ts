@@ -1297,7 +1297,7 @@ export class DockerOrchestrator extends EventEmitter {
     const name = `${CONTAINER_PREFIX}${type}`;
     const nodeConfig = this.config.nodes[type];
     const image = nodeConfig.image ?? DEFAULT_NODE_IMAGES[type];
-    const env = this.buildNodeEnv(type);
+    const env = await this.buildNodeEnv(type);
 
     let lastError: Error | undefined;
 
@@ -1445,8 +1445,12 @@ export class DockerOrchestrator extends EventEmitter {
   /**
    * Build environment variables for a node container.
    * If a WalletManager is provided, injects per-node identity keys.
+   *
+   * Async because the DVM path may need to derive an RSA-4096 Arweave key
+   * via `walletManager.ensureArweaveKey('dvm')` — that derivation takes
+   * 5–30s on first call per unlocked wallet (cached thereafter).
    */
-  private buildNodeEnv(type: NodeType): string[] {
+  private async buildNodeEnv(type: NodeType): Promise<string[]> {
     // nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket -- Docker-internal container-to-container URL, TLS unnecessary
     const connectorUrl = `ws://${CONTAINER_PREFIX}connector:${CONNECTOR_INTERNAL_PORT}`;
     const env: string[] = [`CONNECTOR_URL=${connectorUrl}`];
@@ -1487,9 +1491,39 @@ export class DockerOrchestrator extends EventEmitter {
             env.push(`KIND_PRICING_${kind}=${value}`);
           }
         }
-        // Arweave DVM (kind:5094) requires TURBO_TOKEN for authenticated
-        // uploads. Without it, the entrypoint installs a stub adapter that
-        // throws on first upload — dev-mode capped paths don't apply here.
+        // Arweave DVM (kind:5094) requires Arweave credit credentials for
+        // authenticated uploads. Two paths are wired here:
+        //   1. Preferred (Phase 4): pipe the wallet-derived AR JWK as
+        //      DVM_ARWEAVE_JWK_B64 = base64(JSON(jwk)). Container picks
+        //      this up first and constructs an ArweaveSigner.
+        //   2. Legacy: pass through TURBO_TOKEN (raw JWK JSON env var)
+        //      so existing operators are not broken.
+        // Without either, the entrypoint installs a stub adapter that
+        // throws on first upload with a `townhouse credits buy` CTA.
+        //
+        // NOTE: the JWK is secret material — DO NOT log the env-var value
+        // anywhere in this path. The orchestrator's existing logging only
+        // surfaces container names / lifecycle events, not env arrays.
+        if (this.walletManager) {
+          try {
+            // Surface the 5–30s blocking call so operators know why their
+            // boot is paused. Logged BEFORE the await so the message lands
+            // even if derivation is slow.
+            console.log(
+              '[orchestrator] Deriving DVM Arweave key (first boot, this can take 5-30s)...'
+            );
+            await this.walletManager.ensureArweaveKey('dvm');
+            const jwk = this.walletManager.getArweaveJwk('dvm');
+            const jwkB64 = Buffer.from(JSON.stringify(jwk), 'utf-8').toString(
+              'base64'
+            );
+            env.push(`DVM_ARWEAVE_JWK_B64=${jwkB64}`);
+          } catch {
+            // Wallet locked, unsupported platform, or derivation failed —
+            // skip the preferred path silently. The legacy TURBO_TOKEN
+            // path below (or the stub adapter with CTA) takes over.
+          }
+        }
         const turboToken = process.env['TURBO_TOKEN'];
         if (turboToken) {
           env.push(`TURBO_TOKEN=${turboToken}`);

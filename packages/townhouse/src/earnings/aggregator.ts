@@ -71,7 +71,11 @@ export interface AggregatedEarnings {
   peers: NodeEarnings[];
   /** Pass-through from connector `recentClaims`. Empty array on connector outage. */
   recentClaims: RecentClaim[];
-  /** Sum of `getMetrics().peers[].packetsForwarded`. 0 on connector outage or metrics failure. */
+  /** Sum of `getMetrics().peers[].packetsForwarded` PLUS `packetsLocallyDelivered`
+   *  (connector v3.7.0+, toon-protocol/connector#73 — counts events that landed
+   *  via the self-delivery route, where the connector's in-process relay accepts
+   *  the event locally rather than forwarding to a remote peer). 0 on connector
+   *  outage or metrics failure. */
   eventsRelayed: number;
   /** From `getMetrics().uptimeSeconds`. 0 on connector outage or metrics failure. */
   uptimeSeconds: number;
@@ -250,11 +254,17 @@ export async function aggregateEarnings(
   ]);
 
   // eventsRelayed:
-  //   - primary: sum of peers[].packetsForwarded (AC #2 verbatim)
-  //   - fallback: aggregate.packetsForwarded when peers[] is empty
-  //     (early-boot case per Task 1.8 — connector returns 200 with peers: []
-  //     before any peer has registered, but aggregate counts may already be > 0)
-  // Both sources are clamped to non-negative finite integers — schema declares
+  //   - primary: sum of peers[].packetsForwarded + peers[].packetsLocallyDelivered
+  //   - fallback: aggregate.packetsForwarded + aggregate.packetsLocallyDelivered
+  //     when peers[] is empty (early-boot case per Task 1.8 — connector returns
+  //     200 with peers: [] before any peer has registered, but aggregate counts
+  //     may already be > 0)
+  //
+  // packetsLocallyDelivered is connector v3.7.0+ (toon-protocol/connector#73).
+  // Older connectors omit the field; `?? 0` coalesces undefined so this still
+  // works against pre-3.7.0 deployments.
+  //
+  // All sources are clamped to non-negative finite integers — schema declares
   // `{ type: 'integer', minimum: 0 }` but Fastify response is a serializer,
   // not a validator, so we clamp at the source.
   const clampInt = (n: number): number =>
@@ -262,10 +272,15 @@ export async function aggregateEarnings(
   let eventsRelayed = 0;
   if (metricsResult) {
     if (metricsResult.peers.length === 0) {
-      eventsRelayed = clampInt(metricsResult.aggregate.packetsForwarded);
+      eventsRelayed =
+        clampInt(metricsResult.aggregate.packetsForwarded) +
+        clampInt(metricsResult.aggregate.packetsLocallyDelivered ?? 0);
     } else {
       eventsRelayed = metricsResult.peers.reduce(
-        (sum, p) => sum + clampInt(p.packetsForwarded),
+        (sum, p) =>
+          sum +
+          clampInt(p.packetsForwarded) +
+          clampInt(p.packetsLocallyDelivered ?? 0),
         0
       );
     }

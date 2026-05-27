@@ -15,6 +15,19 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 
+// Mock rsa-from-seed so `wallet show` (which now calls
+// ensureArweaveKey('dvm') as part of Phase 3 rendering) does not run an
+// actual RSA-4096 derivation in unit tests. The CLI degrades gracefully on
+// failure (logs a warning + renders AR row as "—") — we exploit that to
+// keep test runtimes well under the per-file budget. Throwing here causes
+// `wallet show` to print the warning and skip the AR address; tests that
+// care about AR presence mock differently.
+vi.mock('../wallet/rsa-from-seed.js', () => ({
+  rsaPrivateKeyPemFromSeed: vi.fn(async () => {
+    throw new Error('mocked: rsa-from-seed disabled in CLI wallet tests');
+  }),
+}));
+
 import { main } from '../cli.js';
 
 /**
@@ -289,13 +302,14 @@ logging:
           .map((c) => String(c[0]))
           .join('\n');
 
-        // Should show node types
+        // Should show node types (cards layout uses uppercase headers)
         expect(output).toMatch(/town/i);
         expect(output).toMatch(/mill/i);
         expect(output).toMatch(/dvm/i);
 
-        // Should show addresses (hex pubkeys, 0x EVM addresses)
-        expect(output).toMatch(/[0-9a-f]{64}/); // Nostr pubkey
+        // Should show addresses — Phase 3 displays NIP-19 npub by default
+        // (raw hex is hidden unless --hex is passed) and EVM addresses.
+        expect(output).toMatch(/npub1[a-z0-9]+/); // NIP-19 npub
         expect(output).toMatch(/0x[0-9a-fA-F]{40}/); // EVM address
       } finally {
         rmSync(dir, { recursive: true, force: true });

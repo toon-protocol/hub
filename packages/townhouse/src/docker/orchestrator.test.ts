@@ -1533,6 +1533,169 @@ describe('DockerOrchestrator', () => {
       ).toBe(false);
     });
   });
+
+  // ── Phase 4: DVM_ARWEAVE_JWK_B64 piping ────────────────────────────────────
+
+  describe('DVM Arweave JWK env injection (Phase 4)', () => {
+    it('passes DVM_ARWEAVE_JWK_B64 to dvm container as base64(JSON(jwk))', async () => {
+      const { WalletManager } = await import('../wallet/manager.js');
+
+      const walletManager = new WalletManager({
+        encryptedPath: '/tmp/test-phase4.enc',
+      });
+      walletManager.fromMnemonic(
+        'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+      );
+
+      // Mock ensureArweaveKey to avoid the real 5–30s RSA-4096 derivation.
+      const FAKE_JWK = {
+        kty: 'RSA',
+        n: 'n-value',
+        e: 'AQAB',
+        d: 'd-value',
+        p: 'p-value',
+        q: 'q-value',
+        dp: 'dp-value',
+        dq: 'dq-value',
+        qi: 'qi-value',
+      };
+      const ensureSpy = vi
+        .spyOn(walletManager, 'ensureArweaveKey')
+        .mockResolvedValue(FAKE_JWK as never);
+      const getJwkSpy = vi
+        .spyOn(walletManager, 'getArweaveJwk')
+        .mockReturnValue(FAKE_JWK as never);
+
+      const config = configWithNodes(['dvm']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config,
+        walletManager
+      );
+      await orchestrator.up(['dvm']);
+
+      expect(ensureSpy).toHaveBeenCalledWith('dvm');
+      expect(getJwkSpy).toHaveBeenCalledWith('dvm');
+
+      const dvmCall = mockDocker.docker.createContainer.mock.calls.find(
+        (c: any[]) => c[0]?.name === 'townhouse-dvm'
+      );
+      expect(dvmCall).toBeDefined();
+      const env: string[] = dvmCall?.[0]?.Env ?? [];
+      const jwkEnv = env.find((e) => e.startsWith('DVM_ARWEAVE_JWK_B64='));
+      expect(jwkEnv).toBeDefined();
+      // Verify the value is correctly base64-encoded JSON of the JWK.
+      const b64 = jwkEnv!.slice('DVM_ARWEAVE_JWK_B64='.length);
+      const decoded = JSON.parse(Buffer.from(b64, 'base64').toString('utf-8'));
+      expect(decoded).toEqual(FAKE_JWK);
+    });
+
+    it('omits DVM_ARWEAVE_JWK_B64 when no WalletManager is provided (legacy-only mode)', async () => {
+      const config = configWithNodes(['dvm']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config
+        // no walletManager
+      );
+      await orchestrator.up(['dvm']);
+
+      const dvmCall = mockDocker.docker.createContainer.mock.calls.find(
+        (c: any[]) => c[0]?.name === 'townhouse-dvm'
+      );
+      expect(dvmCall).toBeDefined();
+      const env: string[] = dvmCall?.[0]?.Env ?? [];
+      expect(env.some((e) => e.startsWith('DVM_ARWEAVE_JWK_B64='))).toBe(false);
+    });
+
+    it('still passes TURBO_TOKEN through alongside DVM_ARWEAVE_JWK_B64 (entrypoint picks preferred)', async () => {
+      const { WalletManager } = await import('../wallet/manager.js');
+      const walletManager = new WalletManager({
+        encryptedPath: '/tmp/test-phase4-both.enc',
+      });
+      walletManager.fromMnemonic(
+        'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+      );
+      vi.spyOn(walletManager, 'ensureArweaveKey').mockResolvedValue({
+        kty: 'RSA',
+        n: 'n',
+        e: 'AQAB',
+        d: 'd',
+        p: 'p',
+        q: 'q',
+        dp: 'dp',
+        dq: 'dq',
+        qi: 'qi',
+      } as never);
+      vi.spyOn(walletManager, 'getArweaveJwk').mockReturnValue({
+        kty: 'RSA',
+        n: 'n',
+        e: 'AQAB',
+        d: 'd',
+        p: 'p',
+        q: 'q',
+        dp: 'dp',
+        dq: 'dq',
+        qi: 'qi',
+      } as never);
+
+      const originalToken = process.env['TURBO_TOKEN'];
+      process.env['TURBO_TOKEN'] = 'legacy-jwk-json';
+      try {
+        const config = configWithNodes(['dvm']);
+        const orchestrator = new DockerOrchestrator(
+          mockDocker.docker as any,
+          config,
+          walletManager
+        );
+        await orchestrator.up(['dvm']);
+
+        const dvmCall = mockDocker.docker.createContainer.mock.calls.find(
+          (c: any[]) => c[0]?.name === 'townhouse-dvm'
+        );
+        const env: string[] = dvmCall?.[0]?.Env ?? [];
+        // BOTH env vars must be present — entrypoint picks the preferred one.
+        expect(env.some((e) => e.startsWith('DVM_ARWEAVE_JWK_B64='))).toBe(
+          true
+        );
+        expect(env).toContain('TURBO_TOKEN=legacy-jwk-json');
+      } finally {
+        if (originalToken === undefined) {
+          delete process.env['TURBO_TOKEN'];
+        } else {
+          process.env['TURBO_TOKEN'] = originalToken;
+        }
+      }
+    });
+
+    it('continues without DVM_ARWEAVE_JWK_B64 if ensureArweaveKey throws (graceful fallback)', async () => {
+      const { WalletManager } = await import('../wallet/manager.js');
+      const walletManager = new WalletManager({
+        encryptedPath: '/tmp/test-phase4-fail.enc',
+      });
+      walletManager.fromMnemonic(
+        'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+      );
+      vi.spyOn(walletManager, 'ensureArweaveKey').mockRejectedValue(
+        new Error('RSA derivation unsupported on this platform')
+      );
+
+      const config = configWithNodes(['dvm']);
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config,
+        walletManager
+      );
+
+      // Should not throw — graceful fallback.
+      await expect(orchestrator.up(['dvm'])).resolves.toBeUndefined();
+
+      const dvmCall = mockDocker.docker.createContainer.mock.calls.find(
+        (c: any[]) => c[0]?.name === 'townhouse-dvm'
+      );
+      const env: string[] = dvmCall?.[0]?.Env ?? [];
+      expect(env.some((e) => e.startsWith('DVM_ARWEAVE_JWK_B64='))).toBe(false);
+    });
+  });
 });
 
 // ── Story 46.2: pullImage, startNodeViaCompose, stopNodeViaCompose ────────────

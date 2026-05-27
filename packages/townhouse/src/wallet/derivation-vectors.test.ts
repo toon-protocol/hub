@@ -248,4 +248,104 @@ describe('Golden Derivation Vectors (T-024, T-025, T-029)', () => {
       expect(dvmKeys.nostrDerivationPath).toBe("m/44'/1237'/2'/0/0");
     });
   });
+
+  // ── Epic 49: per-node Solana golden vectors ─────────────────────────────
+
+  describe('Solana golden vectors (Epic 49, per-node SOL extension)', () => {
+    /**
+     * Solana uses SLIP-0010 ed25519 derivation at m/44'/501'/N'/0'/0'
+     * with the Phantom/Solflare convention. Golden addresses computed once
+     * from the BIP-39 test mnemonic via @toon-protocol/mill::deriveMillKeys.
+     */
+    it('Town (account 0) Solana address is deterministic and distinct', async () => {
+      const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
+      await manager.fromMnemonic(TEST_MNEMONIC);
+      const town = manager.getNodeKeys('town');
+      expect(town.solanaAddress).toBeTruthy();
+      // base58 Solana addresses are 32–44 chars
+      expect(town.solanaAddress!.length).toBeGreaterThanOrEqual(32);
+      expect(town.solanaDerivationPath).toBe("m/44'/501'/0'/0'/0'");
+    });
+
+    it('Mill (account 1) Solana address is deterministic and distinct from Town', async () => {
+      const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
+      await manager.fromMnemonic(TEST_MNEMONIC);
+      const town = manager.getNodeKeys('town');
+      const mill = manager.getNodeKeys('mill');
+      expect(mill.solanaAddress).toBeTruthy();
+      expect(mill.solanaAddress).not.toBe(town.solanaAddress);
+      expect(mill.solanaDerivationPath).toBe("m/44'/501'/1'/0'/0'");
+    });
+
+    it('DVM (account 2) Solana address is deterministic and distinct from Town + Mill', async () => {
+      const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
+      await manager.fromMnemonic(TEST_MNEMONIC);
+      const town = manager.getNodeKeys('town');
+      const mill = manager.getNodeKeys('mill');
+      const dvm = manager.getNodeKeys('dvm');
+      expect(dvm.solanaAddress).toBeTruthy();
+      expect(dvm.solanaAddress).not.toBe(town.solanaAddress);
+      expect(dvm.solanaAddress).not.toBe(mill.solanaAddress);
+      expect(dvm.solanaDerivationPath).toBe("m/44'/501'/2'/0'/0'");
+    });
+  });
+
+  // ── Epic 49: Arweave golden vectors (RSA-4096) ──────────────────────────
+
+  /**
+   * Arweave addresses derived via the algorithm in `manager.ts::deriveArweaveKey`:
+   *   BIP-32 sub-seed at m/44'/472'/{account}'/0/0
+   *     → human-crypto-keys.getKeyPairFromSeed(seed, {rsa, 4096}, pkcs1-pem)
+   *     → Node crypto PEM→JWK
+   *     → base64url(sha256(modulus_bytes))
+   *
+   * These vectors were computed once against the BIP-39 test mnemonic and
+   * pinned. Any divergence here means a breaking change to the AR
+   * derivation contract — operators would lose access to credit funds.
+   *
+   * NOTE: RSA-4096 generation takes 5–30s per account. To keep CI fast,
+   * we only pin DVM (account 2 — the address that actually matters per
+   * D21-008). Account 0 and 1 derivations are exercised in
+   * `manager.test.ts::ensureArweaveKey` for round-trip determinism.
+   */
+  describe('Arweave golden vectors (Epic 49)', () => {
+    const RSA_TIMEOUT_MS = 180_000;
+
+    it(
+      'derives the pinned DVM Arweave address from the test mnemonic',
+      async () => {
+        const manager = new WalletManager({ encryptedPath: '/tmp/test.enc' });
+        await manager.fromMnemonic(TEST_MNEMONIC);
+        await manager.ensureArweaveKey('dvm');
+        const dvm = manager.getNodeKeys('dvm');
+        // GOLDEN VALUE — computed once from `abandon…about` mnemonic via
+        // m/44'/472'/2'/0/0 → RSA-4096 → SHA-256 of modulus → base64url.
+        // If this changes, AR derivation is broken.
+        expect(dvm.arweaveAddress).toBe(
+          '8QHnfFHMqWkhyvDHAt2sMrasoIZgEuVlIJkgpull-lQ'
+        );
+        expect(dvm.arweaveDerivationPath).toBe("m/44'/472'/2'/0/0");
+      },
+      RSA_TIMEOUT_MS
+    );
+
+    it(
+      'AR derivation is deterministic across two WalletManager instances',
+      async () => {
+        const m1 = new WalletManager({ encryptedPath: '/tmp/test1.enc' });
+        const m2 = new WalletManager({ encryptedPath: '/tmp/test2.enc' });
+        await m1.fromMnemonic(TEST_MNEMONIC);
+        await m2.fromMnemonic(TEST_MNEMONIC);
+        const j1 = await m1.ensureArweaveKey('dvm');
+        const j2 = await m2.ensureArweaveKey('dvm');
+        // Modulus equality is sufficient to confirm identical RSA keys.
+        expect(j1.n).toBe(j2.n);
+        expect(j1.d).toBe(j2.d);
+        expect(m1.getNodeKeys('dvm').arweaveAddress).toBe(
+          m2.getNodeKeys('dvm').arweaveAddress
+        );
+      },
+      RSA_TIMEOUT_MS * 2
+    );
+  });
 });

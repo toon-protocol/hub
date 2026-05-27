@@ -10,13 +10,37 @@ import Fastify, {
 } from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
-import { createRequire } from 'node:module';
+// Local alias so the bundled output doesn't collide with the tsup banner's own
+// `import { createRequire } from 'module'` (Node ESM rejects duplicate identifier
+// imports from the same module). Retroactively authorized 2026-05-18 code review of
+// Story 49.1 — see Hard Rule #2 exception (d) in the story file. Smaller-radius fix
+// than dropping the tsup banner entirely.
+import { createRequire as nodeCreateRequire } from 'node:module';
 import { buildCorsOptions } from './cors.js';
 
 const STARTED_AT = new Date().toISOString();
-const _pkgVersion: string = (
-  createRequire(import.meta.url)('../../package.json') as { version: string }
-)['version'];
+// Resolve `package.json` defensively. At runtime `import.meta.url` points at the
+// bundled output (e.g. `dist/cli.js`), where `../package.json` resolves to
+// `packages/townhouse/package.json`. If tsup ever chunks this module deeper
+// (e.g. `dist/api/build-app.js`), `../../package.json` is needed. Try the
+// expected path first, then the deeper-chunk fallback. Pass 2 code review
+// 2026-05-18 hardening per P37 — keeps the file working across bundle layouts
+// instead of silently MODULE_NOT_FOUND-ing at boot under a future tsup config change.
+const _localRequire = nodeCreateRequire(import.meta.url);
+function _loadPackageJson(): { version: string } {
+  for (const rel of ['../package.json', '../../package.json']) {
+    try {
+      return _localRequire(rel) as { version: string };
+    } catch {
+      // try next candidate
+    }
+  }
+  throw new Error(
+    "build-app.ts: could not resolve package.json from '../package.json' or '../../package.json'. " +
+      'Bundle layout may have changed — update the resolution ladder.'
+  );
+}
+const _pkgVersion: string = _loadPackageJson()['version'];
 
 /** Allowed loopback hosts */
 export const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'];

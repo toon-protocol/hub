@@ -19,6 +19,28 @@ async function seedWallet(
   await saveWallet(walletPath, encryptWallet(mnemonic, password));
 }
 
+// Phase 4: the orchestrator now calls `await walletManager.ensureArweaveKey('dvm')`
+// before starting the DVM container. The real call does RSA-4096 derivation
+// (5–30s) which blows the default 5s test timeout. Stub it out globally —
+// these CLI tests assert lifecycle / arg parsing, not key material.
+const STUB_AR_JWK = {
+  kty: 'RSA',
+  n: 'stub-n',
+  e: 'AQAB',
+  d: 'stub-d',
+  p: 'stub-p',
+  q: 'stub-q',
+  dp: 'stub-dp',
+  dq: 'stub-dq',
+  qi: 'stub-qi',
+};
+vi.spyOn(WalletManager.prototype, 'ensureArweaveKey').mockResolvedValue(
+  STUB_AR_JWK as never
+);
+vi.spyOn(WalletManager.prototype, 'getArweaveJwk').mockReturnValue(
+  STUB_AR_JWK as never
+);
+
 /**
  * Mock dockerode for all CLI tests.
  * Returns a mock Docker instance that simulates successful container operations.

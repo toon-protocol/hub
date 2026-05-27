@@ -12,4 +12,5 @@ export type {
   DerivedNodeKeys,
   NodeKeyInfo,
   EncryptedWallet,
+  ArweaveJwk,
 } from './types.js';
