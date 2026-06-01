@@ -89,7 +89,7 @@ services:
   # boot; the connector (running as node) cannot write the HS keypair/hostname
   # without this chown step.
   connector-init:
-    image: busybox
+    image: busybox:1.37@sha256:9532d8c39891ca2ecde4d30d7710e01fb739c87a8b9299685c63704296b16028
     user: root
     # anon (Tor-based) requires the HS dir to be mode 0700 — too-permissive
     # directories cause an immediate abort. Docker creates volumes as root 755.
