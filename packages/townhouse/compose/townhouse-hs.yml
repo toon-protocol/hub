@@ -223,6 +223,10 @@ services:
       TOWNHOUSE_WALLET_DIR: '${TOWNHOUSE_WALLET_DIR}'
       TOWNHOUSE_UID: '${TOWNHOUSE_UID:-1000}'
       TOWNHOUSE_DOCKER_GID: '${TOWNHOUSE_DOCKER_GID:-0}'
+      # MILL_RELAYS is read by POST /api/nodes {type:'mill'} preflight check
+      # inside the townhouse-api process. It must be in the API container's env
+      # (not only the mill container's env) so the check works correctly.
+      MILL_RELAYS: '${MILL_RELAYS:-}'
     healthcheck:
       # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal probe
       # Use 127.0.0.1 (not localhost) to avoid IPv6 resolution surprises. The

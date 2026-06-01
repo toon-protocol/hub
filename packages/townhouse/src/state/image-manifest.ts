@@ -37,6 +37,26 @@ export const ImageManifestSchema = z
 export type ImageManifest = z.infer<typeof ImageManifestSchema>;
 
 /**
+ * Sentinel digest used by `.github/workflows/connector-publish-smoke.yml`
+ * to populate the four non-connector entries of a synthetic
+ * `image-manifest.json` it writes when the operator supplies
+ * `connector_digest` for a candidate connector tag.
+ *
+ * The smoke workflow only validates the CONNECTOR entry; the four other
+ * entries exist purely to satisfy `ImageManifestSchema.strict()`. Any future
+ * per-image alignment check MUST treat this value as "not a real registry
+ * digest" and skip the comparison rather than fail. Recognize via either
+ * literal equality or `isSyntheticDigest(d)`.
+ */
+export const SYNTHETIC_DIGEST_SENTINEL =
+  'sha256:dead000000000000000000000000000000000000000000000000000000000000';
+
+/** True iff the digest is the synthetic sentinel produced by the smoke workflow. */
+export function isSyntheticDigest(digest: string): boolean {
+  return digest === SYNTHETIC_DIGEST_SENTINEL;
+}
+
+/**
  * Read and validate `image-manifest.json` at the given path.
  *
  * Throws ENOENT if the file is missing — there is no graceful fallback for a

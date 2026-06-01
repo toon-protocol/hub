@@ -18,7 +18,7 @@
  *   Useful in sandbox environments without Docker. CI runs without the skip.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import {
   writeFileSync,
   mkdirSync,
@@ -34,7 +34,27 @@ import type Docker from 'dockerode';
 
 import { DEFAULT_CONNECTOR_IMAGE } from '../constants.js';
 import { ConnectorAdminClient } from '../connector/admin-client.js';
+import { stripDockerFrame } from '../docker/log-tail.js';
 import type { EarningsResponse } from '../connector/types.js';
+
+// CONNECTOR_IMAGE_OVERRIDE (Story 50.0 F2): the connector-publish-smoke workflow
+// sets this to ghcr.io/toon-protocol/connector:<tag-under-test> so the canary
+// can boot a candidate connector image WITHOUT requiring a constants.ts bump
+// first. Local/CI runs without the override fall back to the constants.ts pin.
+// Note: the manifest-alignment describe-block below continues to use
+// DEFAULT_CONNECTOR_IMAGE on purpose — that block validates the constants.ts
+// pin against the published manifest, which is independent of what container
+// we're actually booting in the boot-and-probe block.
+const TARGET_CONNECTOR_IMAGE =
+  process.env['CONNECTOR_IMAGE_OVERRIDE'] || DEFAULT_CONNECTOR_IMAGE;
+
+// KEEP_CONTAINER_ON_FAILURE (Story 50.0 F4): when set to '1' (e.g. by the
+// connector-publish-smoke workflow), disable Docker's AutoRemove and skip the
+// afterAll force-remove so a failure-log capture step can still find the
+// container via `docker ps -a --filter ancestor=...`. Without this gate the
+// container is gone by the time the workflow's `if: failure()` capture runs.
+const KEEP_CONTAINER_ON_FAILURE =
+  process.env['KEEP_CONTAINER_ON_FAILURE'] === '1';
 
 /** Parse a Docker image reference into its name, optional tag, and optional digest. */
 function parseConnectorImage(ref: string): {
@@ -115,7 +135,7 @@ function isTruthyEnv(value: string | undefined): boolean {
 // Skip the entire suite when Docker is unavailable (e.g., sandbox envs).
 // CI runs without SKIP_DOCKER set, so the canary runs in CI.
 describe.skipIf(isTruthyEnv(process.env['SKIP_DOCKER']))(
-  `Connector image contract (${DEFAULT_CONNECTOR_IMAGE})`,
+  `Connector image contract (${TARGET_CONNECTOR_IMAGE})`,
   () => {
     let docker: Docker;
     let container: Docker.Container | undefined;
@@ -124,150 +144,228 @@ describe.skipIf(isTruthyEnv(process.env['SKIP_DOCKER']))(
     let healthClient: ConnectorAdminClient;
     let adminClient: ConnectorAdminClient;
     let tmpDir: string | undefined;
+    // Track whether any test in this suite has failed. Used by afterAll to
+    // decide whether KEEP_CONTAINER_ON_FAILURE should actually keep state
+    // (review #7 — on a PASS we clean up the container AND tmpDir even with
+    // KEEP=1, since the diagnostic-preservation rationale doesn't apply).
+    let suiteHadFailure = false;
 
     beforeAll(async () => {
-      const DockerLib = (await import('dockerode')).default;
-      docker = new DockerLib();
+      // Round 2 review #4 — wrap the entire setup in try/catch so ANY
+      // pre-polling-loop throw (createContainer rejection, container.start
+      // rejection, container.inspect rejection, mkdirSync ENOSPC, dockerode
+      // import failure) flips suiteHadFailure=true before rethrowing. Without
+      // this guard, vitest skips afterEach on beforeAll failure, suiteHadFailure
+      // stays false, afterAll computes shouldKeep=false, and KEEP=1 silently
+      // wipes the container the wrapping smoke workflow was supposed to inspect.
+      try {
+        const DockerLib = (await import('dockerode')).default;
+        docker = new DockerLib();
 
-      // ── Pull image if not already present ──────────────────────────────
-      const images = await docker.listImages();
-      // Support both tag form (RepoTags) and digest form (RepoDigests).
-      // Digest refs appear in RepoDigests as "name@sha256:<hex>", not in RepoTags.
-      const parsedRef = parseConnectorImage(DEFAULT_CONNECTOR_IMAGE);
-      const alreadyPulled = images.some((img) => {
-        if (parsedRef.digest) {
-          return (img.RepoDigests ?? []).some((d) =>
-            d.includes(parsedRef.digest!)
-          );
-        }
-        return (img.RepoTags ?? []).includes(DEFAULT_CONNECTOR_IMAGE);
-      });
-
-      if (!alreadyPulled) {
-        await new Promise<void>((resolve, reject) => {
-          docker.pull(
-            DEFAULT_CONNECTOR_IMAGE,
-            (err: Error | null, stream: NodeJS.ReadableStream) => {
-              if (err) {
-                reject(err);
-                return;
-              }
-              docker.modem.followProgress(stream, (fErr: Error | null) => {
-                if (fErr) reject(fErr);
-                else resolve();
-              });
-            }
-          );
+        // ── Pull image if not already present ──────────────────────────────
+        const images = await docker.listImages();
+        // Support both tag form (RepoTags) and digest form (RepoDigests).
+        // Digest refs appear in RepoDigests as "name@sha256:<hex>", not in RepoTags.
+        const parsedRef = parseConnectorImage(TARGET_CONNECTOR_IMAGE);
+        const alreadyPulled = images.some((img) => {
+          if (parsedRef.digest) {
+            return (img.RepoDigests ?? []).some((d) =>
+              d.includes(parsedRef.digest!)
+            );
+          }
+          return (img.RepoTags ?? []).includes(TARGET_CONNECTOR_IMAGE);
         });
-      }
 
-      // ── Write a minimal config.yaml for the connector ──────────────────
-      // The connector image requires a config file — env vars are not consumed
-      // by the standalone image entrypoint. We use healthCheckPort: 9401 and
-      // adminApi.port: 9402 so both servers are reachable on separate ports.
-      tmpDir = join(
-        tmpdir(),
-        `townhouse-canary-${randomBytes(8).toString('hex')}`
-      );
-      mkdirSync(tmpDir, { recursive: true });
-
-      const configPath = join(tmpDir, 'config.yaml');
-      writeFileSync(
-        configPath,
-        [
-          'nodeId: townhouse-canary',
-          'btpServerPort: 3000',
-          'healthCheckPort: 9401',
-          'environment: development',
-          'deploymentMode: standalone',
-          'logLevel: error',
-          'adminApi:',
-          '  enabled: true',
-          '  port: 9402',
-          '  host: 0.0.0.0',
-          'peers: []',
-          'routes: []',
-        ].join('\n')
-      );
-
-      // ── Start the container ─────────────────────────────────────────────
-      container = await docker.createContainer({
-        Image: DEFAULT_CONNECTOR_IMAGE,
-        HostConfig: {
-          Binds: [`${configPath}:/app/config.yaml:ro`],
-          PortBindings: {
-            '9401/tcp': [{ HostPort: '' }], // healthCheckPort — auto-assign
-            '9402/tcp': [{ HostPort: '' }], // adminApi.port   — auto-assign
-          },
-          AutoRemove: true,
-        },
-      });
-
-      await container.start();
-
-      // ── Discover the bound host ports ──────────────────────────────────
-      const info = await container.inspect();
-      const healthBindings = info.NetworkSettings?.Ports?.['9401/tcp'];
-      const adminBindings = info.NetworkSettings?.Ports?.['9402/tcp'];
-
-      const boundHealthPort = healthBindings?.[0]?.HostPort;
-      const boundAdminPort = adminBindings?.[0]?.HostPort;
-
-      expect(boundHealthPort).toBeTruthy();
-      expect(boundAdminPort).toBeTruthy();
-
-      healthPort = Number(boundHealthPort);
-      adminApiPort = Number(boundAdminPort);
-
-      healthClient = new ConnectorAdminClient(
-        `http://127.0.0.1:${healthPort}`,
-        2000
-      );
-      adminClient = new ConnectorAdminClient(
-        `http://127.0.0.1:${adminApiPort}`,
-        2000
-      );
-
-      // ── Poll /health until 200 (timeout 20s, throw with diagnostic on expiry) ──
-      const deadline = Date.now() + 20_000;
-      let lastError: unknown;
-      let ready = false;
-      while (Date.now() < deadline) {
-        try {
-          await healthClient.getHealth();
-          ready = true;
-          break;
-        } catch (err) {
-          lastError = err;
-          await new Promise((r) => setTimeout(r, 300));
+        if (!alreadyPulled) {
+          await new Promise<void>((resolve, reject) => {
+            docker.pull(
+              TARGET_CONNECTOR_IMAGE,
+              (err: Error | null, stream: NodeJS.ReadableStream) => {
+                if (err) {
+                  reject(err);
+                  return;
+                }
+                docker.modem.followProgress(stream, (fErr: Error | null) => {
+                  if (fErr) reject(fErr);
+                  else resolve();
+                });
+              }
+            );
+          });
         }
-      }
-      if (!ready) {
-        const msg =
-          lastError instanceof Error ? lastError.message : String(lastError);
-        throw new Error(
-          `Connector container failed to become healthy within 20s; last error: ${msg}`
+
+        // ── Write a minimal config.yaml for the connector ──────────────────
+        // The connector image requires a config file — env vars are not consumed
+        // by the standalone image entrypoint. We use healthCheckPort: 9401 and
+        // adminApi.port: 9402 so both servers are reachable on separate ports.
+        tmpDir = join(
+          tmpdir(),
+          `townhouse-canary-${randomBytes(8).toString('hex')}`
         );
+        mkdirSync(tmpDir, { recursive: true });
+
+        const configPath = join(tmpDir, 'config.yaml');
+        writeFileSync(
+          configPath,
+          [
+            'nodeId: townhouse-canary',
+            'btpServerPort: 3000',
+            'healthCheckPort: 9401',
+            'environment: development',
+            'deploymentMode: standalone',
+            'logLevel: error',
+            'adminApi:',
+            '  enabled: true',
+            '  port: 9402',
+            '  host: 0.0.0.0',
+            'peers: []',
+            'routes: []',
+          ].join('\n')
+        );
+
+        // ── Start the container ─────────────────────────────────────────────
+        // AutoRemove gating (Story 50.0 F4): in normal runs we want AutoRemove so
+        // a passing test leaves no exited container. When KEEP_CONTAINER_ON_FAILURE
+        // is set (connector-publish-smoke), we disable AutoRemove so the wrapping
+        // workflow's `docker ps -a --filter ancestor=…` capture step can still
+        // find the container (running OR exited) for log/inspect capture.
+        container = await docker.createContainer({
+          Image: TARGET_CONNECTOR_IMAGE,
+          HostConfig: {
+            Binds: [`${configPath}:/app/config.yaml:ro`],
+            PortBindings: {
+              '9401/tcp': [{ HostPort: '' }], // healthCheckPort — auto-assign
+              '9402/tcp': [{ HostPort: '' }], // adminApi.port   — auto-assign
+            },
+            AutoRemove: !KEEP_CONTAINER_ON_FAILURE,
+          },
+        });
+
+        await container.start();
+
+        // ── Discover the bound host ports ──────────────────────────────────
+        const info = await container.inspect();
+        const healthBindings = info.NetworkSettings?.Ports?.['9401/tcp'];
+        const adminBindings = info.NetworkSettings?.Ports?.['9402/tcp'];
+
+        const boundHealthPort = healthBindings?.[0]?.HostPort;
+        const boundAdminPort = adminBindings?.[0]?.HostPort;
+
+        expect(boundHealthPort).toBeTruthy();
+        expect(boundAdminPort).toBeTruthy();
+
+        healthPort = Number(boundHealthPort);
+        adminApiPort = Number(boundAdminPort);
+
+        healthClient = new ConnectorAdminClient(
+          `http://127.0.0.1:${healthPort}`,
+          2000
+        );
+        adminClient = new ConnectorAdminClient(
+          `http://127.0.0.1:${adminApiPort}`,
+          2000
+        );
+
+        // ── Poll /health until 200 (timeout 20s, throw with diagnostic on expiry) ──
+        const deadline = Date.now() + 20_000;
+        let lastError: unknown;
+        let ready = false;
+        while (Date.now() < deadline) {
+          try {
+            await healthClient.getHealth();
+            ready = true;
+            break;
+          } catch (err) {
+            lastError = err;
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        }
+        if (!ready) {
+          // Review #8 — capture container logs proactively BEFORE the failure
+          // propagates out of beforeAll. If KEEP_CONTAINER_ON_FAILURE=1 is set,
+          // afterAll skips stop/remove so the wrapping workflow can `docker
+          // logs` later — but a connector that crashed during boot may have
+          // already flushed nothing to stdout by then. Grabbing logs here, while
+          // the container is still in the process table, preserves the
+          // diagnostic surface even when KEEP is off or the container exits.
+          suiteHadFailure = true;
+          let logTail = '(no logs captured)';
+          try {
+            const logBuf = (await container.logs({
+              stdout: true,
+              stderr: true,
+              tail: 200,
+            })) as Buffer;
+            // Use the package's canonical stripDockerFrame (docker/log-tail.ts)
+            // to strip the 8-byte Docker multiplex headers — it validates stream
+            // type (1=stdout, 2=stderr) and padding bytes, and falls back to raw
+            // bytes when the buffer doesn't look multiplexed (TTY mode).
+            logTail = stripDockerFrame(logBuf).toString('utf-8').slice(-4000);
+          } catch {
+            // logs not available (container never started or already gone)
+          }
+          const msg =
+            lastError instanceof Error ? lastError.message : String(lastError);
+          throw new Error(
+            `Connector container failed to become healthy within 20s; last error: ${msg}\n` +
+              `── container logs (tail 200, 4KB max) ──\n${logTail}\n── end logs ──`
+          );
+        }
+      } catch (e) {
+        // Review #4 — any throw from anywhere in beforeAll flips the flag
+        // before propagating, so afterAll's `shouldKeep` computation gives
+        // the correct answer regardless of which step failed.
+        suiteHadFailure = true;
+        throw e;
       }
     }, 30_000);
 
+    // Track failures so afterAll can decide whether KEEP=1 should actually
+    // preserve state. vitest's `ctx.task.result.state === 'fail'` covers both
+    // assertion failures and uncaught throws in `it` blocks.
+    afterEach((ctx) => {
+      if (ctx.task.result?.state === 'fail') {
+        suiteHadFailure = true;
+      }
+    });
+
     afterAll(async () => {
+      // KEEP_CONTAINER_ON_FAILURE=1 was originally written to gate
+      // unconditionally on the env var — meaning a PASSING run with KEEP=1
+      // still leaked the container and tmpDir. Review #7 — KEEP should
+      // preserve state ONLY when the suite actually failed; on a green run
+      // the diagnostic rationale doesn't apply, so clean up either way.
+      const shouldKeep = KEEP_CONTAINER_ON_FAILURE && suiteHadFailure;
+
       // AutoRemove: true handles container cleanup once stop() succeeds; if
       // the container was created but never started (rare beforeAll failure
       // path), AutoRemove never fires, so fall back to remove({force:true}).
-      if (container) {
+      if (container && !shouldKeep) {
         try {
-          await container.stop();
+          await container.stop({ t: 3 });
         } catch {
           // not running — fall through to force-remove below
         }
         try {
           await container.remove({ force: true });
-        } catch {
-          // already removed by AutoRemove or never created — nothing to do
+        } catch (e) {
+          // 'No such container' is expected when AutoRemove already cleaned up.
+          // Any other error (socket timeout, daemon failure) is logged so it
+          // doesn't silently mask a real cleanup problem.
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!msg.includes('No such container')) {
+            console.warn(
+              `[canary] afterAll: container.remove() failed unexpectedly: ${msg}`
+            );
+          }
         }
       }
-      if (tmpDir) {
+      // Story 50.0 review F12 + review #7 — only retain the bind-mount source
+      // when we're also retaining the container, since `docker start`/`docker
+      // inspect` reproduction needs the configPath to still exist. On a clean
+      // pass we always reclaim tmpDir; on a failure with KEEP=1 we retain so
+      // the operator can inspect.
+      if (tmpDir && !shouldKeep) {
         rmSync(tmpDir, { recursive: true, force: true });
       }
     }, 15_000);

@@ -17,9 +17,11 @@ const DEFAULT_HS_API_URL = 'http://127.0.0.1:28090';
 
 // Maps server-side step identifiers to the user-visible stage labels.
 const STEP_TO_STAGE: Record<string, string> = {
+  preflight: 'Preflight',
   'derive-key': 'Deriving wallet',
   'pull-image': 'Pulling image',
   'write-yaml': 'Deriving wallet', // same disk-class bucket from operator POV
+  'write-mill-config': 'Deriving wallet', // same disk-class bucket as write-yaml
   'start-container': 'Registering with apex',
   healthcheck: 'Registering with apex',
   'register-peer': 'Live',
@@ -267,6 +269,15 @@ export async function handleNodeAdd(
       errText.includes('Cannot connect to the Docker daemon'))
   ) {
     renderFailure(new Error(errText));
+  } else if (step === 'preflight') {
+    // Preflight failures are configuration errors — the stack is healthy and
+    // must NOT be torn down. Give targeted advice instead of the generic
+    // "hs down && hs up" which would destroy a working stack for no reason.
+    const arrow = ascii ? '->' : '→';
+    process.stderr.write(`${xMark} ${errText}\n`);
+    process.stderr.write(
+      `  ${arrow} Fix the configuration above, then retry 'townhouse node add'.\n`
+    );
   } else {
     // Generic 3-line failure for all other steps.
     const stageName = STEP_TO_STAGE[step] ?? step;

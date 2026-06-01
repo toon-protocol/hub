@@ -446,6 +446,14 @@ export class ConnectorAdminClient {
     authToken: string;
     routes?: { prefix: string; priority?: number }[];
     transport?: 'direct' | 'socks5';
+    // Peer relation. `'child'` marks an apex-owned downstream node (town relay,
+    // mill, dvm): the connector's `requiresSettlementClaim()` returns false for
+    // children, so the apex routes to them for FREE (no settlement channel) —
+    // children don't pay each other. Forwarded verbatim to POST /admin/peers,
+    // which calls setPeerRelation(id, relation). On an existing (inbound-dialed)
+    // peer the connector treats this as an update: no re-dial, just the
+    // relation + any routes are (re)applied.
+    relation?: 'parent' | 'peer' | 'child';
   }): Promise<void> {
     if (!input.url.startsWith('ws://') && !input.url.startsWith('wss://')) {
       throw new Error(

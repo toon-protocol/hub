@@ -57,7 +57,10 @@ import {
   type PortCollision,
 } from './cli/preflight-ports.js';
 import { PullNarrator } from './cli/pull-narrator.js';
-import { readImageManifest } from './state/image-manifest.js';
+import {
+  readImageManifest,
+  isSyntheticDigest,
+} from './state/image-manifest.js';
 import {
   handleNodeAdd,
   handleNodeRemove,
@@ -1586,6 +1589,15 @@ async function collectApexImageRefs(configDir: string): Promise<string[]> {
   if (!existsSync(manifestPath)) return [];
   try {
     const manifest = await readImageManifest(manifestPath);
+    // Skip pre-pull if the manifest is synthetic (smoke-workflow sentinel).
+    // Attempting to pull sha256:dead000… from the registry would fail with a
+    // cryptic 404; the compose step will handle image resolution correctly.
+    if (
+      isSyntheticDigest(manifest.images.connector.digest) ||
+      isSyntheticDigest(manifest.images['townhouse-api'].digest)
+    ) {
+      return [];
+    }
     return [
       `${manifest.images.connector.name}@${manifest.images.connector.digest}`,
       `${manifest.images['townhouse-api'].name}@${manifest.images['townhouse-api'].digest}`,

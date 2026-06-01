@@ -38,6 +38,7 @@ import {
   writeNodesYaml,
   type NodesYamlEntry,
 } from '../../state/nodes-yaml.js';
+import { SYNTHETIC_DIGEST_SENTINEL } from '../../state/image-manifest.js';
 
 // ── Fake keys ─────────────────────────────────────────────────────────────────
 
@@ -225,6 +226,11 @@ function stubFetchOk() {
 beforeEach(async () => {
   resetNodeLifecycleMutex();
   stubFetchOk();
+  // Mill's pre-flight check requires MILL_RELAYS to be set. Stub it for all
+  // tests so mill provision tests pass without real relay infrastructure.
+  // Tests that specifically verify the MILL_RELAYS-absent 400 path override
+  // this stub with vi.stubEnv('MILL_RELAYS', '').
+  vi.stubEnv('MILL_RELAYS', 'wss://test-relay.example.com');
 
   homeDir = await fs.mkdtemp(join(tmpdir(), 'townhouse-lc-test-'));
   configPath = join(homeDir, 'config.yaml');
@@ -257,6 +263,7 @@ afterEach(async () => {
   await fs.rm(homeDir, { recursive: true, force: true });
   resetNodeLifecycleMutex();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 // ── Success path ───────────────────────────────────────────────────────────────
@@ -334,8 +341,82 @@ describe('POST /api/nodes success path', () => {
     expect(body.healthCheckUrl).toBe('http://townhouse-hs-mill:3200/health');
 
     const raw = await fs.readFile(millConfigPath, 'utf-8');
-    const config: unknown = JSON.parse(raw);
-    expect(config).toMatchObject({ swapPairs: [], chains: ['evm'] });
+    const config = JSON.parse(raw) as {
+      swapPairs: unknown[];
+      chains: string[];
+    };
+    expect(config.chains).toContain('evm');
+    expect(config.chains).toContain('solana');
+    expect(Array.isArray(config.swapPairs)).toBe(true);
+    expect(config.swapPairs).toHaveLength(1);
+  });
+
+  it('provisions mill node — swapPairs has EVM→SOL entry with correct chain fields', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'mill' }),
+    });
+
+    expect(res.statusCode).toBe(201);
+    const raw = await fs.readFile(millConfigPath, 'utf-8');
+    const config = JSON.parse(raw) as {
+      swapPairs: {
+        from: { chain: string };
+        to: { chain: string; assetCode: string };
+        rate: string;
+      }[];
+      chains: string[];
+      channels: Record<string, unknown[]>;
+      inventory: Record<string, string>;
+    };
+
+    expect(config.swapPairs).toHaveLength(1);
+    // getDefaultConfig() has no chainProviders → falls back to dev-Anvil sentinel
+    expect(config.swapPairs[0].from.chain).toBe('evm:base:31337');
+    expect(config.swapPairs[0].to.chain).toBe('solana:devnet');
+    expect(config.swapPairs[0].to.assetCode).toBe('USDC');
+    expect(config.swapPairs[0].rate).toBe('1.0');
+    expect(config.chains).toContain('evm');
+    expect(config.chains).toContain('solana');
+    expect(Array.isArray(config.channels['solana:devnet'])).toBe(true);
+    expect(config.channels['solana:devnet'].length).toBeGreaterThan(0);
+    expect(config.inventory['solana:devnet']).toBe('0');
+  });
+
+  it('provisions mill node — swapPairs reads fromChain from chainProviders[0].chainId', async () => {
+    // Exercise the live-config code path: when chainProviders is set, the real
+    // chainId must appear in swapPairs[0].from.chain, not the dev-Anvil fallback.
+    deps.config = {
+      ...getDefaultConfig(),
+      chainProviders: [
+        {
+          chainType: 'evm',
+          chainId: 'evm:eth:1',
+          rpcUrl: 'https://mainnet.example.com',
+          registryAddress: '0x0000000000000000000000000000000000000001',
+          tokenAddress: '0x0000000000000000000000000000000000000002',
+          keyId: 'key-0',
+        },
+      ],
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'mill' }),
+    });
+
+    expect(res.statusCode).toBe(201);
+    const raw = await fs.readFile(millConfigPath, 'utf-8');
+    const config = JSON.parse(raw) as {
+      swapPairs: { from: { chain: string }; to: { chain: string } }[];
+    };
+
+    expect(config.swapPairs[0].from.chain).toBe('evm:eth:1');
+    expect(config.swapPairs[0].to.chain).toBe('solana:devnet');
   });
 
   it('provisions dvm node — correct health URL, no mill.config.json', async () => {
@@ -366,6 +447,91 @@ describe('POST /api/nodes success path', () => {
     expect(orchestrator.pullImageFn).toHaveBeenCalledWith(
       `ghcr.io/toon-protocol/town@sha256:${'b'.repeat(64)}`
     );
+  });
+
+  it('returns 400 with step=pull-image when manifest has synthetic digest', async () => {
+    // Replace the standard manifest with a synthetic one — all four non-connector
+    // entries carry SYNTHETIC_DIGEST_SENTINEL, as produced by connector-publish-smoke.yml.
+    await fs.writeFile(
+      imageManifestPath,
+      JSON.stringify({
+        ...FAKE_MANIFEST,
+        images: {
+          ...FAKE_MANIFEST.images,
+          town: {
+            name: 'ghcr.io/toon-protocol/town',
+            tag: '0.0.1-test',
+            digest: SYNTHETIC_DIGEST_SENTINEL,
+          },
+        },
+      }),
+      'utf-8'
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'town' }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.step).toBe('pull-image');
+    expect(body.err).toMatch(/Synthetic-digest/);
+    // pullImage must NOT be called — no real registry pull attempted.
+    expect(orchestrator.pullImageFn).not.toHaveBeenCalled();
+    // nodes.yaml must be clean — pre-check fires before writeNodesYaml.
+    const yaml = await readNodesYaml(nodesYamlPath);
+    expect(yaml.entries).toHaveLength(0);
+  });
+
+  it('mill: returns 400 with step=preflight when MILL_RELAYS is not set', async () => {
+    // Override the beforeEach stub to simulate a missing env var. An empty
+    // string is falsy, triggering the same pre-flight guard as a truly absent
+    // variable.
+    vi.stubEnv('MILL_RELAYS', '');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'mill' }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.step).toBe('preflight');
+    expect(body.err).toMatch(/MILL_RELAYS/);
+    // No file side effects — mill.config.json must not exist AND nodes.yaml must
+    // have no mill entry (the pre-check fires before writeNodesYaml).
+    await expect(fs.access(millConfigPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    const yaml = await readNodesYaml(nodesYamlPath);
+    expect(yaml.entries.filter((e) => e.type === 'mill')).toHaveLength(0);
+  });
+
+  it('mill: returns 400 with step=preflight when MILL_RELAYS is whitespace-only', async () => {
+    // Whitespace-only is truthy for !process.env['MILL_RELAYS'] but should be
+    // caught by the .trim() guard — an all-space relay URL would make Mill crash
+    // at boot instead of returning a fast 400.
+    vi.stubEnv('MILL_RELAYS', '   ');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'mill' }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.step).toBe('preflight');
+    expect(body.err).toMatch(/MILL_RELAYS/);
+    await expect(fs.access(millConfigPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 });
 
@@ -472,6 +638,27 @@ describe('POST /api/nodes rollback — step failures (AC #3)', () => {
     expect(yaml.entries).toHaveLength(0);
     expect(orchestrator.stopNodeViaComposeFn).toHaveBeenCalledWith('town');
     expect(await connectorAdmin.getPeers()).toHaveLength(0);
+  });
+
+  it('mill: write-mill-config failure → 500 with step=write-mill-config, yaml rolled back, partial file cleaned up', async () => {
+    // Pre-create millConfigPath as a directory to force fs.writeFile to throw
+    // EISDIR. The rollback must still remove the yaml entry even though the
+    // mill-config removal itself will fail (can't rm a directory without recursive).
+    await fs.mkdir(millConfigPath, { recursive: true });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'mill' }),
+    });
+
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.step).toBe('write-mill-config');
+    // Yaml must be rolled back even when mill-config cleanup fails
+    const yaml = await readNodesYaml(nodesYamlPath);
+    expect(yaml.entries.filter((e) => e.type === 'mill')).toHaveLength(0);
   });
 
   it('mill: start-container failure removes mill.config.json on rollback', async () => {

@@ -22,8 +22,12 @@ import { bytesToHex } from '@noble/hashes/utils';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ApiDeps } from '../types.js';
 import type { NodeType } from '../types.js';
+import type { TownhouseConfig } from '../../config/schema.js';
 import { readNodesYaml, writeNodesYaml } from '../../state/nodes-yaml.js';
-import { readImageManifest } from '../../state/image-manifest.js';
+import {
+  readImageManifest,
+  isSyntheticDigest,
+} from '../../state/image-manifest.js';
 import {
   CONTAINER_PREFIX,
   NODE_BTP_PORT,
@@ -53,6 +57,62 @@ const ACCOUNT_INDEX: Record<NodeType, number> = {
 
 /** Default ILP prefix for the apex connector (constant from config-generator). */
 const APEX_ILP_ADDRESS = 'g.townhouse';
+
+/**
+ * Build the initial mill.config.json object for a freshly provisioned Mill.
+ *
+ * Mill's parseRawConfig() converts channels[*].cumulativeAmount / nonce and
+ * inventory[*] from string → bigint. JSON cannot serialize bigint natively, so
+ * these fields MUST be written as strings.
+ *
+ * The bootstrap channel and zero inventory allow validateConfig() to pass
+ * without pre-funding the operator's Mill inventory.
+ *
+ * NOTE: validateConfig() also requires a non-empty `relayUrls` array, which
+ * is NOT included here — it is injected at runtime via the `MILL_RELAYS`
+ * environment variable (set in townhouse-hs.yml compose env). The POST handler
+ * checks MILL_RELAYS before calling this function, so a missing env var is
+ * caught before any file is written.
+ */
+function buildMillSwapPairConfig(config: TownhouseConfig): object {
+  // Both absent (undefined) and explicitly empty ([]) fall through to the
+  // dev-Anvil sentinel — if a live EVM chain is configured, ensure
+  // chainProviders has at least one entry with the correct chainId.
+  const fromChain = config.chainProviders?.[0]?.chainId ?? 'evm:base:31337';
+  // toChain is fixed at 'solana:devnet' for the v0.1 pilot — TownhouseConfig
+  // has no Solana chain-ID field yet. Add one and read it here when mainnet
+  // support is needed.
+  const toChain = 'solana:devnet';
+
+  return {
+    swapPairs: [
+      {
+        from: { assetCode: 'USDC', assetScale: 6, chain: fromChain },
+        to: { assetCode: 'USDC', assetScale: 6, chain: toChain },
+        rate: '1.0',
+        minAmount: '1000',
+        maxAmount: '1000000000',
+      },
+    ],
+    chains: ['evm', 'solana'],
+    // Bootstrap: validateConfig() requires a non-empty channels array for
+    // each distinct pair.to.chain. The zero channelId is a valid-format
+    // sentinel that will never match a real on-chain channel.
+    channels: {
+      [toChain]: [
+        {
+          channelId: '0x' + '0'.repeat(64),
+          cumulativeAmount: '0',
+          nonce: '0',
+        },
+      ],
+    },
+    // Zero initial SOL inventory; parsed to 0n by the Mill CLI.
+    inventory: {
+      [toChain]: '0',
+    },
+  };
+}
 
 /**
  * Poll `url` with a per-request timeout until the server returns HTTP 200.
@@ -227,6 +287,18 @@ export function registerNodeLifecycleRoutes(
           });
         }
 
+        // Pre-check: MILL_RELAYS must be set before any state is written.
+        // Mill's validateConfig() throws INVALID_CONFIG on an empty relayUrls
+        // array, producing a silent 60-second healthcheck timeout. Catching the
+        // missing var here — before writeNodesYaml (step 3) — means no rollback
+        // is needed and the caller gets an actionable 400 with zero side-effects.
+        if (type === 'mill' && !process.env['MILL_RELAYS']?.trim()) {
+          return reply.status(400).send({
+            step: 'preflight',
+            err: 'MILL_RELAYS is not set or is blank. Export a comma-separated list of relay URLs before provisioning Mill (e.g. export MILL_RELAYS=wss://relay.example.com). See packages/townhouse/README.md.',
+          });
+        }
+
         const derivationIndex = ACCOUNT_INDEX[type];
         const id = type; // v1: id === type
         const peerId = type; // v1: peerId === id
@@ -292,6 +364,12 @@ export function registerNodeLifecycleRoutes(
         try {
           const manifest = await readImageManifest(imageManifestPath);
           const entry = manifest.images[type];
+          if (isSyntheticDigest(entry.digest)) {
+            return reply.status(400).send({
+              step: 'pull-image',
+              err: `Synthetic-digest manifest: image-manifest.json was produced by the connector-publish-smoke workflow for smoke testing only. Fetch a real manifest via 'gh run download' or rerun without --skip-fetch before provisioning nodes.`,
+            });
+          }
           const imageRef = `${entry.name}@${entry.digest}`;
           await deps.orchestrator.pullImage(imageRef);
         } catch (err: unknown) {
@@ -346,9 +424,10 @@ export function registerNodeLifecycleRoutes(
         // ── Step 3b: mill — write mill.config.json (same rollback bucket as step 3) ──
         let millConfigWritten = false;
         if (type === 'mill') {
+          // MILL_RELAYS pre-check already ran in pre-checks above — guaranteed set here.
           try {
             const defaultMillConfig = JSON.stringify(
-              { swapPairs: [], chains: ['evm'], channels: {} },
+              buildMillSwapPairConfig(deps.config),
               null,
               2
             );
@@ -371,20 +450,28 @@ export function registerNodeLifecycleRoutes(
             request.log.error(
               {
                 event: 'node_lifecycle_failure',
-                step: 'write-yaml',
+                step: 'write-mill-config',
                 err: errMsg,
               },
               'Step 3b failed: write mill.config.json'
             );
-            // Rollback: remove the yaml entry we just added
-            const rollbackError = await safeRollbackYaml(
+            // Rollback: remove any partial mill.config.json first, then the yaml entry.
+            const rollbackMillError = await safeRollbackMillConfig(
+              millConfigPath,
+              request
+            );
+            const rollbackYamlError = await safeRollbackYaml(
               nodesYamlPath,
               peerId,
               request
             );
+            const rollbackError = combineRollbackErrors(
+              rollbackMillError,
+              rollbackYamlError
+            );
             return reply
               .status(500)
-              .send({ step: 'write-yaml', err: errMsg, rollbackError });
+              .send({ step: 'write-mill-config', err: errMsg, rollbackError });
           }
         }
 
@@ -833,6 +920,21 @@ function combineRollbackErrors(
   return present.join('; ');
 }
 
+// Matches `KEY=value` where KEY is a known-secret name; redacts the value
+// up to the next whitespace, quote, or newline. Compiled once at module scope
+// so repeated error-path calls don't re-join the array and re-compile the RegExp.
+const SECRET_KEYS = [
+  'TOWN_SECRET_KEY',
+  'MILL_SECRET_KEY',
+  'DVM_SECRET_KEY',
+  'TOWN_SETTLEMENT_PRIVATE_KEY',
+  'MILL_SETTLEMENT_PRIVATE_KEY',
+  'DVM_SETTLEMENT_PRIVATE_KEY',
+  'MILL_MNEMONIC',
+  'TOWNHOUSE_WALLET_PASSWORD',
+];
+const REDACT_RE = new RegExp(`(${SECRET_KEYS.join('|')})=[^\\s"'\\n\\r]+`, 'g');
+
 /**
  * Strip secret-name env assignments from an error message before it reaches
  * the HTTP response body (P5). Compose stderr can echo env interpolation in
@@ -841,18 +943,5 @@ function combineRollbackErrors(
  * operators still see WHICH secret was involved.
  */
 function sanitizeErrorMessage(msg: string): string {
-  // Matches `KEY=value` where KEY is a known-secret name; redacts the value
-  // up to the next whitespace, quote, or newline.
-  const SECRET_KEYS = [
-    'TOWN_SECRET_KEY',
-    'MILL_SECRET_KEY',
-    'DVM_SECRET_KEY',
-    'TOWN_SETTLEMENT_PRIVATE_KEY',
-    'MILL_SETTLEMENT_PRIVATE_KEY',
-    'DVM_SETTLEMENT_PRIVATE_KEY',
-    'MILL_MNEMONIC',
-    'TOWNHOUSE_WALLET_PASSWORD',
-  ];
-  const pattern = new RegExp(`(${SECRET_KEYS.join('|')})=[^\\s"'\\n\\r]+`, 'g');
-  return msg.replace(pattern, '$1=[REDACTED]');
+  return msg.replace(REDACT_RE, '$1=[REDACTED]');
 }

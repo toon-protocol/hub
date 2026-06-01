@@ -1,6 +1,6 @@
 {
   "name": "@toon-protocol/townhouse",
-  "version": "0.1.0-rc5",
+  "version": "0.1.0-rc7",
   "description": "TOON Townhouse — host-native orchestrator + dashboard for Docker-containerized TOON nodes",
   "type": "module",
   "main": "./dist/index.js",
@@ -71,7 +71,9 @@
   },
   "devDependencies": {
     "@toon-protocol/client": "workspace:^",
+    "@toon-protocol/core": "workspace:^",
     "@toon-protocol/relay": "workspace:^",
+    "@toon-protocol/sdk": "workspace:^",
     "@types/dockerode": "^3.3.0",
     "@types/node": "^20.0.0",
     "@types/react": "^18.3.3",
