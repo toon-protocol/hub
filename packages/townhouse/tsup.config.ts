@@ -15,6 +15,21 @@ import { getImageDigest } from './scripts/get-image-digest.mjs';
 export default defineConfig({
   entry: ['src/index.ts', 'src/cli.ts'],
   format: ['esm'],
+  // Inline `@toon-protocol/mill/wallet` (the pure key-derivation `deriveMillKeys`)
+  // and its crypto deps into dist. mill ships as a Docker image, NOT an npm
+  // runtime dep — bundling here is what lets townhouse's published package.json
+  // carry ZERO @toon-protocol/* runtime dependencies (see package-structure
+  // guard test). The crypto libs are bundled too (not left external) so the
+  // inlined code resolves @noble's v2-style subpaths at BUILD time and can't
+  // hit a runtime version-skew against townhouse's own @noble/@scure versions.
+  noExternal: [
+    '@toon-protocol/mill',
+    '@scure/bip39',
+    '@scure/bip32',
+    '@noble/curves',
+    '@noble/hashes',
+    'ed25519-hd-key',
+  ],
   dts: true,
   sourcemap: true,
   clean: true,

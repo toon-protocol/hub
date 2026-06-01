@@ -50,7 +50,12 @@ import type {
   NodeKeyInfo,
   ArweaveJwk,
 } from './types.js';
-import { deriveMillKeys } from '@toon-protocol/mill';
+// Imported from the lean `/wallet` subpath (NOT the `@toon-protocol/mill` root
+// barrel) so tsup inlines only the pure key-derivation + its light crypto deps.
+// mill is a build-only (dev) dependency — it ships as a Docker image, never an
+// npm runtime dep of townhouse. The `noExternal` rule in tsup.config.ts bundles
+// this into dist so the published package has zero @toon-protocol/* runtime deps.
+import { deriveMillKeys } from '@toon-protocol/mill/wallet';
 
 const BASE58_ALPHABET =
   '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';

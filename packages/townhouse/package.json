@@ -56,7 +56,6 @@
     "@scure/bip32": "^2.0.0",
     "@scure/bip39": "^2.0.0",
     "@toon-format/toon": "^1.4.0",
-    "@toon-protocol/mill": "workspace:^",
     "ansi-escapes": "^7.3.0",
     "bs58": "^5.0.0",
     "dockerode": "^4.0.0",
@@ -72,6 +71,7 @@
   "devDependencies": {
     "@toon-protocol/client": "workspace:^",
     "@toon-protocol/core": "workspace:^",
+    "@toon-protocol/mill": "workspace:^",
     "@toon-protocol/relay": "workspace:^",
     "@toon-protocol/sdk": "workspace:^",
     "@types/dockerode": "^3.3.0",

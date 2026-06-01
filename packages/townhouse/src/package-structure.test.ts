@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
@@ -67,12 +67,16 @@ describe('package.json structure', () => {
     }
   });
 
-  it('does not depend on @toon-protocol/core or @toon-protocol/sdk', () => {
+  it('has NO @toon-protocol/* runtime dependencies (they ship as Docker images / are inlined)', () => {
+    // town/mill/dvm are Docker-image node types, not npm packages; sdk/core are
+    // inlined where needed. A runtime dep on any of them would (a) bloat the
+    // install and (b) 404 at `npx @toon-protocol/townhouse` if that package was
+    // never published to npm — exactly the v0.1.0 mill regression this guards.
     const deps = pkg['dependencies'] as Record<string, string> | undefined;
-    if (deps) {
-      expect(deps['@toon-protocol/core']).toBeUndefined();
-      expect(deps['@toon-protocol/sdk']).toBeUndefined();
-    }
+    const toonRuntimeDeps = Object.keys(deps ?? {}).filter((name) =>
+      name.startsWith('@toon-protocol/')
+    );
+    expect(toonRuntimeDeps).toEqual([]);
   });
 
   it('has required dependencies: yaml, dockerode', () => {
@@ -85,6 +89,26 @@ describe('package.json structure', () => {
     const publishConfig = pkg['publishConfig'] as Record<string, unknown>;
     expect(publishConfig).toBeDefined();
     expect(publishConfig['access']).toBe('public');
+  });
+
+  it('built dist/*.js contains no bare @toon-protocol/* runtime import (deriveMillKeys must be inlined)', () => {
+    // Runs only when dist/ exists (post-build). tsup `noExternal` must inline
+    // `@toon-protocol/mill/wallet`; if it leaks back to an external import, the
+    // published tarball would 404 against an unpublished package at install.
+    const distDir = join(__dirname, '..', 'dist');
+    let jsFiles: string[];
+    try {
+      jsFiles = readdirSync(distDir).filter((f) => f.endsWith('.js'));
+    } catch {
+      return; // dist not built in this run — covered by the CI build job
+    }
+    for (const f of jsFiles) {
+      const src = readFileSync(join(distDir, f), 'utf-8');
+      expect(
+        /from\s+["']@toon-protocol\//.test(src),
+        `${f} has an unbundled @toon-protocol/* import`
+      ).toBe(false);
+    }
   });
 });
 

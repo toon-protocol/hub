@@ -8,14 +8,14 @@ import type { WalletManager } from '../wallet/index.js';
 import type { ConnectorAdminClient } from '../connector/index.js';
 import type { TownhouseConfig } from '../config/schema.js';
 import type { TransportProbe } from '../connector/transport-probe.js';
-import type { MillHealthResponse } from '@toon-protocol/mill';
-
-// DvmHealthResponse is intentionally inlined here (rather than imported from
-// @toon-protocol/sdk) to keep townhouse off the sdk dependency graph — the
-// package is a thin host orchestrator and pulling sdk just for a response
-// shape blows up the install size and breaks the architectural boundary
-// asserted by package-structure.test.ts. Keep this in sync with the
-// canonical definition at packages/sdk/src/dvm-health.ts.
+// DvmHealthResponse / MillHealthResponse are intentionally inlined here (rather
+// than imported from @toon-protocol/sdk / @toon-protocol/mill) to keep townhouse
+// off those packages' dependency graphs — the package is a thin host
+// orchestrator and pulling sdk/mill just for a response shape blows up the
+// install size and breaks the architectural boundary asserted by
+// package-structure.test.ts. (mill/sdk/dvm ship as Docker images, not npm
+// runtime deps.) Keep DvmHealthResponse in sync with packages/sdk/src/dvm-health.ts
+// and MillHealthResponse in sync with packages/mill/src/mill.ts.
 
 /** Per-kind job count for jobsRecent.byKind */
 export interface DvmJobsByKindEntry {
@@ -50,6 +50,36 @@ export interface DvmHealthResponse {
   kindPricing: Record<string, string>;
   basePricePerByte: string;
   jobsRecent: DvmJobsRecent;
+}
+
+/** Chains a Mill node can settle on. Inlined from packages/mill/src/wallet.ts. */
+type MillChainKind = 'evm' | 'mina' | 'solana';
+
+/** A configured swap pair, inlined from packages/core/src/types.ts (SwapPair). */
+interface MillSwapPair {
+  from: { assetCode: string; assetScale: number; chain: string };
+  to: { assetCode: string; assetScale: number; chain: string };
+  rate: string;
+  minAmount?: string;
+  maxAmount?: string;
+}
+
+/**
+ * Response shape for GET /health on the Mill BLS server. Inlined from
+ * packages/mill/src/mill.ts (MillHealthResponse) — keep in sync.
+ */
+export interface MillHealthResponse {
+  status: 'ok' | 'starting' | 'stopping' | 'stopped';
+  version: string;
+  nodePubkey: string;
+  swapPairsCount: number;
+  chains: readonly MillChainKind[];
+  uptimeSec: number;
+  inventory: Record<string, string>;
+  /** Configured swap pairs — operator-config, no secrets. */
+  swapPairs: MillSwapPair[];
+  /** Per-asset available reserves, parallel to `inventory` (which is total). */
+  inventoryAvailable: Record<string, string>;
 }
 
 /** Node types supported by Townhouse */
@@ -187,9 +217,6 @@ export interface TimeseriesBucket {
 export interface PacketTimeseriesPayload {
   buckets: TimeseriesBucket[];
 }
-
-/** Re-export for consumers that need the full Mill health shape */
-export type { MillHealthResponse };
 
 /** Minimal common health shape; superset emitted by Town containers. */
 export interface TownHealthPayload {

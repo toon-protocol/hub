@@ -20,7 +20,10 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 
-import type { SettlementChain } from '@toon-protocol/mill';
+// Inlined (not imported from @toon-protocol/mill) to keep townhouse off mill's
+// dependency graph — mill ships as a Docker image, not an npm runtime dep. Keep
+// in sync with the canonical definition at packages/mill/src/settlement-event.ts.
+type SettlementChain = 'evm' | 'solana';
 
 /**
  * Subset of `deploy/akash/leases.json` that this module reads. The full file

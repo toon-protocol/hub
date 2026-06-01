@@ -837,9 +837,6 @@ importers:
       '@toon-format/toon':
         specifier: ^1.4.0
         version: 1.4.0
-      '@toon-protocol/mill':
-        specifier: workspace:^
-        version: link:../mill
       ansi-escapes:
         specifier: ^7.3.0
         version: 7.3.0
@@ -880,6 +877,9 @@ importers:
       '@toon-protocol/core':
         specifier: workspace:^
         version: link:../core
+      '@toon-protocol/mill':
+        specifier: workspace:^
+        version: link:../mill
       '@toon-protocol/relay':
         specifier: workspace:^
         version: link:../relay
