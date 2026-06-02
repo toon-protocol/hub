@@ -230,6 +230,48 @@ describe('CLI', () => {
         rmSync(dir, { recursive: true, force: true });
       }
     });
+
+    it('init prints the next-step (hs up) call-to-action on success', async () => {
+      const dir = makeTempDir();
+      try {
+        await main([
+          'init',
+          '--force',
+          '--config-dir',
+          dir,
+          '--password',
+          'testpass1234',
+        ]);
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('Next — start your node');
+        expect(output).toContain('hs up');
+        // Non-default config dir → the next command must carry -c <config>.
+        expect(output).toContain(`-c ${join(dir, 'config.yaml')}`);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('init reuses an existing wallet (keys preserved) and still points to hs up', async () => {
+      const dir = makeTempDir();
+      try {
+        await main(['init', '--config-dir', dir, '--password', 'testpass1234']);
+        // Remove only config.yaml, keep wallet.enc, then re-init without --force.
+        rmSync(join(dir, 'config.yaml'));
+        consoleSpy.mockClear();
+        await main(['init', '--config-dir', dir, '--password', 'testpass1234']);
+        const output = consoleSpy.mock.calls
+          .map((c) => String(c[0]))
+          .join('\n');
+        expect(output).toContain('keeping your existing keys');
+        expect(output).toContain('nothing changed');
+        expect(output).toContain('hs up');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('status (T-002)', () => {

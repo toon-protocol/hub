@@ -172,4 +172,38 @@ describe.skipIf(skipPackTest)('tarball-contents', () => {
       }
     }
   );
+
+  it('tarball ships a published, npm-facing README.md', () => {
+    const readmePath = join(extractDir, 'package', 'README.md');
+    expect(existsSync(readmePath), 'README.md must ship in the tarball').toBe(
+      true
+    );
+    const readme = readFileSync(readmePath, 'utf-8');
+    // It is the operator quickstart...
+    expect(readme).toContain('npx @toon-protocol/townhouse init');
+    expect(readme).toContain('npx @toon-protocol/townhouse hs up');
+    // ...not the contributor doc. A published-package user has no monorepo, no
+    // sibling repos, and no dev-stack script — those instructions would only
+    // confuse them, so they must not leak back into the published README.
+    expect(
+      readme,
+      'published README must not contain monorepo-only `pnpm --filter` commands'
+    ).not.toMatch(/pnpm --filter/);
+    expect(
+      readme,
+      'published README must not reference sibling repo paths (../)'
+    ).not.toContain('../');
+    expect(
+      readme,
+      'published README must not reference the contributor dev-stack script'
+    ).not.toContain('townhouse-dev-infra.sh');
+  });
+
+  it('tarball does NOT ship the contributor CONTRIBUTING.md', () => {
+    const contribPath = join(extractDir, 'package', 'CONTRIBUTING.md');
+    expect(
+      existsSync(contribPath),
+      'CONTRIBUTING.md is contributor-only and must stay out of the npm tarball'
+    ).toBe(false);
+  });
 });

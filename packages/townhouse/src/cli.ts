@@ -20,6 +20,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  realpathSync,
 } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
@@ -222,6 +223,27 @@ export interface CliNodeCommandOverrides {
 const DEFAULT_CONFIG_DIR = join(homedir(), '.townhouse');
 const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, 'config.yaml');
 
+/**
+ * Print the "what now" call-to-action after init. The journey from `init` to a
+ * running node is the moment a first-timer is most likely to stall, so init must
+ * hand them the exact next command. When a non-default config dir is used, the
+ * next command needs an explicit `-c <path>`.
+ */
+function printInitNextStep(dir: string): void {
+  const isDefaultDir = dir === resolve(DEFAULT_CONFIG_DIR);
+  const cmd = isDefaultDir
+    ? 'npx @toon-protocol/townhouse hs up'
+    : `npx @toon-protocol/townhouse hs up -c ${join(dir, 'config.yaml')}`;
+  console.log('');
+  console.log('Next — start your node:');
+  console.log(`  ${cmd}`);
+  console.log('');
+  console.log(
+    'First run pulls container images and bootstraps a hidden service.'
+  );
+  console.log('It can take a few minutes; progress is shown throughout.');
+}
+
 async function handleInit(
   force: boolean,
   configDir?: string,
@@ -276,9 +298,17 @@ async function handleInit(
   // Generate wallet — use config dir for wallet path (overrides default home dir path)
   const walletPath = join(dir, 'wallet.enc');
   if (existsSync(walletPath) && !force) {
+    console.log('');
     console.log(
-      `Wallet already exists at ${walletPath}. Skipping wallet generation.`
+      `Wallet already exists at ${walletPath} — keeping your existing keys.`
     );
+    console.log(
+      'Your seed phrase from the first run is still valid; nothing changed.'
+    );
+    console.log(
+      '(Re-run with --force to regenerate, which REPLACES your keys.)'
+    );
+    printInitNextStep(dir);
     return;
   }
 
@@ -322,6 +352,8 @@ async function handleInit(
 
   // Zero key material
   walletManager.lock();
+
+  printInitNextStep(dir);
 }
 
 async function handleSetup(
@@ -1688,8 +1720,11 @@ async function handleHsUp(
   } else if (process.stdin.isTTY) {
     resolvedPassword = await promptPassword('Wallet password: ');
   } else {
+    // No interactive terminal (CI, SSH without a TTY, piped stdin). Make the
+    // reason explicit so the user knows why no prompt appeared and what to do.
     console.error(
-      'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
+      'Wallet password required, but no interactive terminal is available to prompt.\n' +
+        'Pass --password <pw> or set TOWNHOUSE_WALLET_PASSWORD.'
     );
     process.exitCode = 1;
     return;
@@ -1839,14 +1874,25 @@ async function handleHsUp(
             console.log(`  [${pulled}/${apexImages.length}] ${ref}`);
             await orch.pullImage(ref);
           }
+        } else {
+          // No pinned image manifest (e.g. local dev tree). Compose will pull
+          // images on demand during `up` — which can be a multi-minute period
+          // with little output. Tell the user so the wait isn't a silent void.
+          console.log(
+            'No pinned image manifest found — Docker will pull images on demand.'
+          );
+          console.log(
+            'First start can take several minutes with limited progress output.'
+          );
         }
       } catch (pullErr: unknown) {
-        // Degrade silently per Followup D spec — compose up will retry the
-        // pull and surface a real error if it fails permanently.
+        // Non-fatal: compose up will retry the pull and surface a real error if
+        // it fails permanently. Narrate it calmly rather than as an alarm.
         const detail =
           pullErr instanceof Error ? pullErr.message : String(pullErr);
-        console.error(
-          `[townhouse hs up] pre-pull skipped (non-fatal, compose will retry): ${detail}`
+        console.log(
+          `Could not pre-pull images (${detail}). Docker will pull them during ` +
+            'startup — this is normal and may take a few minutes.'
         );
       }
     }
@@ -1887,6 +1933,16 @@ async function handleHsUp(
       resolve(config.wallet.encrypted_path)
     );
     process.env['TOWNHOUSE_DOCKER_GID'] = String(dockerSockGid);
+
+    // Guarantee the bootstrap phase is narrated before the up-to-90s hostname
+    // wait. The containerState event above may never fire with a matching state
+    // (observed in plain/non-TTY boots: a silent ~20s gap here), so trigger the
+    // phase explicitly. The event handler no-ops once bootstrapStarted is set.
+    if (!bootstrapStarted) {
+      bootstrapStarted = true;
+      ribbon.start('bootstrap');
+    }
+
     // Retry up to 3×: the ATOR anon SDK (@anyone-protocol/anyone-client@1.1.x)
     // has a hardcoded 60s bootstrap timeout that fires when relay descriptor
     // loading is slow. `downHs` omits --volumes so the keypair is preserved.
@@ -1995,14 +2051,33 @@ async function handleHsUp(
     // Dynamic import keeps Ink + React out of non-TTY startup path (faster --help).
     // On non-TTY the process exits naturally after this block (Story 45.4 AC #11).
     if (shouldRenderInk()) {
-      const { mountTui } = await import('./tui/index.js');
-      // P27 (D1): thread HS_TOWNHOUSE_API_URL env override into the TUI so
-      // operators on a non-default Fastify port don't see eternal fetch_failed.
-      const apiUrlOverride = process.env['HS_TOWNHOUSE_API_URL'];
-      const mountOpts =
-        apiUrlOverride !== undefined ? { apiUrl: apiUrlOverride } : {};
-      const instance = mountTui(mountOpts);
-      await instance.waitUntilExit();
+      // Apex is already live here (host.json written, "Apex live at …" printed
+      // above). A TUI mount/runtime failure must NOT bubble to the outer catch —
+      // that renders "Apex boot failed" and a non-zero exit, telling the user
+      // their working node died and prompting them to tear it down. Isolate it.
+      try {
+        const { mountTui } = await import('./tui/index.js');
+        // P27 (D1): thread HS_TOWNHOUSE_API_URL env override into the TUI so
+        // operators on a non-default Fastify port don't see eternal fetch_failed.
+        const apiUrlOverride = process.env['HS_TOWNHOUSE_API_URL'];
+        const mountOpts =
+          apiUrlOverride !== undefined ? { apiUrl: apiUrlOverride } : {};
+        const instance = mountTui(mountOpts);
+        await instance.waitUntilExit();
+      } catch (tuiErr: unknown) {
+        const detail =
+          tuiErr instanceof Error ? tuiErr.message : String(tuiErr);
+        console.error('');
+        console.error(`Your node is live at ${hostname}.`);
+        console.error(
+          `The live dashboard could not open (${detail}) — this is a display ` +
+            'issue, not a node issue. Your node keeps running.'
+        );
+        console.error(
+          'Stop it anytime with:  npx @toon-protocol/townhouse hs down'
+        );
+        // Leave process.exitCode at success — the boot succeeded.
+      }
     }
   } catch (err: unknown) {
     const { exitCode } = renderFailure(err);
@@ -2547,10 +2622,20 @@ export async function main(
 }
 
 // Self-invoke when run as entrypoint.
+// process.argv[1] can be a symlink (e.g. node_modules/.bin/townhouse created by
+// npm/npx), while import.meta.url is the realpath of dist/cli.js. Comparing them
+// directly makes the guard false under npx/installed-bin, so main() never runs and
+// every command silently no-ops. Resolve symlinks before comparing.
 const invokedFile = process.argv[1];
-const invokedDirectly =
-  typeof invokedFile === 'string' &&
-  import.meta.url === pathToFileURL(invokedFile).href;
+let invokedDirectly = false;
+if (typeof invokedFile === 'string') {
+  try {
+    invokedDirectly =
+      import.meta.url === pathToFileURL(realpathSync(invokedFile)).href;
+  } catch {
+    invokedDirectly = import.meta.url === pathToFileURL(invokedFile).href;
+  }
+}
 
 if (invokedDirectly) {
   main(process.argv.slice(2)).catch((error: unknown) => {

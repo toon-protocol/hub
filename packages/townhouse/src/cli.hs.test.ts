@@ -1276,7 +1276,7 @@ describe('CLI hs subcommand', () => {
     }
   });
 
-  it('hs up: missing image-manifest.json silently skips pre-pull (no narration, no error)', async () => {
+  it('hs up: missing image-manifest.json narrates on-demand pull (no silent void, no error)', async () => {
     const { configDir, configPath } = await makeHsTestDir();
     // Intentionally NOT writing image-manifest.json.
     try {
@@ -1292,9 +1292,11 @@ describe('CLI hs subcommand', () => {
       const stdout = consoleSpy.mock.calls
         .map((c) => c[0] as string)
         .join('\n');
-      // No pre-pull preamble. No `[pull]` lines.
-      expect(stdout).not.toContain('Pulling');
+      // No per-image pre-pull lines (no manifest to pin them)...
       expect(stdout).not.toContain('[pull]');
+      // ...but the wait is NOT a silent void: the user is told Docker will pull
+      // images on demand and that first start can take a few minutes.
+      expect(stdout).toContain('Docker will pull');
       // Boot still succeeds.
       expect(process.exitCode).not.toBe(1);
       expect(overrides.createOrchestrator).toHaveBeenCalled();
@@ -1316,10 +1318,12 @@ describe('CLI hs subcommand', () => {
         overrides
       );
 
-      const errOutput = consoleErrorSpy.mock.calls
+      const stdout = consoleSpy.mock.calls
         .map((c) => c[0] as string)
         .join('\n');
-      expect(errOutput).toContain('pre-pull skipped (non-fatal');
+      // Calm, non-alarming narration (not an error) — and the boot continues.
+      expect(stdout).toContain('Could not pre-pull images');
+      expect(stdout).toContain('Docker will pull them during startup');
       // Boot still proceeded to orchestrator.up — see createOrchestrator was
       // called and the orchestrator stub's up was invoked.
       const orchInstance = (
@@ -1328,6 +1332,62 @@ describe('CLI hs subcommand', () => {
       expect(orchInstance.up).toHaveBeenCalled();
       expect(process.exitCode).not.toBe(1);
     } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up: TUI mount failure is NOT reported as a boot failure (apex already live)', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    writeApexManifest(configDir);
+    const overrides = makeHsOverrides({});
+
+    // Force the Ink/TUI path on (shouldRenderInk needs a TTY, no CI, TERM≠dumb)
+    // and make the TUI mount throw — simulating an Ink/React render failure that
+    // happens AFTER apex is already live. The boot must still count as success.
+    const origStdoutIsTTY = process.stdout.isTTY;
+    const origCI = process.env['CI'];
+    const origNoColor = process.env['NO_COLOR'];
+    const origTerm = process.env['TERM'];
+    Object.defineProperty(process.stdout, 'isTTY', {
+      value: true,
+      configurable: true,
+    });
+    delete process.env['CI'];
+    process.env['NO_COLOR'] = '1'; // suppress the ribbon spinner timer
+    process.env['TERM'] = 'xterm';
+    vi.mocked(mountTui).mockImplementationOnce(() => {
+      throw new Error('ink mount boom');
+    });
+
+    try {
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      // We actually exercised the TUI branch.
+      expect(vi.mocked(mountTui)).toHaveBeenCalled();
+      // Boot is NOT reported as a failure — apex is live.
+      expect(process.exitCode).not.toBe(1);
+      const stderr = consoleErrorSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
+      expect(stderr).not.toContain('Apex boot failed');
+      // The display failure is surfaced as a calm, non-fatal note instead.
+      expect(stderr).toContain('display issue, not a node issue');
+    } finally {
+      Object.defineProperty(process.stdout, 'isTTY', {
+        value: origStdoutIsTTY,
+        configurable: true,
+      });
+      if (origCI === undefined) delete process.env['CI'];
+      else process.env['CI'] = origCI;
+      if (origNoColor === undefined) delete process.env['NO_COLOR'];
+      else process.env['NO_COLOR'] = origNoColor;
+      if (origTerm === undefined) delete process.env['TERM'];
+      else process.env['TERM'] = origTerm;
       rmSync(configDir, { recursive: true, force: true });
     }
   });
