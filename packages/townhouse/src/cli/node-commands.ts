@@ -240,8 +240,16 @@ export async function handleNodeAdd(
 
   // 409 node_type_in_use
   if (response.status === 409 && body.error === 'node_type_in_use') {
+    // The desired node already exists — only one node per type is supported
+    // (v1 constraint). Point the operator at how to inspect it and how to
+    // recreate it, rather than the unhelpful "use a different type" (there are
+    // only three types, and they likely already have the ones they want).
+    const existingId = body.existingId ?? body.type ?? type;
     process.stderr.write(
-      `${xMark} Node of type '${body.type}' already exists with id '${body.existingId}'. Remove it first or use a different type.\n`
+      `${xMark} A '${body.type}' node already exists (id '${existingId}'). ` +
+        `Only one node per type is supported.\n` +
+        `  See your nodes:  townhouse node list\n` +
+        `  Recreate it:     townhouse node remove ${existingId} && townhouse node add ${body.type}\n`
     );
     process.exitCode = 1;
     return;
