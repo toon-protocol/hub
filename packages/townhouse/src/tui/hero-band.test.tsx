@@ -14,7 +14,14 @@ const ZERO_APEX: AggregatedEarnings['apex'] = {
   routingFees: { USDC: { lifetime: '0', today: '0', month: '0', year: '0' } },
 };
 const NONZERO_APEX: AggregatedEarnings['apex'] = {
-  routingFees: { USDC: { lifetime: '5000000', today: '100000', month: '1000000', year: '3000000' } },
+  routingFees: {
+    USDC: {
+      lifetime: '5000000',
+      today: '100000',
+      month: '1000000',
+      year: '3000000',
+    },
+  },
 };
 const EMPTY_PEERS: AggregatedEarnings['peers'] = [];
 
@@ -64,7 +71,9 @@ describe('HeroBand component', () => {
       {
         id: 'junk-peer',
         type: 'town',
-        byAsset: { USDC: { lifetime: 'not-a-number', today: '0', month: '0', year: '0' } },
+        byAsset: {
+          USDC: { lifetime: 'not-a-number', today: '0', month: '0', year: '0' },
+        },
         lastClaimAt: null,
       },
     ];
@@ -134,12 +143,18 @@ describe('Hardcoded copy smoke check (AC #9)', () => {
 
     const collectTsx = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true })
-        .filter((d) => d.isFile() && d.name.endsWith('.tsx') && !d.name.endsWith('.test.tsx'))
+        .filter(
+          (d) =>
+            d.isFile() &&
+            d.name.endsWith('.tsx') &&
+            !d.name.endsWith('.test.tsx')
+        )
         .map((d) => join(dir, d.name));
 
     const files = [...collectTsx(tuiDir), ...collectTsx(componentsDir)];
 
-    const FORBIDDEN_RE = /["'`](you're early|warming up|first packet en route|Fetching earnings|Connector not reachable|Last refresh failed|↳ apex routing|enable mill to route|no peers yet — run|recent: |\[a\] activity|no settlements yet|j\/k to scroll|Activity — last|\(no activity yet\))/i;
+    const FORBIDDEN_RE =
+      /["'`](you're early|warming up|first packet en route|Fetching earnings|Connector not reachable|Last refresh failed|Starting up —|↳ apex routing|enable mill to route|no peers yet|recent: |\[a\] activity|no settlements yet|j\/k to scroll|Activity — last|\(no activity yet\))/i;
     for (const file of files) {
       const content = readFileSync(file, 'utf-8');
       expect(

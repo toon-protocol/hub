@@ -27,20 +27,48 @@ const STARTED_AT = new Date().toISOString();
 // 2026-05-18 hardening per P37 — keeps the file working across bundle layouts
 // instead of silently MODULE_NOT_FOUND-ing at boot under a future tsup config change.
 const _localRequire = nodeCreateRequire(import.meta.url);
-function _loadPackageJson(): { version: string } {
-  for (const rel of ['../package.json', '../../package.json']) {
+
+/**
+ * Resolve the package version for API metadata WITHOUT ever throwing.
+ *
+ * Tries several bundle layouts: npm install (`../package.json` is the real one),
+ * a deeper tsup chunk (`../../`), and the minimal Docker runtime where the
+ * bundle sits at `/app/entrypoint-*.js` next to a `./package.json`. Requires a
+ * real `version` string so the Docker image's `{"type":"module"}` marker (no
+ * version) doesn't satisfy the lookup.
+ *
+ * The version is cosmetic (surfaced only in API metadata), so it MUST NOT crash
+ * the whole API at module load when package.json isn't on the resolution ladder
+ * — that exact throw bricked the townhouse-api Docker image (its runtime
+ * `/app/package.json` is only `{"type":"module"}`), crash-looping the container.
+ * Falls back to a `TOWNHOUSE_VERSION` build-time override or a sentinel.
+ *
+ * Exported for unit testing; `req`/`env` are injectable.
+ */
+export function _resolvePackageVersion(
+  req: (id: string) => unknown = _localRequire,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  for (const rel of [
+    '../package.json',
+    '../../package.json',
+    './package.json',
+  ]) {
     try {
-      return _localRequire(rel) as { version: string };
+      const pkg = req(rel) as { version?: unknown };
+      if (pkg && typeof pkg.version === 'string') {
+        return pkg.version;
+      }
     } catch {
       // try next candidate
     }
   }
-  throw new Error(
-    "build-app.ts: could not resolve package.json from '../package.json' or '../../package.json'. " +
-      'Bundle layout may have changed — update the resolution ladder.'
-  );
+  const envVersion = env['TOWNHOUSE_VERSION'];
+  return typeof envVersion === 'string' && envVersion.length > 0
+    ? envVersion
+    : '0.0.0-unknown';
 }
-const _pkgVersion: string = _loadPackageJson()['version'];
+const _pkgVersion: string = _resolvePackageVersion();
 
 /** Allowed loopback hosts */
 export const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'];

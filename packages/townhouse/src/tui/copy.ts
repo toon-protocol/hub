@@ -12,13 +12,16 @@ export const COPY = {
   banners: {
     connectorUnavailable: `Connector not reachable — showing last known values. Retrying in 2s.`,
     fetchFailed: `Last refresh failed — retrying.`,
+    // Shown only before the first successful fetch — a fresh node whose API is
+    // still warming up should read as "starting", not "failed".
+    startingUp: `Starting up — connecting to your node…`,
   },
   apex: {
     routingPrefix: `↳ apex routing: `,
     routingEmpty: `(enable mill to route)`,
   },
   peerTable: {
-    empty: `no peers yet — run 'townhouse node add town'`,
+    empty: `no peers yet — in a new terminal: townhouse node add town`,
   },
   activityTicker: {
     prefix: `recent: `,

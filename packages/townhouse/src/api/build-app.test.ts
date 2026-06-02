@@ -4,11 +4,48 @@
 
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
-import { buildFastifyApp, LOOPBACK_HOSTS } from './build-app.js';
+import {
+  buildFastifyApp,
+  LOOPBACK_HOSTS,
+  _resolvePackageVersion,
+} from './build-app.js';
 
 const _pkg = createRequire(import.meta.url)('../../package.json') as {
   version: string;
 };
+
+describe('_resolvePackageVersion (crash-proof version lookup)', () => {
+  it('returns the version when a package.json with one is on the ladder', () => {
+    const req = (rel: string) =>
+      rel === '../package.json' ? { version: '1.2.3' } : undefined;
+    expect(_resolvePackageVersion(req, {})).toBe('1.2.3');
+  });
+
+  it('skips a package.json that has no version (e.g. the Docker {"type":"module"} marker)', () => {
+    // './package.json' resolves but is the bare ESM marker → must fall through.
+    const req = (rel: string) =>
+      rel === './package.json' ? { type: 'module' } : undefined;
+    expect(_resolvePackageVersion(req, {})).toBe('0.0.0-unknown');
+  });
+
+  it('NEVER throws when no package.json resolves — falls back to a sentinel', () => {
+    const req = () => {
+      throw new Error("Cannot find module '../package.json'");
+    };
+    // This is the exact townhouse-api Docker crash scenario.
+    expect(() => _resolvePackageVersion(req, {})).not.toThrow();
+    expect(_resolvePackageVersion(req, {})).toBe('0.0.0-unknown');
+  });
+
+  it('honours the TOWNHOUSE_VERSION env override when package.json is unresolvable', () => {
+    const req = () => {
+      throw new Error('nope');
+    };
+    expect(_resolvePackageVersion(req, { TOWNHOUSE_VERSION: '9.9.9' })).toBe(
+      '9.9.9'
+    );
+  });
+});
 
 describe('buildFastifyApp (AC-9)', () => {
   it('creates a Fastify instance with no errors', async () => {

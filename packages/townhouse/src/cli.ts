@@ -1651,6 +1651,42 @@ function isAnonBootstrapTimeout(err: unknown): boolean {
   return /connector.*unhealthy|dependency.*connector.*fail/i.test(text);
 }
 
+/**
+ * Foreground the Ink dashboard for an already-live apex when stdout is a TTY.
+ * Used by both the cold-boot path and the idempotent re-run path, so that
+ * re-running `townhouse hs up` against a running node re-attaches the dashboard
+ * instead of just printing the hostname and exiting.
+ *
+ * A TUI mount/runtime failure must NOT be treated as a boot failure — apex is
+ * already live — so it is caught and reported as a display issue. No-op on
+ * non-TTY stdout (the process then exits naturally after printing the address).
+ */
+async function attachDashboard(hostname: string): Promise<void> {
+  if (!shouldRenderInk()) return;
+  try {
+    const { mountTui } = await import('./tui/index.js');
+    // P27 (D1): thread HS_TOWNHOUSE_API_URL env override into the TUI so
+    // operators on a non-default Fastify port don't see eternal fetch_failed.
+    const apiUrlOverride = process.env['HS_TOWNHOUSE_API_URL'];
+    const mountOpts =
+      apiUrlOverride !== undefined ? { apiUrl: apiUrlOverride } : {};
+    const instance = mountTui(mountOpts);
+    await instance.waitUntilExit();
+  } catch (tuiErr: unknown) {
+    const detail = tuiErr instanceof Error ? tuiErr.message : String(tuiErr);
+    console.error('');
+    console.error(`Your node is live at ${hostname}.`);
+    console.error(
+      `The live dashboard could not open (${detail}) — this is a display ` +
+        'issue, not a node issue. Your node keeps running.'
+    );
+    console.error(
+      'Stop it anytime with:  npx @toon-protocol/townhouse hs down'
+    );
+    // Leave process.exitCode at success — the node is live.
+  }
+}
+
 async function handleHsUp(
   _configPath: string,
   configDir: string,
@@ -1665,8 +1701,46 @@ async function handleHsUp(
 ): Promise<void> {
   const { password, force, skipPreflight, hsOverrides } = options;
 
+  // ── Idempotency probe (AC #7) — BEFORE the preflight ────────────────────────
+  // If our apex is already live, this is a re-run: re-print the address, refresh
+  // host.json, and (in a TTY) re-attach the dashboard, then return. This MUST run
+  // before the port preflight: the preflight would otherwise flag our OWN apex's
+  // canonical ports as a collision and refuse, making an idempotent re-run (and
+  // re-attaching the dashboard) impossible. Skipped under --force (cold rebuild).
+  if (!force) {
+    const adminClientFactory =
+      hsOverrides?.createAdminClient ??
+      ((url: string, t: number) => new ConnectorAdminClient(url, t));
+    const probe = adminClientFactory(HS_CONNECTOR_ADMIN_URL, 3_000);
+    try {
+      const existing = await probe.getHsHostname();
+      if (existing.hostname !== null) {
+        // hostname from the connector already includes the .anyone suffix.
+        console.log(`Apex live at ${existing.hostname}`);
+        _writeHostJson(configDir, {
+          hostname: existing.hostname,
+          publishedAt: existing.publishedAt ?? new Date().toISOString(),
+          writtenAt: new Date().toISOString(),
+        });
+        await attachDashboard(existing.hostname);
+        return;
+      }
+      // hostname null → apex started but HS not ready → treat as cold-start.
+    } catch (probeErr: unknown) {
+      const msg =
+        probeErr instanceof Error ? probeErr.message : String(probeErr);
+      if (msg.includes('anon-disabled')) {
+        // Apex running but anon is disabled — render failure copy and exit.
+        const { exitCode } = renderFailure(probeErr);
+        process.exitCode = exitCode;
+        return;
+      }
+      // ECONNREFUSED / timeout → not running → fall through to preflight + boot.
+    }
+  }
+
   // ── Preflight: port-collision check (Epic 49 Followup B) ────────────────────
-  // Runs BEFORE wallet unlock and before any Docker call — catches the most
+  // Only reached on a true cold start (no apex already live). Catches the most
   // common operator footgun (contributor dev stack still up, another hs up
   // instance, or an unrelated process bound to the canonical ports) and
   // surfaces an actionable error instead of a cryptic mid-boot EADDRINUSE.
@@ -1753,40 +1827,8 @@ async function handleHsUp(
   const ribbon = new OnboardingRibbon();
 
   try {
-    // Idempotency probe (AC #7): check if apex is already running.
-    if (!force) {
-      const adminClientFactory =
-        hsOverrides?.createAdminClient ??
-        ((url: string, t: number) => new ConnectorAdminClient(url, t));
-      const probe = adminClientFactory(HS_CONNECTOR_ADMIN_URL, 3_000);
-      try {
-        const existing = await probe.getHsHostname();
-        if (existing.hostname !== null) {
-          // Apex is already running — re-print hostname and refresh host.json.
-          // hostname from the connector already includes the .anyone suffix.
-          console.log(`Apex live at ${existing.hostname}`);
-          _writeHostJson(configDir, {
-            hostname: existing.hostname,
-            publishedAt: existing.publishedAt ?? new Date().toISOString(),
-            writtenAt: new Date().toISOString(),
-          });
-          return;
-        }
-        // hostname is null → apex started but HS not ready → treat as cold-start.
-      } catch (probeErr: unknown) {
-        const msg =
-          probeErr instanceof Error ? probeErr.message : String(probeErr);
-        if (msg.includes('anon-disabled')) {
-          // Apex running but anon is disabled — render failure copy and exit.
-          const { exitCode } = renderFailure(probeErr);
-          process.exitCode = exitCode;
-          return;
-        }
-        // ECONNREFUSED or timeout → not running → proceed to cold-boot.
-      }
-    }
-
-    // Cold-boot path.
+    // Cold-boot path. (The idempotency probe runs earlier — above the preflight —
+    // so an already-live apex re-attaches instead of failing the port check.)
 
     // Step 1: write connector.yaml with anon.enabled: true (AC #3).
     writeHsConnectorConfig(configDir, config, { force });
@@ -1847,6 +1889,13 @@ async function handleHsUp(
         ribbon.start('bootstrap');
       }
     });
+
+    // Stop the pull-phase spinner before the pre-pull narration below. The
+    // spinner rewrites its line in place (cursor-up + clear), which smears into
+    // duplicated "Pulling apex image…" lines when the per-image/layer progress
+    // prints interleaved underneath it. The narration IS the progress indicator
+    // for this phase; the spinner resumes cleanly for the quiet bootstrap wait.
+    ribbon.stop();
 
     // ── Cold-pull pre-warm (Epic 49 Followup D) ───────────────────────────
     // Compose's `up -d` with inheritStdio=true is essentially silent on a
@@ -2047,38 +2096,10 @@ async function handleHsUp(
     // ribbon.start('live', hostname) prints: "Apex live at <hostname>" as the FINAL stdout line.
     ribbon.start('live', hostname);
 
-    // Story 48.1: foreground Ink TUI when stdout is a TTY.
-    // Dynamic import keeps Ink + React out of non-TTY startup path (faster --help).
-    // On non-TTY the process exits naturally after this block (Story 45.4 AC #11).
-    if (shouldRenderInk()) {
-      // Apex is already live here (host.json written, "Apex live at …" printed
-      // above). A TUI mount/runtime failure must NOT bubble to the outer catch —
-      // that renders "Apex boot failed" and a non-zero exit, telling the user
-      // their working node died and prompting them to tear it down. Isolate it.
-      try {
-        const { mountTui } = await import('./tui/index.js');
-        // P27 (D1): thread HS_TOWNHOUSE_API_URL env override into the TUI so
-        // operators on a non-default Fastify port don't see eternal fetch_failed.
-        const apiUrlOverride = process.env['HS_TOWNHOUSE_API_URL'];
-        const mountOpts =
-          apiUrlOverride !== undefined ? { apiUrl: apiUrlOverride } : {};
-        const instance = mountTui(mountOpts);
-        await instance.waitUntilExit();
-      } catch (tuiErr: unknown) {
-        const detail =
-          tuiErr instanceof Error ? tuiErr.message : String(tuiErr);
-        console.error('');
-        console.error(`Your node is live at ${hostname}.`);
-        console.error(
-          `The live dashboard could not open (${detail}) — this is a display ` +
-            'issue, not a node issue. Your node keeps running.'
-        );
-        console.error(
-          'Stop it anytime with:  npx @toon-protocol/townhouse hs down'
-        );
-        // Leave process.exitCode at success — the boot succeeded.
-      }
-    }
+    // Story 48.1: foreground Ink TUI when stdout is a TTY. Apex is already live
+    // here (host.json written, "Apex live at …" printed above); attachDashboard
+    // isolates any TUI failure so it is never reported as a boot failure.
+    await attachDashboard(hostname);
   } catch (err: unknown) {
     const { exitCode } = renderFailure(err);
     process.exitCode = exitCode;

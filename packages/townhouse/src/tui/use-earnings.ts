@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AggregatedEarnings } from './types.js';
-import { DEFAULT_API_URL, DEFAULT_REFRESH_INTERVAL_MS } from './constants.js';
+import {
+  DEFAULT_API_URL,
+  DEFAULT_REFRESH_INTERVAL_MS,
+  STARTING_UP_GRACE_FETCHES,
+} from './constants.js';
 
 export type EarningsState =
   | { phase: 'loading'; data: null; bannerKey: null }
@@ -8,7 +12,7 @@ export type EarningsState =
   | {
       phase: 'stale';
       data: AggregatedEarnings;
-      bannerKey: 'connector_unavailable' | 'fetch_failed';
+      bannerKey: 'connector_unavailable' | 'fetch_failed' | 'starting_up';
     };
 
 export interface UseEarningsOptions {
@@ -40,10 +44,25 @@ export function useEarnings(opts: UseEarningsOptions = {}): EarningsState {
   });
 
   const prevDataRef = useRef<AggregatedEarnings | null>(null);
+  // Consecutive failures before the first-ever success. Resets on any success.
+  const warmupFailuresRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     let abortController: AbortController | null = null;
+
+    // Choose the banner for a failed fetch: a calm 'starting_up' while a node
+    // that has never responded is within its warm-up grace, escalating to the
+    // specific failure banner once we've had data OR the grace is exhausted.
+    function failureBanner(
+      specific: 'fetch_failed' | 'connector_unavailable'
+    ): 'starting_up' | 'fetch_failed' | 'connector_unavailable' {
+      if (prevDataRef.current !== null) return specific;
+      warmupFailuresRef.current += 1;
+      return warmupFailuresRef.current <= STARTING_UP_GRACE_FETCHES
+        ? 'starting_up'
+        : specific;
+    }
 
     async function doFetch(): Promise<void> {
       if (cancelled) return;
@@ -63,7 +82,7 @@ export function useEarnings(opts: UseEarningsOptions = {}): EarningsState {
           setState({
             phase: 'stale',
             data: prev ?? EMPTY_EARNINGS,
-            bannerKey: 'fetch_failed',
+            bannerKey: failureBanner('fetch_failed'),
           });
           return;
         }
@@ -77,22 +96,22 @@ export function useEarnings(opts: UseEarningsOptions = {}): EarningsState {
           setState({
             phase: 'stale',
             data: prev ?? EMPTY_EARNINGS,
-            bannerKey: 'connector_unavailable',
+            bannerKey: failureBanner('connector_unavailable'),
           });
           return;
         }
 
         prevDataRef.current = body;
+        warmupFailuresRef.current = 0;
         setState({ phase: 'ok', data: body, bannerKey: null });
       } catch (err) {
         if (cancelled) return;
         if (err instanceof Error && err.name === 'AbortError') return;
 
-        const prev = prevDataRef.current;
         setState({
           phase: 'stale',
-          data: prev ?? EMPTY_EARNINGS,
-          bannerKey: 'fetch_failed',
+          data: prevDataRef.current ?? EMPTY_EARNINGS,
+          bannerKey: failureBanner('fetch_failed'),
         });
       } finally {
         abortController = null;

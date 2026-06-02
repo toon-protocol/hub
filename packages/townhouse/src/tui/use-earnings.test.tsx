@@ -7,7 +7,11 @@ import type { AggregatedEarnings } from './types.js';
 
 const OK_PAYLOAD: AggregatedEarnings = {
   status: 'ok',
-  apex: { routingFees: { USDC: { lifetime: '1000000', today: '100', month: '500', year: '1000' } } },
+  apex: {
+    routingFees: {
+      USDC: { lifetime: '1000000', today: '100', month: '500', year: '1000' },
+    },
+  },
   peers: [],
   recentClaims: [],
   eventsRelayed: 42,
@@ -25,7 +29,11 @@ function makeEarningsApp(
 ): { App: React.FC; getLastState: () => EarningsState | undefined } {
   let lastState: EarningsState | undefined;
   const App: React.FC = () => {
-    const state = useEarnings({ fetchImpl, refreshIntervalMs, apiUrl: 'http://localhost' });
+    const state = useEarnings({
+      fetchImpl,
+      refreshIntervalMs,
+      apiUrl: 'http://localhost',
+    });
     lastState = state;
     return <Text>{state.phase}</Text>;
   };
@@ -62,7 +70,10 @@ describe('useEarnings hook', () => {
     } as unknown as Response);
 
     // Large interval so interval ticks don't interfere with this test.
-    const { App, getLastState } = makeEarningsApp(fetchMock as unknown as typeof fetch, 50_000);
+    const { App, getLastState } = makeEarningsApp(
+      fetchMock as unknown as typeof fetch,
+      50_000
+    );
     const { unmount } = render(React.createElement(App));
 
     // Flush React effects + Promise chain: setImmediate → doFetch() → fetch → json → setState
@@ -95,7 +106,9 @@ describe('useEarnings hook', () => {
     }
 
     // Expect at least 4 interval ticks on top of the initial fetch
-    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(initialCount + 4);
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(
+      initialCount + 4
+    );
 
     unmount();
   });
@@ -103,7 +116,10 @@ describe('useEarnings hook', () => {
   it('first-fetch network error advances out of loading (P1 — no stuck loading)', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
 
-    const { App, getLastState } = makeEarningsApp(fetchMock as unknown as typeof fetch, 50_000);
+    const { App, getLastState } = makeEarningsApp(
+      fetchMock as unknown as typeof fetch,
+      50_000
+    );
     const { unmount } = render(React.createElement(App));
 
     await flushAll();
@@ -111,7 +127,8 @@ describe('useEarnings hook', () => {
     const state = getLastState();
     expect(state?.phase).toBe('stale');
     if (state?.phase === 'stale') {
-      expect(state.bannerKey).toBe('fetch_failed');
+      // No successful fetch yet → calm 'starting_up' (warm-up), not 'fetch_failed'.
+      expect(state.bannerKey).toBe('starting_up');
       // EMPTY_EARNINGS seed: status is 'connector_unavailable' (the sentinel value).
       expect(state.data.eventsRelayed).toBe(0);
     }
@@ -119,19 +136,54 @@ describe('useEarnings hook', () => {
     unmount();
   });
 
-  it('first-fetch !res.ok advances out of loading with fetch_failed banner', async () => {
+  it('first-fetch !res.ok advances out of loading with starting_up banner', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       json: () => Promise.resolve({}),
     } as unknown as Response);
 
-    const { App, getLastState } = makeEarningsApp(fetchMock as unknown as typeof fetch, 50_000);
+    const { App, getLastState } = makeEarningsApp(
+      fetchMock as unknown as typeof fetch,
+      50_000
+    );
     const { unmount } = render(React.createElement(App));
 
     await flushAll();
 
     const state = getLastState();
     expect(state?.phase).toBe('stale');
+    if (state?.phase === 'stale') {
+      // No successful fetch yet → calm 'starting_up' (warm-up), not 'fetch_failed'.
+      expect(state.bannerKey).toBe('starting_up');
+    }
+
+    unmount();
+  });
+
+  it('escalates starting_up → fetch_failed after the warm-up grace (never succeeded)', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+
+    const { App, getLastState } = makeEarningsApp(
+      fetchMock as unknown as typeof fetch,
+      50
+    );
+    const { unmount } = render(React.createElement(App));
+
+    // First failure is within the grace window → calm 'starting_up'.
+    await flushAll();
+    const first = getLastState();
+    if (first?.phase === 'stale') {
+      expect(first.bannerKey).toBe('starting_up');
+    }
+
+    // Drive several more failed fetches past the grace window.
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(60);
+      for (let j = 0; j < 8; j++) await Promise.resolve();
+    }
+
+    // A node that never responds must not read as "starting up" forever.
+    const state = getLastState();
     if (state?.phase === 'stale') {
       expect(state.bannerKey).toBe('fetch_failed');
     }
@@ -151,7 +203,10 @@ describe('useEarnings hook', () => {
         json: () => Promise.resolve(UNAVAILABLE_PAYLOAD),
       } as unknown as Response);
 
-    const { App, getLastState } = makeEarningsApp(fetchMock as unknown as typeof fetch, 50);
+    const { App, getLastState } = makeEarningsApp(
+      fetchMock as unknown as typeof fetch,
+      50
+    );
     const { unmount } = render(React.createElement(App));
 
     // First fetch → ok
@@ -174,6 +229,38 @@ describe('useEarnings hook', () => {
     unmount();
   });
 
+  it('uses fetch_failed (not starting_up) once a fetch has succeeded', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(OK_PAYLOAD),
+      } as unknown as Response)
+      .mockRejectedValue(new TypeError('fetch failed'));
+
+    const { App, getLastState } = makeEarningsApp(
+      fetchMock as unknown as typeof fetch,
+      50
+    );
+    const { unmount } = render(React.createElement(App));
+
+    // First fetch → ok (establishes prior data).
+    await flushAll();
+    expect(getLastState()?.phase).toBe('ok');
+
+    // Second fetch fails — now that we've had data, it's a real failure.
+    await vi.advanceTimersByTimeAsync(60);
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    const state = getLastState();
+    if (state?.phase === 'stale') {
+      expect(state.bannerKey).toBe('fetch_failed');
+      expect(state.data.eventsRelayed).toBe(OK_PAYLOAD.eventsRelayed);
+    }
+
+    unmount();
+  });
+
   it('aborts in-flight fetch on unmount via AbortController and rejects with AbortError', async () => {
     // Real timers needed here: React's scheduler uses the real setImmediate reference
     // captured at module load time, which fake-timer advancement cannot trigger.
@@ -183,8 +270,9 @@ describe('useEarnings hook', () => {
     // behavior, so the production catch block's `err.name === 'AbortError'` branch
     // actually runs. The captured signal lets the test assert the abort propagated.
     const captured: { signal: AbortSignal | null } = { signal: null };
-    const fetchMock = vi.fn().mockImplementation(
-      (_url: string, opts?: { signal?: AbortSignal }) => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation((_url: string, opts?: { signal?: AbortSignal }) => {
         captured.signal = opts?.signal ?? null;
         return new Promise<Response>((_resolve, reject) => {
           opts?.signal?.addEventListener('abort', () => {
@@ -193,10 +281,12 @@ describe('useEarnings hook', () => {
             reject(err);
           });
         });
-      }
-    );
+      });
 
-    const { App, getLastState } = makeEarningsApp(fetchMock as unknown as typeof fetch, 50_000);
+    const { App, getLastState } = makeEarningsApp(
+      fetchMock as unknown as typeof fetch,
+      50_000
+    );
     const { unmount } = render(React.createElement(App));
 
     // Wait for React to commit the effect and doFetch() to start the in-flight request.

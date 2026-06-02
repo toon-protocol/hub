@@ -480,6 +480,52 @@ describe('CLI hs subcommand', () => {
     }
   });
 
+  it('hs up re-attaches (no port-collision error) when apex is already live on its own ports', async () => {
+    const hostname = 'running456.anyone';
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const stderrSpy = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation(() => true);
+      // Apex is already live...
+      const overrides = makeHsOverrides({ hostname, probe: 'running' });
+      // ...and the preflight WOULD flag its own canonical ports as in-use.
+      overrides.checkPortCollisions = vi.fn(async () => [
+        {
+          port: 9401,
+          containerName: 'townhouse-hs-connector',
+          composeProject: 'compose',
+          status: 'Up 10 minutes',
+        },
+      ]);
+
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      // Idempotent re-attach wins: no collision error, no failure exit.
+      expect(process.exitCode).not.toBe(1);
+      const stderrOut = stderrSpy.mock.calls
+        .map((c) => c[0] as string)
+        .join('');
+      expect(stderrOut).not.toContain(
+        'cannot start — host ports already in use'
+      );
+      // The preflight is never even consulted — the probe short-circuits first.
+      expect(overrides.checkPortCollisions).not.toHaveBeenCalled();
+      // And it re-prints the live address (re-attach path).
+      const allOutput =
+        consoleSpy.mock.calls.map((c) => c[0] as string).join('') +
+        stdoutSpy.mock.calls.map((c) => c[0] as string).join('');
+      expect(allOutput).toContain(`Apex live at ${hostname}`);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   // ── hs up: containerState → ribbon bootstrap ──────────────────────────────
 
   it('hs up wires containerState listener (ribbon bootstrap transitions on "creating")', async () => {
@@ -1022,12 +1068,15 @@ describe('CLI hs subcommand', () => {
       );
 
       expect(process.exitCode).toBe(1);
-      // Preflight ran before any orchestrator was constructed.
+      // Preflight still blocks the cold boot: no orchestrator, no materialize,
+      // and (since it runs before wallet unlock) no wallet decrypt.
       expect(overrides.createOrchestrator).not.toHaveBeenCalled();
       expect(overrides.materializeComposeTemplate).not.toHaveBeenCalled();
-      // Preflight wallet-unlock did NOT happen — the wallet decrypt path
-      // would have called createAdminClient for the idempotency probe.
-      expect(overrides.createAdminClient).not.toHaveBeenCalled();
+      // The idempotency probe now runs BEFORE the preflight: it finds apex not
+      // live (cold), so the preflight fires on the foreign collision. The probe
+      // having run is exactly what lets an already-live apex re-attach instead
+      // of failing the port check on its own ports.
+      expect(overrides.createAdminClient).toHaveBeenCalled();
 
       const stderrOut = stderrSpy.mock.calls
         .map((c) => c[0] as string)
