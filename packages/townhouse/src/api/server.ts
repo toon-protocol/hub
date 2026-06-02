@@ -23,6 +23,7 @@ import {
 } from './routes/metrics-ws.js';
 import { registerWizardRoutes } from './routes/wizard.js';
 import { registerTransportRoutes } from './routes/transport.js';
+import { registerChainsRoutes } from './routes/chains.js';
 import { registerEarningsRoutes } from './routes/earnings.js';
 import { registerLogsRoutes } from './routes/logs.js';
 
@@ -60,6 +61,9 @@ export async function createApiServer(deps: ApiDeps): Promise<ApiServer> {
 
   // Register transport routes (before nodes routes)
   registerTransportRoutes(app, deps);
+
+  // Register settlement-chain config routes (EVM/Solana/Mina)
+  registerChainsRoutes(app, deps);
 
   // Register all normal routes
   registerNodeRoutes(app, deps);

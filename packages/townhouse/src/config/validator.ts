@@ -5,7 +5,7 @@
 
 import type { ChainProviderEntry, TownhouseConfig } from './schema.js';
 
-const VALID_CHAIN_TYPES = new Set(['evm']);
+const VALID_CHAIN_TYPES = new Set(['evm', 'solana', 'mina']);
 const HEX_ADDRESS = /^0x[a-fA-F0-9]+$/;
 
 class ConfigValidationError extends Error {
@@ -240,39 +240,84 @@ export function validateConfig(raw: unknown): TownhouseConfig {
     chainProviders = (raw['chainProviders'] as unknown[]).map((entry, idx) => {
       const path = `config.chainProviders[${idx}]`;
       assertObject(entry, path);
-      assertString(entry['chainType'], `${path}.chainType`);
-      if (!VALID_CHAIN_TYPES.has(entry['chainType'] as string)) {
+      const chainType = entry['chainType'];
+      assertString(chainType, `${path}.chainType`);
+      if (!VALID_CHAIN_TYPES.has(chainType as string)) {
         throw new ConfigValidationError(
           `${path}.chainType must be one of: ${[...VALID_CHAIN_TYPES].join(', ')}`
         );
       }
       assertString(entry['chainId'], `${path}.chainId`);
-      assertString(entry['rpcUrl'], `${path}.rpcUrl`);
-      assertString(entry['registryAddress'], `${path}.registryAddress`);
-      if (!HEX_ADDRESS.test(entry['registryAddress'] as string)) {
-        throw new ConfigValidationError(
-          `${path}.registryAddress must match /^0x[a-fA-F0-9]+$/`
-        );
+
+      if (chainType === 'evm') {
+        assertString(entry['rpcUrl'], `${path}.rpcUrl`);
+        assertString(entry['registryAddress'], `${path}.registryAddress`);
+        if (!HEX_ADDRESS.test(entry['registryAddress'] as string)) {
+          throw new ConfigValidationError(
+            `${path}.registryAddress must match /^0x[a-fA-F0-9]+$/`
+          );
+        }
+        assertString(entry['tokenAddress'], `${path}.tokenAddress`);
+        if (!HEX_ADDRESS.test(entry['tokenAddress'] as string)) {
+          throw new ConfigValidationError(
+            `${path}.tokenAddress must match /^0x[a-fA-F0-9]+$/`
+          );
+        }
+        assertString(entry['keyId'], `${path}.keyId`);
+        if (!HEX_ADDRESS.test(entry['keyId'] as string)) {
+          throw new ConfigValidationError(
+            `${path}.keyId must match /^0x[a-fA-F0-9]+$/`
+          );
+        }
+        return {
+          chainType: 'evm' as const,
+          chainId: entry['chainId'] as string,
+          rpcUrl: entry['rpcUrl'] as string,
+          registryAddress: entry['registryAddress'] as string,
+          tokenAddress: entry['tokenAddress'] as string,
+          keyId: entry['keyId'] as string,
+        };
       }
-      assertString(entry['tokenAddress'], `${path}.tokenAddress`);
-      if (!HEX_ADDRESS.test(entry['tokenAddress'] as string)) {
-        throw new ConfigValidationError(
-          `${path}.tokenAddress must match /^0x[a-fA-F0-9]+$/`
-        );
+
+      if (chainType === 'solana') {
+        assertString(entry['rpcUrl'], `${path}.rpcUrl`);
+        assertString(entry['programId'], `${path}.programId`);
+        assertString(entry['keyId'], `${path}.keyId`);
+        if (entry['wsUrl'] !== undefined) {
+          assertString(entry['wsUrl'], `${path}.wsUrl`);
+        }
+        if (entry['tokenMint'] !== undefined) {
+          assertString(entry['tokenMint'], `${path}.tokenMint`);
+        }
+        return {
+          chainType: 'solana' as const,
+          chainId: entry['chainId'] as string,
+          rpcUrl: entry['rpcUrl'] as string,
+          ...(entry['wsUrl'] !== undefined
+            ? { wsUrl: entry['wsUrl'] as string }
+            : {}),
+          programId: entry['programId'] as string,
+          ...(entry['tokenMint'] !== undefined
+            ? { tokenMint: entry['tokenMint'] as string }
+            : {}),
+          keyId: entry['keyId'] as string,
+        };
       }
-      assertString(entry['keyId'], `${path}.keyId`);
-      if (!HEX_ADDRESS.test(entry['keyId'] as string)) {
-        throw new ConfigValidationError(
-          `${path}.keyId must match /^0x[a-fA-F0-9]+$/`
-        );
+
+      // mina
+      assertString(entry['graphqlUrl'], `${path}.graphqlUrl`);
+      assertString(entry['zkAppAddress'], `${path}.zkAppAddress`);
+      if (entry['keyId'] !== undefined) {
+        assertString(entry['keyId'], `${path}.keyId`);
       }
       return {
-        chainType: entry['chainType'] as 'evm',
+        chainType: 'mina' as const,
         chainId: entry['chainId'] as string,
-        rpcUrl: entry['rpcUrl'] as string,
-        registryAddress: entry['registryAddress'] as string,
-        tokenAddress: entry['tokenAddress'] as string,
-        keyId: entry['keyId'] as string,
+        graphqlUrl: entry['graphqlUrl'] as string,
+        zkAppAddress: entry['zkAppAddress'] as string,
+        ...(entry['keyId'] !== undefined
+          ? { keyId: entry['keyId'] as string }
+          : {}),
       };
     });
   }

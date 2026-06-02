@@ -5,14 +5,18 @@ import { WizardStepNodes } from '@/components/wizard/WizardStepNodes';
 import { WizardStepWallet } from '@/components/wizard/WizardStepWallet';
 import { WizardStepPrivacy } from '@/components/wizard/WizardStepPrivacy';
 import { WizardStepFees } from '@/components/wizard/WizardStepFees';
+import { WizardStepChains } from '@/components/wizard/WizardStepChains';
 import { WizardStepLaunch } from '@/components/wizard/WizardStepLaunch';
 import { WizardStepLaunching } from '@/components/wizard/WizardStepLaunching';
 import { useWizardSubmit } from '@/hooks/useWizardSubmit';
 import type { WizardError } from '@/hooks/useWizardSubmit';
 import type { NodeType } from '@toon-protocol/townhouse';
-import type { WizardInitRequest } from '@toon-protocol/townhouse';
+import type {
+  WizardInitRequest,
+  ChainProviderEntry,
+} from '@toon-protocol/townhouse';
 
-type WizardStep = 1 | 2 | 3 | 4 | 5 | 'launching' | 'cancelled';
+type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 'launching' | 'cancelled';
 
 interface WizardDraft {
   nodes: { town: boolean; mill: boolean; dvm: boolean };
@@ -24,6 +28,7 @@ interface WizardDraft {
   townFeePerEvent: number;
   millFeeBasisPoints: number;
   dvmFeePerJob: number;
+  chainProviders: ChainProviderEntry[];
 }
 
 const STEP_LABELS: Record<number, string> = {
@@ -31,10 +36,11 @@ const STEP_LABELS: Record<number, string> = {
   2: 'Set up wallet',
   3: 'Choose transport',
   4: 'Set fees',
-  5: 'Review',
+  5: 'Settlement chains',
+  6: 'Review',
 };
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 
 export function WizardView() {
   const { submit, previewMnemonic } = useWizardSubmit();
@@ -50,6 +56,7 @@ export function WizardView() {
     townFeePerEvent: 100,
     millFeeBasisPoints: 30,
     dvmFeePerJob: 5000,
+    chainProviders: [],
   });
   const [launching, setLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<WizardError | null>(null);
@@ -65,7 +72,9 @@ export function WizardView() {
   function handleCancel() {
     if (
       hasWorkingDraft &&
-      !window.confirm('Cancel setup? Your wallet password and seed phrase will be discarded.')
+      !window.confirm(
+        'Cancel setup? Your wallet password and seed phrase will be discarded.'
+      )
     ) {
       return;
     }
@@ -87,10 +96,16 @@ export function WizardView() {
       backup_ack: draft.backupAck,
       nodes: {
         town: { enabled: draft.nodes.town, feePerEvent: draft.townFeePerEvent },
-        mill: { enabled: draft.nodes.mill, feeBasisPoints: draft.millFeeBasisPoints },
+        mill: {
+          enabled: draft.nodes.mill,
+          feeBasisPoints: draft.millFeeBasisPoints,
+        },
         dvm: { enabled: draft.nodes.dvm, feePerJob: draft.dvmFeePerJob },
       },
       transport: { mode: draft.transport },
+      ...(draft.chainProviders.length > 0
+        ? { chainProviders: draft.chainProviders }
+        : {}),
     };
 
     const result = await submit(req);
@@ -105,10 +120,10 @@ export function WizardView() {
   }
 
   function handleRetryFromLaunching() {
-    // AC-19 — return to step 5 with draft intact so the operator can retry
-    // without losing the password/seed phrase they already entered.
+    // AC-19 — return to the review step with draft intact so the operator can
+    // retry without losing the password/seed phrase they already entered.
     setLaunchError(null);
-    setStep(5);
+    setStep(6);
   }
 
   const stepNum = typeof step === 'number' ? step : null;
@@ -118,7 +133,9 @@ export function WizardView() {
     <Shell
       header={
         <div className="flex items-center justify-between">
-          <span className="font-geist-sans font-semibold text-ink tracking-tight-16">Townhouse Setup</span>
+          <span className="font-geist-sans font-semibold text-ink tracking-tight-16">
+            Townhouse Setup
+          </span>
           {showCancel && (
             <Button
               variant="ghost"
@@ -170,13 +187,15 @@ export function WizardView() {
               mnemonicMode: draft.mnemonicMode,
               backupAck: draft.backupAck,
             }}
-            onChange={(w) => setDraft((d) => ({
-              ...d,
-              mnemonic: w.mnemonic,
-              password: w.password,
-              mnemonicMode: w.mnemonicMode,
-              backupAck: w.backupAck,
-            }))}
+            onChange={(w) =>
+              setDraft((d) => ({
+                ...d,
+                mnemonic: w.mnemonic,
+                password: w.password,
+                mnemonicMode: w.mnemonicMode,
+                backupAck: w.backupAck,
+              }))
+            }
             onContinue={() => setStep(3)}
             onBack={() => setStep(1)}
             fetchMnemonic={previewMnemonic}
@@ -207,6 +226,17 @@ export function WizardView() {
         )}
 
         {step === 5 && (
+          <WizardStepChains
+            chains={draft.chainProviders}
+            onChange={(chainProviders) =>
+              setDraft((d) => ({ ...d, chainProviders }))
+            }
+            onContinue={() => setStep(6)}
+            onBack={() => setStep(4)}
+          />
+        )}
+
+        {step === 6 && (
           <WizardStepLaunch
             summary={{
               enabledNodes,
@@ -216,7 +246,7 @@ export function WizardView() {
               dvmFeePerJob: draft.dvmFeePerJob,
             }}
             onLaunch={() => void handleLaunch()}
-            onBack={() => setStep(4)}
+            onBack={() => setStep(5)}
             launching={launching}
             error={launchError}
           />
@@ -232,8 +262,10 @@ export function WizardView() {
               Setup cancelled
             </h2>
             <p className="font-geist-sans text-sm text-ink/60">
-              Close this tab and stop the <code className="font-geist-mono">townhouse setup</code> process
-              (Ctrl+C in the terminal). Re-run <code className="font-geist-mono">townhouse setup</code> when
+              Close this tab and stop the{' '}
+              <code className="font-geist-mono">townhouse setup</code> process
+              (Ctrl+C in the terminal). Re-run{' '}
+              <code className="font-geist-mono">townhouse setup</code> when
               you&apos;re ready to continue.
             </p>
           </div>

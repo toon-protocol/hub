@@ -31,8 +31,8 @@ import Docker from 'dockerode';
 import { nip19 } from 'nostr-tools';
 
 import { getDefaultConfig } from './config/defaults.js';
-import { loadConfig } from './config/loader.js';
-import type { TownhouseConfig } from './config/schema.js';
+import { loadConfig, saveConfig } from './config/loader.js';
+import type { TownhouseConfig, ChainProviderEntry } from './config/schema.js';
 import { DockerOrchestrator, OrchestratorError } from './docker/index.js';
 import type { NodeType } from './docker/types.js';
 import {
@@ -128,6 +128,9 @@ Usage:
   townhouse node add [<type>] [--json] [-c <path>]    Provision a child node (default: town)
   townhouse node remove <id> [--yes] [--json] [-c <path>]   Deprovision a child node
   townhouse node list [--json] [-c <path>]            List provisioned nodes
+  townhouse chains list [--json] [-c <path>]          List configured settlement chains (EVM/Solana/Mina)
+  townhouse chains add --chain-type <evm|solana|mina> --chain-id <id> [fields] [-c <path>]   Add/update a settlement chain
+  townhouse chains remove <chainId> [-c <path>]       Remove a settlement chain
   townhouse channels [--json]                    Show open payment channels
   townhouse logs <node-id> [-f|--follow] [--lines N] [--json]   Tail logs for a node (Ctrl-C to stop)
   townhouse peer <id> [--json]                   Show per-peer detail card
@@ -2333,6 +2336,178 @@ function _runDockerComposeDown(
  * The optional `hsOverrides` bag is used by unit tests to stub out Docker,
  * file I/O, and admin-client calls in the `hs up` / `hs down` path.
  */
+const CHAINS_HELP = `townhouse chains — configure settlement chains (connector chainProviders)
+
+The connector settles ILP payment claims on these chains. Changes take effect
+on the next 'townhouse hs down && townhouse hs up'.
+
+Usage:
+  townhouse chains list [--json] [-c <path>]
+  townhouse chains add  --chain-type <evm|solana|mina> --chain-id <id> [fields] [-c <path>]
+  townhouse chains remove <chainId> [-c <path>]
+
+Fields by chain type:
+  evm:    --rpc-url <url> --registry <0x..> --token-address <0x..> --key-id <0x..>
+  solana: --rpc-url <url> --program-id <addr> --key-id <id> [--ws-url <url>] [--token-mint <addr>]
+  mina:   --graphql-url <url> --zkapp <addr> [--key-id <id>]`;
+
+interface ChainsFlags {
+  chainType?: string;
+  chainId?: string;
+  rpcUrl?: string;
+  wsUrl?: string;
+  registry?: string;
+  tokenAddress?: string;
+  tokenMint?: string;
+  programId?: string;
+  graphqlUrl?: string;
+  zkapp?: string;
+  keyId?: string;
+}
+
+/** Build a typed ChainProviderEntry from CLI flags. Throws on missing fields. */
+function buildChainProviderFromFlags(f: ChainsFlags): ChainProviderEntry {
+  const { chainType, chainId } = f;
+  if (chainType !== 'evm' && chainType !== 'solana' && chainType !== 'mina') {
+    throw new Error('--chain-type must be one of: evm, solana, mina');
+  }
+  if (!chainId) throw new Error('--chain-id is required');
+
+  const require = (flag: string, val: string | undefined): string => {
+    if (!val) throw new Error(`${flag} is required for ${chainType} chains`);
+    return val;
+  };
+
+  if (chainType === 'evm') {
+    return {
+      chainType: 'evm',
+      chainId,
+      rpcUrl: require('--rpc-url', f.rpcUrl),
+      registryAddress: require('--registry', f.registry),
+      tokenAddress: require('--token-address', f.tokenAddress),
+      keyId: require('--key-id', f.keyId),
+    };
+  }
+  if (chainType === 'solana') {
+    return {
+      chainType: 'solana',
+      chainId,
+      rpcUrl: require('--rpc-url', f.rpcUrl),
+      ...(f.wsUrl ? { wsUrl: f.wsUrl } : {}),
+      programId: require('--program-id', f.programId),
+      ...(f.tokenMint ? { tokenMint: f.tokenMint } : {}),
+      keyId: require('--key-id', f.keyId),
+    };
+  }
+  // mina
+  return {
+    chainType: 'mina',
+    chainId,
+    graphqlUrl: require('--graphql-url', f.graphqlUrl),
+    zkAppAddress: require('--zkapp', f.zkapp),
+    ...(f.keyId ? { keyId: f.keyId } : {}),
+  };
+}
+
+/**
+ * `townhouse chains <list|add|remove>` — edit the connector settlement chains
+ * (config.chainProviders) for EVM / Solana / Mina without hand-editing YAML.
+ */
+async function handleChains(
+  action: string | undefined,
+  chainIdArg: string | undefined,
+  flags: ChainsFlags,
+  configPath: string,
+  jsonMode: boolean
+): Promise<void> {
+  if (!action) {
+    console.log(CHAINS_HELP);
+    throw new CliHelpRequested();
+  }
+
+  const config = loadConfig(configPath);
+  const providers: ChainProviderEntry[] = config.chainProviders ?? [];
+
+  switch (action) {
+    case 'list': {
+      if (jsonMode) {
+        console.log(JSON.stringify(providers, null, 2));
+        return;
+      }
+      if (providers.length === 0) {
+        console.log(
+          'No settlement chains configured — the connector uses a built-in dev-Anvil EVM placeholder.'
+        );
+        console.log(
+          'Add one with:  townhouse chains add --chain-type evm --chain-id evm:base:8453 ...'
+        );
+        return;
+      }
+      console.log('Configured settlement chains:');
+      for (const p of providers) {
+        console.log(`  ${p.chainType.padEnd(6)} ${p.chainId}`);
+      }
+      return;
+    }
+    case 'add': {
+      let entry: ChainProviderEntry;
+      try {
+        entry = buildChainProviderFromFlags(flags);
+      } catch (err: unknown) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+        return;
+      }
+      // Idempotent upsert: replace any existing entry with the same chainId.
+      const next = providers.filter((p) => p.chainId !== entry.chainId);
+      next.push(entry);
+      try {
+        saveConfig(configPath, { ...config, chainProviders: next });
+      } catch (err: unknown) {
+        console.error(
+          `Invalid chain config: ${err instanceof Error ? err.message : String(err)}`
+        );
+        process.exitCode = 1;
+        return;
+      }
+      console.log(
+        `Added ${entry.chainType} settlement chain '${entry.chainId}'.`
+      );
+      console.log('Apply with:  townhouse hs down && townhouse hs up');
+      return;
+    }
+    case 'remove': {
+      if (!chainIdArg) {
+        console.error('Usage: townhouse chains remove <chainId>');
+        process.exitCode = 1;
+        return;
+      }
+      const next = providers.filter((p) => p.chainId !== chainIdArg);
+      if (next.length === providers.length) {
+        console.error(
+          `No settlement chain with chainId '${chainIdArg}' found.`
+        );
+        process.exitCode = 1;
+        return;
+      }
+      saveConfig(configPath, {
+        ...config,
+        chainProviders: next.length > 0 ? next : undefined,
+      });
+      console.log(`Removed settlement chain '${chainIdArg}'.`);
+      console.log('Apply with:  townhouse hs down && townhouse hs up');
+      return;
+    }
+    default: {
+      // eslint-disable-next-line no-control-regex
+      const safe = action.replace(/[\x00-\x1f\x7f]/g, '');
+      console.error(`Unknown chains subcommand: ${safe}`);
+      console.log(CHAINS_HELP);
+      process.exitCode = 1;
+    }
+  }
+}
+
 export async function main(
   argv: string[],
   dockerInstance?: Docker,
@@ -2374,6 +2549,18 @@ export async function main(
       hex: { type: 'boolean' },
       paths: { type: 'boolean' },
       confirm: { type: 'boolean' },
+      // chains add (multi-chain settlement config)
+      'chain-type': { type: 'string' },
+      'chain-id': { type: 'string' },
+      'rpc-url': { type: 'string' },
+      'ws-url': { type: 'string' },
+      registry: { type: 'string' },
+      'token-address': { type: 'string' },
+      'token-mint': { type: 'string' },
+      'program-id': { type: 'string' },
+      'graphql-url': { type: 'string' },
+      zkapp: { type: 'string' },
+      'key-id': { type: 'string' },
     },
     strict: false,
     allowPositionals: true,
@@ -2629,6 +2816,32 @@ export async function main(
           process.exitCode = 1;
         }
       }
+      break;
+    }
+    case 'chains': {
+      const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
+      const action = positionals[1];
+      const chainIdArg = positionals[2];
+      const flags: ChainsFlags = {
+        chainType: values['chain-type'] as string | undefined,
+        chainId: values['chain-id'] as string | undefined,
+        rpcUrl: values['rpc-url'] as string | undefined,
+        wsUrl: values['ws-url'] as string | undefined,
+        registry: values['registry'] as string | undefined,
+        tokenAddress: values['token-address'] as string | undefined,
+        tokenMint: values['token-mint'] as string | undefined,
+        programId: values['program-id'] as string | undefined,
+        graphqlUrl: values['graphql-url'] as string | undefined,
+        zkapp: values['zkapp'] as string | undefined,
+        keyId: values['key-id'] as string | undefined,
+      };
+      await handleChains(
+        action,
+        chainIdArg,
+        flags,
+        configPath,
+        values.json === true
+      );
       break;
     }
     default: {

@@ -13,6 +13,11 @@ export type {
   TransportConfig,
   ApiConfig,
   LoggingConfig,
+  ChainType,
+  ChainProviderEntry,
+  EvmChainProvider,
+  SolanaChainProvider,
+  MinaChainProvider,
 } from './config/index.js';
 
 export {

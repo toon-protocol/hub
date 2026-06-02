@@ -353,16 +353,94 @@ describe('validateConfig', () => {
     const raw = validRaw();
     raw['chainProviders'] = [
       {
-        chainType: 'solana',
-        chainId: 'solana:mainnet:1',
-        rpcUrl: 'https://api.mainnet-beta.solana.com',
-        registryAddress: '0x0000000000000000000000000000000000000000',
-        tokenAddress: '0x0000000000000000000000000000000000000000',
-        keyId: '0x0000000000000000000000000000000000000000',
+        chainType: 'bitcoin',
+        chainId: 'bitcoin:mainnet',
       },
     ];
     expect(() => validateConfig(raw)).toThrow(
-      'config.chainProviders[0].chainType must be one of: evm'
+      'config.chainProviders[0].chainType must be one of: evm, solana, mina'
+    );
+  });
+
+  it('accepts a Solana chainProvider', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = [
+      {
+        chainType: 'solana',
+        chainId: 'solana:devnet',
+        rpcUrl: 'https://api.devnet.solana.com',
+        wsUrl: 'wss://api.devnet.solana.com',
+        programId: 'PpayMENtCha1Ne1Program111111111111111111111',
+        tokenMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+        keyId: 'solana-treasury',
+      },
+    ];
+    const config = validateConfig(raw);
+    expect(config.chainProviders).toHaveLength(1);
+    const entry = config.chainProviders?.[0];
+    expect(entry?.chainType).toBe('solana');
+    expect(entry?.chainId).toBe('solana:devnet');
+    if (entry?.chainType === 'solana') {
+      expect(entry.programId).toBe(
+        'PpayMENtCha1Ne1Program111111111111111111111'
+      );
+      expect(entry.wsUrl).toBe('wss://api.devnet.solana.com');
+      expect(entry.tokenMint).toBe(
+        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+      );
+    }
+  });
+
+  it('rejects a Solana chainProvider missing programId', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = [
+      {
+        chainType: 'solana',
+        chainId: 'solana:devnet',
+        rpcUrl: 'https://api.devnet.solana.com',
+        keyId: 'solana-treasury',
+      },
+    ];
+    expect(() => validateConfig(raw)).toThrow(
+      'config.chainProviders[0].programId'
+    );
+  });
+
+  it('accepts a Mina chainProvider', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = [
+      {
+        chainType: 'mina',
+        chainId: 'mina:devnet',
+        graphqlUrl: 'https://api.minascan.io/node/devnet/v1/graphql',
+        zkAppAddress: 'B62qpayMENtCha1Ne1zkApp1111111111111111111111111111111',
+      },
+    ];
+    const config = validateConfig(raw);
+    expect(config.chainProviders).toHaveLength(1);
+    const entry = config.chainProviders?.[0];
+    expect(entry?.chainType).toBe('mina');
+    if (entry?.chainType === 'mina') {
+      expect(entry.graphqlUrl).toBe(
+        'https://api.minascan.io/node/devnet/v1/graphql'
+      );
+      expect(entry.zkAppAddress).toBe(
+        'B62qpayMENtCha1Ne1zkApp1111111111111111111111111111111'
+      );
+    }
+  });
+
+  it('rejects a Mina chainProvider missing zkAppAddress', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = [
+      {
+        chainType: 'mina',
+        chainId: 'mina:devnet',
+        graphqlUrl: 'https://api.minascan.io/node/devnet/v1/graphql',
+      },
+    ];
+    expect(() => validateConfig(raw)).toThrow(
+      'config.chainProviders[0].zkAppAddress'
     );
   });
 

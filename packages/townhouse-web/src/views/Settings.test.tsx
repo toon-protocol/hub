@@ -15,17 +15,6 @@ const DIRECT_STATUS: TransportStatusPayload = {
   ts: Date.now(),
 };
 
-const ATOR_OK_STATUS: TransportStatusPayload = {
-  mode: 'ator',
-  socksProxy: 'socks5h://proxy.ator.io:9050',
-  reachable: true,
-  latencyProxyMs: 120,
-  latencyDirectMs: 5,
-  lastProbedAt: Date.now(),
-  probeError: null,
-  ts: Date.now(),
-};
-
 const ATOR_DOWN_STATUS: TransportStatusPayload = {
   mode: 'ator',
   socksProxy: 'socks5h://proxy.ator.io:9050',
@@ -38,7 +27,11 @@ const ATOR_DOWN_STATUS: TransportStatusPayload = {
 };
 
 function jsonRes(body: unknown, status = 200): Response {
-  return { ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) } as unknown as Response;
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  } as unknown as Response;
 }
 
 function renderSettings() {
@@ -60,8 +53,12 @@ afterEach(() => {
 describe('SettingsView', () => {
   it('renders the Transport section', async () => {
     renderSettings();
-    await waitFor(() => expect(screen.getByText('Transport')).toBeInTheDocument());
-    expect(screen.getByRole('radiogroup', { name: /transport mode/i })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText('Transport')).toBeInTheDocument()
+    );
+    expect(
+      screen.getByRole('radiogroup', { name: /transport mode/i })
+    ).toBeInTheDocument();
   });
 
   it('radio reflects current mode from hook', async () => {
@@ -83,7 +80,9 @@ describe('SettingsView', () => {
   it('Save button enabled after selecting a different mode', async () => {
     const user = userEvent.setup();
     renderSettings();
-    await waitFor(() => expect(screen.getByRole('radio', { name: /direct/i })).toBeChecked());
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: /direct/i })).toBeChecked()
+    );
 
     await user.click(screen.getByRole('radio', { name: /ator/i }));
     const saveBtn = screen.getByRole('button', { name: /save/i });
@@ -91,15 +90,27 @@ describe('SettingsView', () => {
   });
 
   it('clicking Save calls PATCH /api/transport', async () => {
-    const patchResponse = { mode: 'ator', restartTriggered: true, restartedAt: Date.now() };
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonRes(DIRECT_STATUS))
-      .mockResolvedValueOnce(jsonRes(patchResponse))
-      .mockResolvedValue(jsonRes(ATOR_OK_STATUS));
+    const patchResponse = {
+      mode: 'ator',
+      restartTriggered: true,
+      restartedAt: Date.now(),
+    };
+    // URL/method-aware: the Settings view now also fetches /api/chains on mount,
+    // so call-order mocks would desync. Dispatch on URL + method instead.
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/api/chains'))
+        return Promise.resolve(jsonRes({ chainProviders: [] }));
+      if (url.includes('/api/transport') && init?.method === 'PATCH')
+        return Promise.resolve(jsonRes(patchResponse));
+      return Promise.resolve(jsonRes(DIRECT_STATUS));
+    });
 
     const user = userEvent.setup();
     renderSettings();
-    await waitFor(() => expect(screen.getByRole('radio', { name: /direct/i })).toBeChecked());
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: /direct/i })).toBeChecked()
+    );
 
     await user.click(screen.getByRole('radio', { name: /ator/i }));
     await user.click(screen.getByRole('button', { name: /save/i }));
@@ -115,32 +126,54 @@ describe('SettingsView', () => {
   });
 
   it('shows success message after successful flip', async () => {
-    const patchResponse = { mode: 'ator', restartTriggered: true, restartedAt: Date.now() };
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonRes(DIRECT_STATUS))
-      .mockResolvedValueOnce(jsonRes(patchResponse))
-      .mockResolvedValue(jsonRes(ATOR_OK_STATUS));
+    const patchResponse = {
+      mode: 'ator',
+      restartTriggered: true,
+      restartedAt: Date.now(),
+    };
+    // URL/method-aware: the Settings view now also fetches /api/chains on mount,
+    // so call-order mocks would desync. Dispatch on URL + method instead.
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/api/chains'))
+        return Promise.resolve(jsonRes({ chainProviders: [] }));
+      if (url.includes('/api/transport') && init?.method === 'PATCH')
+        return Promise.resolve(jsonRes(patchResponse));
+      return Promise.resolve(jsonRes(DIRECT_STATUS));
+    });
 
     const user = userEvent.setup();
     renderSettings();
-    await waitFor(() => expect(screen.getByRole('radio', { name: /direct/i })).toBeChecked());
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: /direct/i })).toBeChecked()
+    );
 
     await user.click(screen.getByRole('radio', { name: /ator/i }));
     await user.click(screen.getByRole('button', { name: /save/i }));
 
-    await waitFor(() =>
-      expect(screen.getByRole('status')).toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument());
   });
 
   it('shows error message when PATCH fails', async () => {
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(jsonRes(DIRECT_STATUS))
-      .mockResolvedValueOnce(jsonRes({ error: 'connector_restart_failed', message: 'docker error' }, 500));
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes('/api/chains'))
+        return Promise.resolve(jsonRes({ chainProviders: [] }));
+      if (url.includes('/api/transport') && init?.method === 'PATCH')
+        return Promise.resolve(
+          jsonRes(
+            { error: 'connector_restart_failed', message: 'docker error' },
+            500
+          )
+        );
+      return Promise.resolve(jsonRes(DIRECT_STATUS));
+    });
 
     const user = userEvent.setup();
     renderSettings();
-    await waitFor(() => expect(screen.getByRole('radio', { name: /direct/i })).toBeChecked());
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: /direct/i })).toBeChecked()
+    );
 
     await user.click(screen.getByRole('radio', { name: /ator/i }));
 
@@ -158,7 +191,9 @@ describe('SettingsView', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonRes(ATOR_DOWN_STATUS));
     renderSettings();
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /switch to direct/i })).toBeInTheDocument()
+      expect(
+        screen.getByRole('button', { name: /switch to direct/i })
+      ).toBeInTheDocument()
     );
   });
 

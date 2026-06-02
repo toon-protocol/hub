@@ -6,7 +6,7 @@ import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import type { DockerOrchestrator } from '../docker/orchestrator.js';
 import type { WalletManager } from '../wallet/index.js';
 import type { ConnectorAdminClient } from '../connector/index.js';
-import type { TownhouseConfig } from '../config/schema.js';
+import type { TownhouseConfig, ChainProviderEntry } from '../config/schema.js';
 import type { TransportProbe } from '../connector/transport-probe.js';
 // DvmHealthResponse / MillHealthResponse are intentionally inlined here (rather
 // than imported from @toon-protocol/sdk / @toon-protocol/mill) to keep townhouse
@@ -377,6 +377,12 @@ export interface WizardInitRequest {
     dvm: { enabled: boolean; feePerJob?: number };
   };
   transport: { mode: 'direct' | 'ator' };
+  /**
+   * Optional settlement chains (connector chainProviders) to configure during
+   * first-run setup. Omitted/empty → the connector uses the dev-Anvil default.
+   * Validated deeply when the resulting config is saved.
+   */
+  chainProviders?: ChainProviderEntry[];
 }
 
 /** Progress messages streamed over WS /api/wizard/progress */

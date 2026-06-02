@@ -460,6 +460,62 @@ describe('ConnectorConfigGenerator', () => {
       );
     });
 
+    it('emits a Solana chainProvider with programId (not registry/token)', () => {
+      const config = configWithNodes(['town'], {
+        chainProviders: [
+          {
+            chainType: 'solana',
+            chainId: 'solana:devnet',
+            rpcUrl: 'https://api.devnet.solana.com',
+            wsUrl: 'wss://api.devnet.solana.com',
+            programId: 'PpayMENtCha1Ne1Program111111111111111111111',
+            tokenMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+            keyId: 'solana-treasury',
+          },
+        ],
+      });
+      const generator = new ConnectorConfigGenerator(config);
+      const yaml = generator.toYaml(generator.generate(['town']));
+
+      expect(yaml).toMatch(/chainType:\s*solana/);
+      expect(yaml).toMatch(/chainId:\s*solana:devnet/);
+      expect(yaml).toMatch(
+        /programId:\s*PpayMENtCha1Ne1Program111111111111111111111/
+      );
+      expect(yaml).toMatch(/wsUrl:\s*wss:\/\/api\.devnet\.solana\.com/);
+      expect(yaml).toMatch(
+        /tokenMint:\s*EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/
+      );
+      // EVM-only fields must NOT appear for a Solana entry.
+      expect(yaml).not.toMatch(/registryAddress:/);
+      expect(yaml).not.toMatch(/tokenAddress:/);
+    });
+
+    it('emits a Mina chainProvider with graphqlUrl + zkAppAddress', () => {
+      const config = configWithNodes(['town'], {
+        chainProviders: [
+          {
+            chainType: 'mina',
+            chainId: 'mina:devnet',
+            graphqlUrl: 'https://api.minascan.io/node/devnet/v1/graphql',
+            zkAppAddress:
+              'B62qpayMENtCha1Ne1zkApp1111111111111111111111111111111',
+          },
+        ],
+      });
+      const generator = new ConnectorConfigGenerator(config);
+      const yaml = generator.toYaml(generator.generate(['town']));
+
+      expect(yaml).toMatch(/chainType:\s*mina/);
+      expect(yaml).toMatch(/chainId:\s*mina:devnet/);
+      expect(yaml).toMatch(/graphqlUrl:/);
+      expect(yaml).toMatch(
+        /zkAppAddress:\s*B62qpayMENtCha1Ne1zkApp1111111111111111111111111111111/
+      );
+      expect(yaml).not.toMatch(/rpcUrl:/);
+      expect(yaml).not.toMatch(/registryAddress:/);
+    });
+
     it('emits multiple chainProviders entries as a list', () => {
       const config = configWithNodes(['town'], {
         chainProviders: [

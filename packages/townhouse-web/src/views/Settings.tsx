@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Shell } from '@/components/primitives/Shell';
 import { Button } from '@/components/primitives/Button';
 import { TransportStatusPanel } from '@/components/TransportStatusPanel';
+import { ChainsPanel } from '@/components/ChainsPanel';
 import { useTransportStatus } from '@/hooks/useTransportStatus';
 import { useTransportPatch } from '@/hooks/useTransportPatch';
 import type { TransportPatchRequest } from '@toon-protocol/townhouse';
@@ -170,6 +171,9 @@ export function SettingsView() {
             {pending ? 'Saving…' : 'Save & restart connector'}
           </Button>
         </section>
+
+        {/* Settlement chains section */}
+        <ChainsPanel />
       </div>
     </Shell>
   );

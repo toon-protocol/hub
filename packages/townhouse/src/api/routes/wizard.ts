@@ -462,5 +462,10 @@ export function buildConfigFromRequest(
   // Apply transport
   config.transport.mode = request.transport.mode;
 
+  // Apply optional settlement chains (deep-validated at save time).
+  if (request.chainProviders && request.chainProviders.length > 0) {
+    config.chainProviders = request.chainProviders;
+  }
+
   return config;
 }

@@ -158,14 +158,39 @@ export class ConnectorConfigGenerator {
       this.config.chainProviders !== undefined &&
       this.config.chainProviders.length > 0
     ) {
-      yamlObj['chainProviders'] = this.config.chainProviders.map((p) => ({
-        chainType: p.chainType,
-        chainId: p.chainId,
-        rpcUrl: p.rpcUrl,
-        registryAddress: p.registryAddress,
-        tokenAddress: p.tokenAddress,
-        keyId: p.keyId,
-      }));
+      yamlObj['chainProviders'] = this.config.chainProviders.map((p) => {
+        // Emit the per-chain shape the connector's ProviderConfig expects
+        // (EVM | Solana | Mina). Fields are discriminated on chainType.
+        if (p.chainType === 'evm') {
+          return {
+            chainType: 'evm',
+            chainId: p.chainId,
+            rpcUrl: p.rpcUrl,
+            registryAddress: p.registryAddress,
+            tokenAddress: p.tokenAddress,
+            keyId: p.keyId,
+          };
+        }
+        if (p.chainType === 'solana') {
+          return {
+            chainType: 'solana',
+            chainId: p.chainId,
+            rpcUrl: p.rpcUrl,
+            ...(p.wsUrl !== undefined ? { wsUrl: p.wsUrl } : {}),
+            programId: p.programId,
+            ...(p.tokenMint !== undefined ? { tokenMint: p.tokenMint } : {}),
+            keyId: p.keyId,
+          };
+        }
+        // mina
+        return {
+          chainType: 'mina',
+          chainId: p.chainId,
+          graphqlUrl: p.graphqlUrl,
+          zkAppAddress: p.zkAppAddress,
+          ...(p.keyId !== undefined ? { keyId: p.keyId } : {}),
+        };
+      });
     }
 
     return yamlStringify(yamlObj);

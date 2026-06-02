@@ -9,9 +9,11 @@ import { WizardView } from './Wizard';
 vi.mock('@/hooks/useWizardSubmit', () => ({
   useWizardSubmit: () => ({
     submit: vi.fn().mockResolvedValue({ status: 'launching' }),
-    previewMnemonic: vi.fn().mockResolvedValue(
-      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
-    ),
+    previewMnemonic: vi
+      .fn()
+      .mockResolvedValue(
+        'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+      ),
   }),
 }));
 
@@ -100,15 +102,19 @@ describe('WizardView', () => {
 
   it('shows progress indicator', () => {
     renderWizard();
-    expect(screen.getByText('Step 1 of 5')).toBeInTheDocument();
+    expect(screen.getByText('Step 1 of 6')).toBeInTheDocument();
   });
 
   it('step 2 shows wallet tab switcher', async () => {
     renderWizard();
     fireEvent.click(screen.getAllByRole('checkbox')[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(screen.getByRole('tab', { name: 'Generate new' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Import existing' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('tab', { name: 'Generate new' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('tab', { name: 'Import existing' })
+    ).toBeInTheDocument();
   });
 
   it('step 3 shows privacy radio options', async () => {

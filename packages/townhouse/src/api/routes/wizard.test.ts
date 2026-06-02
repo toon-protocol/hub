@@ -505,6 +505,33 @@ describe('buildConfigFromRequest', () => {
     expect(config.transport.mode).toBe('ator');
   });
 
+  it('applies chainProviders when provided', () => {
+    const config = buildConfigFromRequest(
+      makeValidPayload({
+        chainProviders: [
+          {
+            chainType: 'solana',
+            chainId: 'solana:devnet',
+            rpcUrl: 'https://s',
+            programId: 'P',
+            keyId: 'k',
+          },
+        ],
+      }),
+      '/tmp/test/config.yaml'
+    );
+    expect(config.chainProviders).toHaveLength(1);
+    expect(config.chainProviders?.[0]?.chainType).toBe('solana');
+  });
+
+  it('leaves chainProviders unset when omitted (connector uses the default)', () => {
+    const config = buildConfigFromRequest(
+      makeValidPayload(),
+      '/tmp/test/config.yaml'
+    );
+    expect(config.chainProviders).toBeUndefined();
+  });
+
   it('sets wallet path relative to config dir (POSIX)', () => {
     const config = buildConfigFromRequest(
       makeValidPayload(),

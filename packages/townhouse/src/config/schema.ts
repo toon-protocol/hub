@@ -67,29 +67,73 @@ export interface ConnectorConfig {
 }
 
 /**
- * Connector chain-provider entry — surfaces what the connector needs to spin
- * up its settlement subsystem (AccountManager + ClaimReceiver). Without at
- * least one entry, `/admin/earnings.json` returns 503 and Townhouse's
+ * Connector chain-provider entry — what the connector needs to spin up its
+ * settlement subsystem (AccountManager + ClaimReceiver) for one chain. Without
+ * at least one entry, `/admin/earnings.json` returns 503 and Townhouse's
  * earnings data plane breaks (Epic 47 BUG-1).
+ *
+ * This is a discriminated union on `chainType` that mirrors the connector's
+ * `ProviderConfig` contract (EVM | Solana | Mina), so entries pass straight
+ * through `ConnectorConfigGenerator` to the connector. The connector already
+ * implements payment-channel providers for all three chains.
  *
  * Dev-Anvil deterministic placeholders are exposed via
  * `DEFAULT_HS_CHAIN_PROVIDERS` in `defaults.ts`; operators running on real
  * chains override this in their `config.yaml`.
  */
-export interface ChainProviderEntry {
-  /** Currently only 'evm' supported. */
+
+/** Supported settlement chain families. */
+export type ChainType = 'evm' | 'solana' | 'mina';
+
+/** EVM settlement chain (Base, Arbitrum, Anvil dev, …). */
+export interface EvmChainProvider {
   chainType: 'evm';
   /** Canonical chain id, e.g. 'evm:base:31337' (dev-Anvil) or 'evm:base:8453' (mainnet). */
   chainId: string;
-  /** Chain RPC endpoint. May be a dead address in offline/demo mode. */
+  /** JSON-RPC endpoint. May be a dead address in offline/demo mode. */
   rpcUrl: string;
   /** PaymentChannel registry contract. */
   registryAddress: string;
   /** Settlement token (USDC, etc.) contract. */
   tokenAddress: string;
-  /** Hex private key the connector signs settlement claims with. */
+  /** Hex private key / key id the connector signs settlement claims with. */
   keyId: string;
 }
+
+/** Solana settlement chain. */
+export interface SolanaChainProvider {
+  chainType: 'solana';
+  /** Canonical chain id, e.g. 'solana:devnet' or 'solana:mainnet'. */
+  chainId: string;
+  /** Cluster RPC endpoint (HTTP). */
+  rpcUrl: string;
+  /** WebSocket endpoint for account subscriptions (derived from rpcUrl if absent). */
+  wsUrl?: string;
+  /** On-chain payment-channel program id (base58). */
+  programId: string;
+  /** Settlement token mint (base58). */
+  tokenMint?: string;
+  /** Key id the connector signs settlement claims with. */
+  keyId: string;
+}
+
+/** Mina settlement chain. */
+export interface MinaChainProvider {
+  chainType: 'mina';
+  /** Canonical chain id, e.g. 'mina:devnet' or 'mina:mainnet'. */
+  chainId: string;
+  /** Mina GraphQL endpoint. */
+  graphqlUrl: string;
+  /** zkApp address for the payment-channel contract (base58). */
+  zkAppAddress: string;
+  /** Key id the connector signs settlement claims with. */
+  keyId?: string;
+}
+
+export type ChainProviderEntry =
+  | EvmChainProvider
+  | SolanaChainProvider
+  | MinaChainProvider;
 
 /**
  * Hidden-service publication config (Story 35.5 of the connector repo).
