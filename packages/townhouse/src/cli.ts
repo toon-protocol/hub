@@ -31,6 +31,7 @@ import Docker from 'dockerode';
 import { nip19 } from 'nostr-tools';
 
 import { getDefaultConfig } from './config/defaults.js';
+import type { NetworkMode } from './config/schema.js';
 import { loadConfig, saveConfig } from './config/loader.js';
 import type { TownhouseConfig, ChainProviderEntry } from './config/schema.js';
 import { DockerOrchestrator, OrchestratorError } from './docker/index.js';
@@ -40,6 +41,7 @@ import {
   TransportProbe,
   DEFAULT_ATOR_PROXY,
   writeHsConnectorConfig,
+  writeHsNodeEnvFile,
 } from './connector/index.js';
 import { materializeComposeTemplate } from './compose-loader.js';
 import type { ComposeLoaderOptions } from './compose-loader.js';
@@ -113,7 +115,7 @@ const HELP_TEXT = `townhouse — TOON node orchestrator
 
 Usage:
   townhouse setup [--no-browser] [--port <n>] [--config-dir <dir>]  Run the first-run setup wizard
-  townhouse init [--force] [--config-dir <dir>] [--password <pw>] [--preset <name>] [--yes]   Initialize config + wallet
+  townhouse init [--force] [--config-dir <dir>] [--password <pw>] [--preset <name>] [--network <mode>] [--yes]   Initialize config + wallet
   townhouse up [--town] [--mill] [--dvm] [-c <path>] [--password <pw>]  Start nodes
   townhouse down [-c <path>]                     Stop all nodes
   townhouse status [-c <path>]                   Show node status
@@ -147,6 +149,7 @@ Flags:
   --no-browser   Skip opening the browser automatically (setup command)
   --port         Override the API port (setup command, default 9400)
   --preset       Init from a named preset (init only). Supported: demo
+  --network      Chain network for apex + nodes (init only): mainnet (default), testnet, devnet, custom
   --yes          Non-interactive (init only); with --preset=demo uses demo password if --password absent
   --json         Machine-readable JSON output (node commands; NDJSON for \`logs\`)
   --lines        Number of historical log lines to fetch on attach (logs command, default 50)
@@ -252,7 +255,8 @@ async function handleInit(
   configDir?: string,
   password?: string,
   preset?: 'demo',
-  yes?: boolean
+  yes?: boolean,
+  network?: NetworkMode
 ): Promise<void> {
   const dir = resolve(configDir ?? DEFAULT_CONFIG_DIR);
   const configPath = join(dir, 'config.yaml');
@@ -289,6 +293,11 @@ async function handleInit(
     // getDefaultConfig() hardcodes ~/.townhouse/wallet.enc; tests and non-default
     // config dirs need the wallet collocated with config.yaml.
     configToWrite.wallet.encrypted_path = join(dir, 'wallet.enc');
+  }
+  // Persist the network mode (mainnet/testnet/devnet/custom). Drives chain/RPC
+  // config for the apex connector and every node container (resolveNetworkProfile).
+  if (network !== undefined) {
+    configToWrite.network = network;
   }
   const yamlContent = stringify(configToWrite);
   writeFileSync(configPath, yamlContent, {
@@ -1841,6 +1850,12 @@ async function handleHsUp(
       hsOverrides?.materializeComposeTemplate ?? materializeComposeTemplate;
     const { composePath } = materialize('hs', { townhouseHome: configDir });
 
+    // Step 2b: write compose/.env from the `network` mode so the compose
+    // template's ${EVM_CHAIN}/${EVM_RPC_URL}/${SOLANA_*} interpolations resolve
+    // to real public endpoints for the chosen tier (apex + children share the
+    // same network profile). Must run after materialize (which creates compose/).
+    writeHsNodeEnvFile(configDir, config);
+
     // Step 3: start the ribbon (phase 1 — pulling).
     ribbon.start('pull');
 
@@ -2530,6 +2545,7 @@ export async function main(
       'no-browser': { type: 'boolean' },
       port: { type: 'string' },
       preset: { type: 'string' },
+      network: { type: 'string' },
       yes: { type: 'boolean' },
       'rotate-keys': { type: 'boolean' },
       'skip-preflight': { type: 'boolean' },
@@ -2620,12 +2636,24 @@ export async function main(
         process.exitCode = 1;
         break;
       }
+      const networkVal = values.network as string | undefined;
+      if (
+        networkVal !== undefined &&
+        !['mainnet', 'testnet', 'devnet', 'custom'].includes(networkVal)
+      ) {
+        console.error(
+          `Unknown network: ${networkVal}. Supported: mainnet, testnet, devnet, custom`
+        );
+        process.exitCode = 1;
+        break;
+      }
       await handleInit(
         values.force === true,
         values['config-dir'] as string | undefined,
         values.password as string | undefined,
         presetVal,
-        values.yes === true
+        values.yes === true,
+        networkVal as NetworkMode | undefined
       );
       break;
     }

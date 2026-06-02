@@ -6,6 +6,7 @@
 import type { ChainProviderEntry, TownhouseConfig } from './schema.js';
 
 const VALID_CHAIN_TYPES = new Set(['evm', 'solana', 'mina']);
+const VALID_NETWORK_MODES = new Set(['mainnet', 'testnet', 'devnet', 'custom']);
 const HEX_ADDRESS = /^0x[a-fA-F0-9]+$/;
 
 class ConfigValidationError extends Error {
@@ -229,6 +230,18 @@ export function validateConfig(raw: unknown): TownhouseConfig {
     );
   }
 
+  // network (optional)
+  let network: TownhouseConfig['network'];
+  if (raw['network'] !== undefined) {
+    assertString(raw['network'], 'config.network');
+    if (!VALID_NETWORK_MODES.has(raw['network'] as string)) {
+      throw new ConfigValidationError(
+        `config.network must be one of: ${[...VALID_NETWORK_MODES].join(', ')}`
+      );
+    }
+    network = raw['network'] as TownhouseConfig['network'];
+  }
+
   // chainProviders (optional)
   let chainProviders: ChainProviderEntry[] | undefined;
   if (raw['chainProviders'] !== undefined) {
@@ -397,6 +410,7 @@ export function validateConfig(raw: unknown): TownhouseConfig {
     logging: {
       level: logging['level'] as 'debug' | 'info' | 'warn' | 'error',
     },
+    ...(network !== undefined ? { network } : {}),
     ...(chainProviders !== undefined ? { chainProviders } : {}),
   };
 }

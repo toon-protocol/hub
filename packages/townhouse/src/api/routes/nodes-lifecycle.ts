@@ -20,6 +20,10 @@ import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { bytesToHex } from '@noble/hashes/utils';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import {
+  resolveNetworkProfile,
+  type ChainProviderConfigEntry,
+} from '@toon-protocol/core';
 import type { ApiDeps } from '../types.js';
 import type { NodeType } from '../types.js';
 import type { TownhouseConfig } from '../../config/schema.js';
@@ -151,12 +155,36 @@ async function waitForHealthy(url: string, timeoutMs: number): Promise<void> {
  *
  * NEVER log the return value of this function — it contains secret keys.
  */
+/**
+ * Resolve the network-mode chain env (EVM_CHAIN/EVM_RPC_URL/EVM_CHAIN_ID/
+ * EVM_USDC_ADDRESS/SOLANA_*) the HS compose interpolates into the town/mill
+ * containers. Same source of truth as the apex connector (hs-config-writer)
+ * and the `.env` written by env-writer — so the children use the public RPCs
+ * for the operator's chosen network instead of falling back to the unreachable
+ * local `anvil` default (the cause of the "disconnected" boot-loop).
+ */
+export function buildNetworkNodeEnv(
+  config: TownhouseConfig
+): Record<string, string> {
+  const profile = resolveNetworkProfile(config.network ?? 'mainnet', {
+    customProviders: config.chainProviders as
+      | ChainProviderConfigEntry[]
+      | undefined,
+  });
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(profile.nodeEnv)) {
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
 function buildNodeEnv(
   type: NodeType,
   nostrSecretKeyHex: string,
   evmPrivateKeyHex: string,
   mnemonic: string | null,
-  apexEvmAddress: string
+  apexEvmAddress: string,
+  chainEnv: Record<string, string>
 ): Record<string, string> {
   // Town's TOON_SETTLEMENT_PRIVATE_KEY (and mill's settlement key, if it
   // were ever read) requires a 0x-prefixed 32-byte hex string. bytesToHex
@@ -170,6 +198,7 @@ function buildNodeEnv(
         TOWN_SECRET_KEY: nostrSecretKeyHex,
         TOWN_SETTLEMENT_PRIVATE_KEY: evmPrivateKeyHex0x,
         APEX_EVM_ADDRESS: apexEvmAddress,
+        ...chainEnv,
       };
     case 'mill':
       return {
@@ -177,8 +206,10 @@ function buildNodeEnv(
         MILL_SETTLEMENT_PRIVATE_KEY: evmPrivateKeyHex0x,
         MILL_MNEMONIC: mnemonic ?? '',
         APEX_EVM_ADDRESS: apexEvmAddress,
+        ...chainEnv,
       };
     case 'dvm':
+      // DVM does no on-chain settlement — no chain env needed.
       return {
         DVM_SECRET_KEY: nostrSecretKeyHex,
       };
@@ -490,7 +521,8 @@ export function registerNodeLifecycleRoutes(
           nostrSecretKeyHex,
           evmPrivateKeyHex,
           mnemonicSnapshot,
-          apexEvmAddress
+          apexEvmAddress,
+          buildNetworkNodeEnv(deps.config)
         );
         try {
           await deps.orchestrator.startNodeViaCompose(type, nodeEnv);

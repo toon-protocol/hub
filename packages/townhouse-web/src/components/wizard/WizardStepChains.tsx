@@ -1,6 +1,10 @@
-import type { ChainProviderEntry } from '@toon-protocol/townhouse';
+import { useState } from 'react';
+import type { ChainProviderEntry, NetworkMode } from '@toon-protocol/townhouse';
 import { Button } from '@/components/primitives/Button';
 import { ChainAddForm } from '@/components/ChainAddForm';
+import { NetworkSelector } from '@/components/NetworkSelector';
+import { useNetwork } from '@/hooks/useNetwork';
+import { useNetworkPatch } from '@/hooks/useNetworkPatch';
 
 export interface WizardStepChainsProps {
   chains: ChainProviderEntry[];
@@ -17,9 +21,12 @@ function upsert(
 }
 
 /**
- * Optional setup-wizard step: configure the settlement chains the node will
- * settle payment claims on. Skippable — chains can also be added later in
- * Settings; the connector starts with a dev placeholder otherwise.
+ * Optional setup-wizard step: pick the network tier the node runs on
+ * (mainnet / testnet / devnet / custom). The tier drives chain + RPC for the
+ * connector and every node and is persisted via PATCH /api/network (the wizard
+ * init request has no network field — this step persists eagerly on change,
+ * mirroring how the privacy step fires its side-effect). `custom` reveals the
+ * per-chain editor, whose entries flow into the wizard draft and init request.
  */
 export function WizardStepChains({
   chains,
@@ -27,52 +34,88 @@ export function WizardStepChains({
   onContinue,
   onBack,
 }: WizardStepChainsProps): JSX.Element {
+  const { network, kind: networkKind, refetch } = useNetwork();
+  const {
+    patch: patchNetwork,
+    pending,
+    error: networkError,
+  } = useNetworkPatch();
+
+  // Local optimistic mode so the editor reveals immediately on `custom`, even
+  // before the PATCH/refetch round-trips. Falls back to the resolved value.
+  const [localMode, setLocalMode] = useState<NetworkMode | null>(null);
+  const mode: NetworkMode = localMode ?? network?.network ?? 'mainnet';
+
+  function handleNetworkChange(next: NetworkMode): void {
+    if (next === mode) return;
+    setLocalMode(next);
+    void patchNetwork(next, () => refetch()).catch(() => {
+      /* error surfaces via networkError; localMode keeps the UI responsive */
+    });
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div>
         <h2 className="font-geist-sans text-xl font-semibold text-ink tracking-tight-20">
-          Settlement chains
+          Network
         </h2>
         <p className="font-geist-sans text-sm text-ink/60 mt-1">
-          Optional. Add the chains your node settles payments on (EVM, Solana,
-          Mina). You can skip this and configure chains later in Settings — the
-          connector starts with a dev placeholder otherwise.
+          Pick the network tier your node runs on. Defaults to mainnet. Choose
+          custom to supply explicit chains, RPCs and signing keys.
         </p>
       </div>
 
-      {chains.length > 0 && (
-        <ul className="flex flex-col gap-2">
-          {chains.map((c) => (
-            <li
-              key={c.chainId}
-              className="flex items-center justify-between gap-3 rounded-md border border-ink/10 px-3 py-2"
-            >
-              <span className="font-geist-sans text-sm font-medium text-ink">
-                {c.chainType.toUpperCase()} · {c.chainId}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  onChange(chains.filter((x) => x.chainId !== c.chainId))
-                }
-                aria-label={`Remove ${c.chainId}`}
-              >
-                Remove
-              </Button>
-            </li>
-          ))}
-        </ul>
+      <NetworkSelector
+        value={mode}
+        onChange={handleNetworkChange}
+        status={network?.status}
+        nodeEnv={network?.nodeEnv}
+        disabled={pending || networkKind === 'loading'}
+      />
+      {networkError && (
+        <p role="alert" className="font-geist-sans text-sm text-red-600">
+          {networkError}
+        </p>
       )}
 
-      <ChainAddForm onAdd={(entry) => onChange(upsert(chains, entry))} />
+      {mode === 'custom' && (
+        <>
+          {chains.length > 0 && (
+            <ul className="flex flex-col gap-2">
+              {chains.map((c) => (
+                <li
+                  key={c.chainId}
+                  className="flex items-center justify-between gap-3 rounded-md shadow-border px-3 py-2"
+                >
+                  <span className="font-geist-sans text-sm font-medium text-ink">
+                    {c.chainType.toUpperCase()} · {c.chainId}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      onChange(chains.filter((x) => x.chainId !== c.chainId))
+                    }
+                    aria-label={`Remove ${c.chainId}`}
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <ChainAddForm onAdd={(entry) => onChange(upsert(chains, entry))} />
+        </>
+      )}
 
       <div className="flex items-center justify-between gap-3 pt-2">
         <Button variant="ghost" onClick={onBack}>
           Back
         </Button>
         <Button variant="primary" onClick={onContinue}>
-          {chains.length > 0 ? 'Continue' : 'Skip for now'}
+          Continue
         </Button>
       </div>
     </div>

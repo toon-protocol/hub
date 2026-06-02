@@ -10,6 +10,7 @@ export type {
   ApiConfig,
   LoggingConfig,
   ChainType,
+  NetworkMode,
   ChainProviderEntry,
   EvmChainProvider,
   SolanaChainProvider,

@@ -24,6 +24,7 @@ import {
 import { registerWizardRoutes } from './routes/wizard.js';
 import { registerTransportRoutes } from './routes/transport.js';
 import { registerChainsRoutes } from './routes/chains.js';
+import { registerNetworkRoutes } from './routes/network.js';
 import { registerEarningsRoutes } from './routes/earnings.js';
 import { registerLogsRoutes } from './routes/logs.js';
 
@@ -64,6 +65,9 @@ export async function createApiServer(deps: ApiDeps): Promise<ApiServer> {
 
   // Register settlement-chain config routes (EVM/Solana/Mina)
   registerChainsRoutes(app, deps);
+
+  // Register network-mode route (mainnet/testnet/devnet/custom)
+  registerNetworkRoutes(app, deps);
 
   // Register all normal routes
   registerNodeRoutes(app, deps);

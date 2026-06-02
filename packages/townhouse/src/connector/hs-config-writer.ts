@@ -13,8 +13,9 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse, stringify as yamlStringify } from 'yaml';
+import { resolveNetworkProfile } from '@toon-protocol/core';
 import { ConnectorConfigGenerator } from './config-generator.js';
-import type { TownhouseConfig } from '../config/schema.js';
+import type { ChainProviderEntry, TownhouseConfig } from '../config/schema.js';
 import { DEFAULT_HS_CHAIN_PROVIDERS } from '../config/defaults.js';
 import type { ConnectorRuntimeConfig } from './types.js';
 
@@ -66,17 +67,30 @@ export function writeHsConnectorConfig(
     // Fall through to overwrite.
   }
 
-  // Epic 47 BUG-1 product fix (D2): inject DEFAULT_HS_CHAIN_PROVIDERS when
-  // the operator has not configured chainProviders. Without at least one
-  // entry, the connector's settlement subsystem (AccountManager +
-  // ClaimReceiver) does not initialize, so `/admin/earnings.json` returns
-  // 503 and Townhouse's earnings data plane (Epic 47) breaks. The defaults
-  // are dev-Anvil deterministic addresses paired with a dead RPC; they
-  // initialize the subsystem successfully but never resolve on-chain calls.
-  // Operators running on real chains override chainProviders in config.yaml.
-  const hsConfig: TownhouseConfig =
+  // Resolve the apex connector's chainProviders. Precedence:
+  //   1. explicit config.chainProviders (operator ran `townhouse chains add`)
+  //   2. derived from `network` via resolveNetworkProfile (the network flag,
+  //      shared with the child node containers — see env-writer.ts)
+  //   3. DEFAULT_HS_CHAIN_PROVIDERS — last-resort dev-Anvil placeholders so the
+  //      connector's settlement subsystem (AccountManager + ClaimReceiver) still
+  //      initializes and `/admin/earnings.json` returns 200 (Epic 47 BUG-1).
+  //
+  // (2) yields no entries until TOON's on-chain settlement contracts are deployed
+  // to public chains (the presets carry empty registry/program/zkApp today), so in
+  // practice the apex still uses (3) for now while the child nodes already get the
+  // real public RPCs from the same network profile. The dev key from (3) is reused
+  // so derived providers are complete the moment the preset addresses are filled in.
+  const network = config.network ?? 'mainnet';
+  const derived =
     config.chainProviders !== undefined && config.chainProviders.length > 0
-      ? config
+      ? config.chainProviders
+      : (resolveNetworkProfile(network, {
+          keyId: DEFAULT_HS_CHAIN_PROVIDERS[0]?.keyId,
+          customProviders: config.chainProviders,
+        }).chainProviders as ChainProviderEntry[]);
+  const hsConfig: TownhouseConfig =
+    derived.length > 0
+      ? { ...config, chainProviders: derived }
       : { ...config, chainProviders: [...DEFAULT_HS_CHAIN_PROVIDERS] };
 
   // Build the HS runtime config by extending the base generated config.

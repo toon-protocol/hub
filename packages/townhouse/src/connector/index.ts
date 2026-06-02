@@ -10,6 +10,8 @@ export { ConnectorAdminClient } from './admin-client.js';
 export { TransportProbe } from './transport-probe.js';
 export { writeHsConnectorConfig } from './hs-config-writer.js';
 export type { WriteHsConnectorConfigResult } from './hs-config-writer.js';
+export { writeHsNodeEnvFile } from './env-writer.js';
+export type { WriteHsNodeEnvResult } from './env-writer.js';
 export type {
   ConnectorRuntimeConfig,
   AssetEarnings,

@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { ChainProviderEntry } from '@toon-protocol/townhouse';
+import type { ChainProviderEntry, NetworkMode } from '@toon-protocol/townhouse';
 import { Button } from './primitives/Button';
 import { ChainAddForm } from './ChainAddForm';
+import { NetworkSelector } from './NetworkSelector';
 import { useChains } from '@/hooks/useChains';
 import { useChainsPatch } from '@/hooks/useChainsPatch';
+import { useNetwork } from '@/hooks/useNetwork';
+import { useNetworkPatch } from '@/hooks/useNetworkPatch';
 
 // Re-exported for back-compat with existing tests.
 export { buildEntryFromForm } from './ChainAddForm';
@@ -32,12 +35,37 @@ function upsert(
 export function ChainsPanel(): JSX.Element {
   const { chains, kind, refetch } = useChains();
   const { patch, pending, error: patchError } = useChainsPatch();
+  const { network, kind: networkKind, refetch: refetchNetwork } = useNetwork();
+  const {
+    patch: patchNetwork,
+    pending: networkPending,
+    error: networkError,
+  } = useNetworkPatch();
   const [draft, setDraft] = useState<ChainProviderEntry[]>([]);
   const [success, setSuccess] = useState<string | null>(null);
+  const [networkSuccess, setNetworkSuccess] = useState<string | null>(null);
+
+  // Until the network mode resolves, default to mainnet (the API default).
+  const mode: NetworkMode = network?.network ?? 'mainnet';
 
   useEffect(() => {
     if (kind === 'ready') setDraft(chains);
   }, [kind, chains]);
+
+  function handleNetworkChange(next: NetworkMode): void {
+    if (next === mode) return;
+    setNetworkSuccess(null);
+    void patchNetwork(next, () => {
+      refetchNetwork();
+      setNetworkSuccess(
+        next === 'custom'
+          ? 'Switched to custom — configure your chains below.'
+          : `Network set to ${next} — the connector is restarting.`
+      );
+    }).catch(() => {
+      /* error surfaces via networkError */
+    });
+  }
 
   function handleRemove(chainId: string): void {
     setSuccess(null);
@@ -68,16 +96,59 @@ export function ChainsPanel(): JSX.Element {
         the connector.
       </p>
 
-      {kind === 'loading' && (
+      <div className="mb-6">
+        {networkKind === 'error' ? (
+          <p className="font-geist-sans text-sm text-red-600">
+            Couldn&apos;t load network configuration.
+          </p>
+        ) : (
+          <NetworkSelector
+            value={mode}
+            onChange={handleNetworkChange}
+            status={network?.status}
+            nodeEnv={network?.nodeEnv}
+            disabled={networkPending || networkKind === 'loading'}
+          />
+        )}
+        <div className="flex items-center gap-3 mt-2 min-h-[1.25rem]">
+          {networkPending && (
+            <span className="font-geist-sans text-sm text-ink/60">
+              Applying…
+            </span>
+          )}
+          {networkSuccess && (
+            <span
+              role="status"
+              className="font-geist-sans text-sm text-green-700"
+            >
+              {networkSuccess}
+            </span>
+          )}
+          {networkError && (
+            <span role="alert" className="font-geist-sans text-sm text-red-600">
+              {networkError}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {mode !== 'custom' && (
+        <p className="font-geist-sans text-sm text-ink/50">
+          Per-chain editing is available in <strong>custom</strong> network
+          mode. The endpoints above are resolved from the selected tier.
+        </p>
+      )}
+
+      {mode === 'custom' && kind === 'loading' && (
         <p className="font-geist-sans text-sm text-ink/50">Loading…</p>
       )}
-      {kind === 'error' && (
+      {mode === 'custom' && kind === 'error' && (
         <p className="font-geist-sans text-sm text-red-600">
           Couldn&apos;t load settlement chains.
         </p>
       )}
 
-      {kind !== 'loading' && (
+      {mode === 'custom' && kind !== 'loading' && (
         <>
           <ul className="flex flex-col gap-2 mb-4">
             {draft.length === 0 && (
@@ -89,7 +160,7 @@ export function ChainsPanel(): JSX.Element {
             {draft.map((c) => (
               <li
                 key={c.chainId}
-                className="flex items-center justify-between gap-3 rounded-md border border-ink/10 px-3 py-2"
+                className="flex items-center justify-between gap-3 rounded-md shadow-border px-3 py-2"
               >
                 <div className="flex flex-col">
                   <span className="font-geist-sans text-sm font-medium text-ink">

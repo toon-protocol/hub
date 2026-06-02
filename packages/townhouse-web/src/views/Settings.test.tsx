@@ -34,6 +34,34 @@ function jsonRes(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
+const NETWORK_BODY = {
+  network: 'mainnet',
+  status: { evm: 'unconfigured', solana: 'unconfigured', mina: 'unconfigured' },
+  nodeEnv: {},
+  ts: Date.now(),
+};
+
+/**
+ * The ChainsPanel now also fetches /api/network and /api/chains on mount.
+ * Tests that assert on transport-specific roles (alert/status) must answer
+ * those routes too, or the network panel would surface its own load error and
+ * pollute role queries. URL/method-aware dispatch keeps things deterministic.
+ */
+function withTransportFetch(
+  transportHandler: (url: string, init?: RequestInit) => Response | null
+) {
+  vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+    const url = String(input);
+    if (url.includes('/api/network'))
+      return Promise.resolve(jsonRes(NETWORK_BODY));
+    if (url.includes('/api/chains'))
+      return Promise.resolve(jsonRes({ chainProviders: [] }));
+    const handled = transportHandler(url, init);
+    if (handled) return Promise.resolve(handled);
+    return Promise.resolve(jsonRes(DIRECT_STATUS));
+  });
+}
+
 function renderSettings() {
   return render(
     <MemoryRouter>
@@ -95,16 +123,13 @@ describe('SettingsView', () => {
       restartTriggered: true,
       restartedAt: Date.now(),
     };
-    // URL/method-aware: the Settings view now also fetches /api/chains on mount,
-    // so call-order mocks would desync. Dispatch on URL + method instead.
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
-      const url = String(input);
-      if (url.includes('/api/chains'))
-        return Promise.resolve(jsonRes({ chainProviders: [] }));
-      if (url.includes('/api/transport') && init?.method === 'PATCH')
-        return Promise.resolve(jsonRes(patchResponse));
-      return Promise.resolve(jsonRes(DIRECT_STATUS));
-    });
+    // URL/method-aware: the Settings view now also fetches /api/chains and
+    // /api/network on mount, so call-order mocks would desync.
+    withTransportFetch((url, init) =>
+      url.includes('/api/transport') && init?.method === 'PATCH'
+        ? jsonRes(patchResponse)
+        : null
+    );
 
     const user = userEvent.setup();
     renderSettings();
@@ -131,16 +156,13 @@ describe('SettingsView', () => {
       restartTriggered: true,
       restartedAt: Date.now(),
     };
-    // URL/method-aware: the Settings view now also fetches /api/chains on mount,
-    // so call-order mocks would desync. Dispatch on URL + method instead.
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
-      const url = String(input);
-      if (url.includes('/api/chains'))
-        return Promise.resolve(jsonRes({ chainProviders: [] }));
-      if (url.includes('/api/transport') && init?.method === 'PATCH')
-        return Promise.resolve(jsonRes(patchResponse));
-      return Promise.resolve(jsonRes(DIRECT_STATUS));
-    });
+    // URL/method-aware: the Settings view now also fetches /api/chains and
+    // /api/network on mount, so call-order mocks would desync.
+    withTransportFetch((url, init) =>
+      url.includes('/api/transport') && init?.method === 'PATCH'
+        ? jsonRes(patchResponse)
+        : null
+    );
 
     const user = userEvent.setup();
     renderSettings();
@@ -155,19 +177,14 @@ describe('SettingsView', () => {
   });
 
   it('shows error message when PATCH fails', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
-      const url = String(input);
-      if (url.includes('/api/chains'))
-        return Promise.resolve(jsonRes({ chainProviders: [] }));
-      if (url.includes('/api/transport') && init?.method === 'PATCH')
-        return Promise.resolve(
-          jsonRes(
+    withTransportFetch((url, init) =>
+      url.includes('/api/transport') && init?.method === 'PATCH'
+        ? jsonRes(
             { error: 'connector_restart_failed', message: 'docker error' },
             500
           )
-        );
-      return Promise.resolve(jsonRes(DIRECT_STATUS));
-    });
+        : null
+    );
 
     const user = userEvent.setup();
     renderSettings();

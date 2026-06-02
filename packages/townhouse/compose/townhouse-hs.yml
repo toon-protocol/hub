@@ -271,7 +271,12 @@ services:
       NODE_ID: town
       PARENT_PEER_ID: apex
       FEE_PER_EVENT: '0'
-      # Chain RPC — operator sets EVM_RPC_URL in ~/.townhouse/env or via CLI.
+      # Chain selection — driven by the `network` flag (resolveNetworkProfile).
+      # EVM_CHAIN is the primary EVM preset name (e.g. base-mainnet) → town
+      # TOON_CHAIN; EVM_RPC_URL is the matching RPC. Both come from the node-env
+      # overlay (nodes-lifecycle buildNetworkNodeEnv) and ~/.townhouse/compose/.env
+      # (env-writer). 'none' makes the town node run relay-only (no settlement).
+      TOON_CHAIN: ${EVM_CHAIN:-}
       TOON_RPC_URL: ${EVM_RPC_URL:-}
       NODE_NOSTR_PUBKEY: ''
       NODE_EVM_ADDRESS: ''
