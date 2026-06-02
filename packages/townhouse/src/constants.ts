@@ -24,19 +24,24 @@ export const NODE_BTP_PORT = 3000;
  *   manifest.images.connector.tag
  */
 export const DEFAULT_CONNECTOR_IMAGE =
-  // v3.8.0 — latest published connector (Story 50.4 bump). Migrates local SQLite
-  // from better-sqlite3 to libsql (toon-protocol/connector#79 — removes the
+  // v3.8.1 — latest published connector (Mina settlement fix). Wires the
+  // dual-party Mina payment-channel claim path (toon-protocol/connector#84 —
+  // the on-chain `claimFromChannel` now passes the real counterparty balance,
+  // salt, and both signatures instead of the single-sig/zeroed placeholders
+  // that left Mina settlement un-claimable). EVM and Solana settlement are
+  // unchanged. Patch over 3.8.0, which migrated local SQLite from
+  // better-sqlite3 to libsql (toon-protocol/connector#79 — removed the
   // native-build failure on Node 24 that left the settlement/claim subsystem
   // silently un-wired → value-bearing packets auto-fulfilled instead of
-  // claim-gated) AND makes inbound per-packet claim validation relation-aware
-  // (toon-protocol/connector#78 — a child node now skips the inline-claim
+  // claim-gated) AND made inbound per-packet claim validation relation-aware
+  // (toon-protocol/connector#78 — a child node skips the inline-claim
   // requirement for PREPAREs forwarded from its parent, unblocking Story 50.3's
   // AC#1 kind:1 F06 "No payment channel claim attached" on the apex→child hop).
   // No breaking changes to the SDK/admin contract within 3.x (verified >=3.3.2
-  // through 3.8.0 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest resolved via
-  // `docker buildx imagetools inspect` for tag 3.8.0. To bump: see
+  // through 3.8.1 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest resolved via
+  // `docker buildx imagetools inspect` for tag 3.8.1. To bump: see
   // CONNECTOR_RELEASE_CONTRACT.md.
-  'ghcr.io/toon-protocol/connector@sha256:3343c19649290043e521c81b467b7c6410b8eaedd76d48804ea9b6fc810cddb0';
+  'ghcr.io/toon-protocol/connector@sha256:d22a786f82cc928238b0ef14c6455d1238bd2f42744138cad8af81ca1747ff6e';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).
