@@ -229,12 +229,22 @@ export interface TownhouseConfig {
    * - `mainnet` (default when unset) — public production chains
    * - `testnet` — public Sepolia / Solana testnet / Mina devnet
    * - `devnet` — public Sepolia / Solana+Mina devnets (no local chain)
-   * - `custom` — operator supplies `chainProviders` (below) directly
+   * - `custom` — operator supplies `chainProviders` directly, OR just RPC URLs
+   *   via `endpoints` (below) to point at the project's dev chains
    *
    * Resolved via `resolveNetworkProfile()` (@toon-protocol/core). An explicit
    * non-empty `chainProviders` always overrides the derived providers.
    */
   network?: NetworkMode;
+  /**
+   * Operator-supplied RPC URLs for `network: 'custom'` (`--evm-url`/`--sol-url`
+   * or EVM_URL/SOL_URL env). Points the apex + nodes at the project's dev chains
+   * hosted anywhere — e.g. the anvil + solana that scripts/akash-deploy.sh
+   * deploys to Akash (ingress hostnames rotate per redeploy, so the operator
+   * passes the current URLs). EVM is the chain-id 31338 Anvil
+   * (settlement-complete); Solana is RPC + Mock-USDC only (relay-only).
+   */
+  endpoints?: { evmUrl?: string; solUrl?: string };
   /**
    * Connector chain providers — required for the connector's settlement
    * subsystem (AccountManager + ClaimReceiver) to initialize. When unset on

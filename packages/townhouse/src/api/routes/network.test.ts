@@ -85,6 +85,33 @@ describe('PATCH /api/network', () => {
     await app.close();
   });
 
+  it('custom + endpoints surfaces the akash-anvil dev-chain profile', async () => {
+    const { app, deps } = build();
+    registerNetworkRoutes(app, deps);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/network',
+      payload: {
+        network: 'custom',
+        endpoints: {
+          evmUrl: 'https://anvil.akash',
+          solUrl: 'https://sol.akash',
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.network).toBe('custom');
+    expect(body.nodeEnv.EVM_CHAIN).toBe('akash-anvil');
+    expect(body.nodeEnv.EVM_RPC_URL).toBe('https://anvil.akash');
+    expect(body.status.evm).toBe('configured');
+    expect(deps.config.endpoints).toEqual({
+      evmUrl: 'https://anvil.akash',
+      solUrl: 'https://sol.akash',
+    });
+    await app.close();
+  });
+
   it('rejects an unknown mode (schema enum)', async () => {
     const { app, deps } = build();
     registerNetworkRoutes(app, deps);

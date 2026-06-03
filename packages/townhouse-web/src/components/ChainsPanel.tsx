@@ -44,6 +44,8 @@ export function ChainsPanel(): JSX.Element {
   const [draft, setDraft] = useState<ChainProviderEntry[]>([]);
   const [success, setSuccess] = useState<string | null>(null);
   const [networkSuccess, setNetworkSuccess] = useState<string | null>(null);
+  const [evmUrl, setEvmUrl] = useState('');
+  const [solUrl, setSolUrl] = useState('');
 
   // Until the network mode resolves, default to mainnet (the API default).
   const mode: NetworkMode = network?.network ?? 'mainnet';
@@ -52,17 +54,47 @@ export function ChainsPanel(): JSX.Element {
     if (kind === 'ready') setDraft(chains);
   }, [kind, chains]);
 
+  // Seed the custom RPC URL inputs from GET /api/network once it resolves.
+  useEffect(() => {
+    if (network?.endpoints) {
+      setEvmUrl(network.endpoints.evmUrl ?? '');
+      setSolUrl(network.endpoints.solUrl ?? '');
+    }
+  }, [network?.endpoints]);
+
   function handleNetworkChange(next: NetworkMode): void {
     if (next === mode) return;
     setNetworkSuccess(null);
-    void patchNetwork(next, () => {
-      refetchNetwork();
-      setNetworkSuccess(
-        next === 'custom'
-          ? 'Switched to custom — configure your chains below.'
-          : `Network set to ${next} — the connector is restarting.`
-      );
-    }).catch(() => {
+    void patchNetwork(
+      next,
+      () => {
+        refetchNetwork();
+        setNetworkSuccess(
+          next === 'custom'
+            ? 'Switched to custom — configure your chains below.'
+            : `Network set to ${next} — the connector is restarting.`
+        );
+      },
+      next === 'custom' ? { evmUrl, solUrl } : undefined
+    ).catch(() => {
+      /* error surfaces via networkError */
+    });
+  }
+
+  function handleEndpointsChange(nextEvmUrl: string, nextSolUrl: string): void {
+    setEvmUrl(nextEvmUrl);
+    setSolUrl(nextSolUrl);
+    // Persist the new URLs against the custom mode (no-op outside custom mode).
+    if (mode !== 'custom') return;
+    setNetworkSuccess(null);
+    void patchNetwork(
+      'custom',
+      () => {
+        refetchNetwork();
+        setNetworkSuccess('RPC URLs saved — the connector is restarting.');
+      },
+      { evmUrl: nextEvmUrl, solUrl: nextSolUrl }
+    ).catch(() => {
       /* error surfaces via networkError */
     });
   }
@@ -107,6 +139,9 @@ export function ChainsPanel(): JSX.Element {
             onChange={handleNetworkChange}
             status={network?.status}
             nodeEnv={network?.nodeEnv}
+            evmUrl={evmUrl}
+            solUrl={solUrl}
+            onEndpointsChange={handleEndpointsChange}
             disabled={networkPending || networkKind === 'loading'}
           />
         )}

@@ -28,11 +28,24 @@ export interface NetworkNodeEnv {
   SOLANA_USDC_MINT?: string;
 }
 
+/**
+ * Operator-supplied RPC URLs for the `custom` tier. Lets the operator point at
+ * the project's dev chains (e.g. the Akash-hosted anvil/solana) without filling
+ * in the full per-chain editor. Mirrors the optional `endpoints` field returned
+ * by GET /api/network.
+ */
+export interface NetworkEndpoints {
+  evmUrl?: string;
+  solUrl?: string;
+}
+
 /** Shape of GET /api/network (also the non-restart subset of PATCH). */
 export interface NetworkPayload {
   network: NetworkMode;
   status: NetworkFamilyStatus;
   nodeEnv: NetworkNodeEnv;
+  /** Present (and meaningful) only when `network === 'custom'`. */
+  endpoints?: NetworkEndpoints;
   ts: number;
 }
 
@@ -79,6 +92,7 @@ export function useNetwork(
           network: body.network,
           status: body.status,
           nodeEnv: body.nodeEnv ?? {},
+          ...(body.endpoints ? { endpoints: body.endpoints } : {}),
           ts: typeof body.ts === 'number' ? body.ts : Date.now(),
         });
         setKind('ready');

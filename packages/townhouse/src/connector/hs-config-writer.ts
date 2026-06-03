@@ -13,8 +13,8 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse, stringify as yamlStringify } from 'yaml';
-import { resolveNetworkProfile } from '@toon-protocol/core';
 import { ConnectorConfigGenerator } from './config-generator.js';
+import { resolveConfigNetworkProfile } from '../config/network-profile.js';
 import type { ChainProviderEntry, TownhouseConfig } from '../config/schema.js';
 import { DEFAULT_HS_CHAIN_PROVIDERS } from '../config/defaults.js';
 import type { ConnectorRuntimeConfig } from './types.js';
@@ -80,14 +80,10 @@ export function writeHsConnectorConfig(
   // practice the apex still uses (3) for now while the child nodes already get the
   // real public RPCs from the same network profile. The dev key from (3) is reused
   // so derived providers are complete the moment the preset addresses are filled in.
-  const network = config.network ?? 'mainnet';
-  const derived =
-    config.chainProviders !== undefined && config.chainProviders.length > 0
-      ? config.chainProviders
-      : (resolveNetworkProfile(network, {
-          keyId: DEFAULT_HS_CHAIN_PROVIDERS[0]?.keyId,
-          customProviders: config.chainProviders,
-        }).chainProviders as ChainProviderEntry[]);
+  const derived = resolveConfigNetworkProfile(
+    config,
+    DEFAULT_HS_CHAIN_PROVIDERS[0]?.keyId
+  ).chainProviders as ChainProviderEntry[];
   const hsConfig: TownhouseConfig =
     derived.length > 0
       ? { ...config, chainProviders: derived }

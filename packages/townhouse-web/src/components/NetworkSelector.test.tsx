@@ -94,6 +94,71 @@ describe('<NetworkSelector />', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('reveals two RPC URL inputs when custom is selected', () => {
+    render(
+      <NetworkSelector
+        value="custom"
+        onChange={() => {}}
+        evmUrl=""
+        solUrl=""
+        onEndpointsChange={() => {}}
+      />
+    );
+    expect(
+      screen.getByRole('textbox', { name: /evm rpc url/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('textbox', { name: /solana rpc url/i })
+    ).toBeInTheDocument();
+  });
+
+  it('does not show the RPC URL inputs when another mode is selected', () => {
+    render(<NetworkSelector value="mainnet" onChange={() => {}} />);
+    expect(
+      screen.queryByRole('textbox', { name: /evm rpc url/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the Solana relay-only note in custom mode', () => {
+    render(
+      <NetworkSelector
+        value="custom"
+        onChange={() => {}}
+        evmUrl=""
+        solUrl=""
+        onEndpointsChange={() => {}}
+      />
+    );
+    expect(
+      screen.getByText(/RPC only — settlement pending program deploy/i)
+    ).toBeInTheDocument();
+  });
+
+  it('fires onEndpointsChange when typing into the EVM URL input', async () => {
+    const onEndpointsChange = vi.fn();
+    render(
+      <NetworkSelector
+        value="custom"
+        onChange={() => {}}
+        evmUrl=""
+        solUrl=""
+        onEndpointsChange={onEndpointsChange}
+      />
+    );
+    await userEvent.type(
+      screen.getByRole('textbox', { name: /evm rpc url/i }),
+      'h'
+    );
+    expect(onEndpointsChange).toHaveBeenCalledWith('h', '');
+  });
+
+  it('selecting custom calls onChange with the custom mode', async () => {
+    const onChange = vi.fn();
+    render(<NetworkSelector value="mainnet" onChange={onChange} />);
+    await userEvent.click(screen.getByRole('radio', { name: /custom/i }));
+    expect(onChange).toHaveBeenCalledWith('custom');
+  });
+
   it('disables the radios while a patch is in flight', () => {
     render(<NetworkSelector value="mainnet" onChange={() => {}} disabled />);
     expect(screen.getByRole('radio', { name: /testnet/i })).toBeDisabled();

@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NetworkMode } from '@toon-protocol/townhouse';
+import type { NetworkEndpoints } from './useNetwork';
 
 export interface UseNetworkPatchResult {
-  patch: (network: NetworkMode, onSuccess?: () => void) => Promise<void>;
+  patch: (
+    network: NetworkMode,
+    onSuccess?: () => void,
+    /** For `network: 'custom'`, the operator-entered RPC URLs to persist. */
+    endpoints?: NetworkEndpoints
+  ) => Promise<void>;
   pending: boolean;
   error: string | null;
 }
@@ -27,7 +33,11 @@ export function useNetworkPatch(
   }, []);
 
   const patch = useCallback(
-    async (network: NetworkMode, onSuccess?: () => void): Promise<void> => {
+    async (
+      network: NetworkMode,
+      onSuccess?: () => void,
+      endpoints?: NetworkEndpoints
+    ): Promise<void> => {
       if (pendingRef.current) throw new Error('patch already in flight');
       pendingRef.current = true;
       if (mountedRef.current) {
@@ -41,7 +51,9 @@ export function useNetworkPatch(
         const res = await fetch(url, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ network }),
+          body: JSON.stringify(
+            endpoints ? { network, endpoints } : { network }
+          ),
           signal: controller.signal,
         });
         if (!res.ok) {

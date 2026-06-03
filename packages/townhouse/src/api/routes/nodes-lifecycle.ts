@@ -20,10 +20,7 @@ import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { bytesToHex } from '@noble/hashes/utils';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import {
-  resolveNetworkProfile,
-  type ChainProviderConfigEntry,
-} from '@toon-protocol/core';
+import { resolveConfigNetworkProfile } from '../../config/network-profile.js';
 import type { ApiDeps } from '../types.js';
 import type { NodeType } from '../types.js';
 import type { TownhouseConfig } from '../../config/schema.js';
@@ -166,11 +163,7 @@ async function waitForHealthy(url: string, timeoutMs: number): Promise<void> {
 export function buildNetworkNodeEnv(
   config: TownhouseConfig
 ): Record<string, string> {
-  const profile = resolveNetworkProfile(config.network ?? 'mainnet', {
-    customProviders: config.chainProviders as
-      | ChainProviderConfigEntry[]
-      | undefined,
-  });
+  const profile = resolveConfigNetworkProfile(config);
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(profile.nodeEnv)) {
     if (value !== undefined) env[key] = value;

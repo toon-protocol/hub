@@ -10,6 +10,12 @@ export interface NetworkSelectorProps {
   status?: NetworkFamilyStatus;
   /** Resolved read-only endpoints for the non-custom tiers. */
   nodeEnv?: NetworkNodeEnv;
+  /** Operator-entered EVM RPC URL (controlled; only used in custom mode). */
+  evmUrl?: string;
+  /** Operator-entered Solana RPC URL (controlled; only used in custom mode). */
+  solUrl?: string;
+  /** Fired when either RPC URL input changes. */
+  onEndpointsChange?: (evmUrl: string, solUrl: string) => void;
   /** Disable the whole control while a PATCH is in flight. */
   disabled?: boolean;
 }
@@ -41,7 +47,8 @@ const MODES: ModeMeta[] = [
   {
     mode: 'custom',
     label: 'Custom',
-    blurb: 'Supply explicit chains, RPCs and signing keys below.',
+    blurb:
+      "Paste RPC URLs to point at the project's dev chains (e.g. the Akash-hosted anvil/solana), or use the full chain editor below to supply explicit chains, RPCs and signing keys for real chains.",
   },
 ];
 
@@ -62,13 +69,17 @@ function statusNote(state: 'configured' | 'unconfigured'): string {
  * Network-mode selector: four tiers (mainnet default / testnet / devnet /
  * custom) that drive chain + RPC for BOTH the apex connector and the child
  * nodes. The non-custom tiers render resolved read-only endpoints + per-family
- * settlement status; `custom` reveals the per-chain editor in the parent.
+ * settlement status; `custom` reveals two optional RPC-URL inputs here plus the
+ * per-chain editor in the parent.
  */
 export function NetworkSelector({
   value,
   onChange,
   status,
   nodeEnv,
+  evmUrl,
+  solUrl,
+  onEndpointsChange,
   disabled,
 }: NetworkSelectorProps): JSX.Element {
   return (
@@ -122,6 +133,53 @@ export function NetworkSelector({
           </label>
         ))}
       </div>
+
+      {/* Custom: operator can paste RPC URLs to point at the project's dev
+          chains (e.g. the Akash-hosted anvil/solana), a lighter alternative to
+          the full per-chain editor rendered by the parent. */}
+      {value === 'custom' && (
+        <div className="rounded-md shadow-border px-3 py-3 flex flex-col gap-3">
+          <label className="flex flex-col gap-1">
+            <span className="font-geist-sans text-xs font-medium text-ink">
+              EVM RPC URL
+            </span>
+            <input
+              type="text"
+              aria-label="EVM RPC URL"
+              value={evmUrl ?? ''}
+              disabled={disabled}
+              placeholder="https://…"
+              onChange={(e) =>
+                onEndpointsChange?.(e.target.value, solUrl ?? '')
+              }
+              className="bg-canvas shadow-border rounded-md px-2 py-1.5 font-geist-mono text-xs text-ink"
+            />
+            <span className="font-geist-sans text-[11px] text-green-700">
+              Settlement-capable — anvil EVM with registry + token deployed.
+            </span>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="font-geist-sans text-xs font-medium text-ink">
+              Solana RPC URL
+            </span>
+            <input
+              type="text"
+              aria-label="Solana RPC URL"
+              value={solUrl ?? ''}
+              disabled={disabled}
+              placeholder="https://…"
+              onChange={(e) =>
+                onEndpointsChange?.(evmUrl ?? '', e.target.value)
+              }
+              className="bg-canvas shadow-border rounded-md px-2 py-1.5 font-geist-mono text-xs text-ink"
+            />
+            <span className="font-geist-sans text-[11px] text-ink/60">
+              RPC only — settlement pending program deploy.
+            </span>
+          </label>
+        </div>
+      )}
 
       {/* Resolved read-only view for the non-custom tiers. */}
       {value !== 'custom' && (

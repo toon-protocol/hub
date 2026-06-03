@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ChainProviderEntry, NetworkMode } from '@toon-protocol/townhouse';
 import { Button } from '@/components/primitives/Button';
 import { ChainAddForm } from '@/components/ChainAddForm';
@@ -46,11 +46,37 @@ export function WizardStepChains({
   const [localMode, setLocalMode] = useState<NetworkMode | null>(null);
   const mode: NetworkMode = localMode ?? network?.network ?? 'mainnet';
 
+  // Local custom RPC URLs, seeded from GET once it resolves.
+  const [evmUrl, setEvmUrl] = useState('');
+  const [solUrl, setSolUrl] = useState('');
+  useEffect(() => {
+    if (network?.endpoints) {
+      setEvmUrl(network.endpoints.evmUrl ?? '');
+      setSolUrl(network.endpoints.solUrl ?? '');
+    }
+  }, [network?.endpoints]);
+
   function handleNetworkChange(next: NetworkMode): void {
     if (next === mode) return;
     setLocalMode(next);
-    void patchNetwork(next, () => refetch()).catch(() => {
+    void patchNetwork(
+      next,
+      () => refetch(),
+      next === 'custom' ? { evmUrl, solUrl } : undefined
+    ).catch(() => {
       /* error surfaces via networkError; localMode keeps the UI responsive */
+    });
+  }
+
+  function handleEndpointsChange(nextEvmUrl: string, nextSolUrl: string): void {
+    setEvmUrl(nextEvmUrl);
+    setSolUrl(nextSolUrl);
+    if (mode !== 'custom') return;
+    void patchNetwork('custom', () => refetch(), {
+      evmUrl: nextEvmUrl,
+      solUrl: nextSolUrl,
+    }).catch(() => {
+      /* error surfaces via networkError */
     });
   }
 
@@ -71,6 +97,9 @@ export function WizardStepChains({
         onChange={handleNetworkChange}
         status={network?.status}
         nodeEnv={network?.nodeEnv}
+        evmUrl={evmUrl}
+        solUrl={solUrl}
+        onEndpointsChange={handleEndpointsChange}
         disabled={pending || networkKind === 'loading'}
       />
       {networkError && (

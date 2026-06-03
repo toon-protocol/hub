@@ -242,6 +242,21 @@ export function validateConfig(raw: unknown): TownhouseConfig {
     network = raw['network'] as TownhouseConfig['network'];
   }
 
+  // endpoints (optional) — operator-supplied RPC URLs for network: 'custom'
+  let endpoints: TownhouseConfig['endpoints'];
+  if (raw['endpoints'] !== undefined) {
+    assertObject(raw['endpoints'], 'config.endpoints');
+    const e = raw['endpoints'] as Record<string, unknown>;
+    if (e['evmUrl'] !== undefined)
+      assertString(e['evmUrl'], 'config.endpoints.evmUrl');
+    if (e['solUrl'] !== undefined)
+      assertString(e['solUrl'], 'config.endpoints.solUrl');
+    endpoints = {
+      ...(e['evmUrl'] !== undefined ? { evmUrl: e['evmUrl'] as string } : {}),
+      ...(e['solUrl'] !== undefined ? { solUrl: e['solUrl'] as string } : {}),
+    };
+  }
+
   // chainProviders (optional)
   let chainProviders: ChainProviderEntry[] | undefined;
   if (raw['chainProviders'] !== undefined) {
@@ -411,6 +426,7 @@ export function validateConfig(raw: unknown): TownhouseConfig {
       level: logging['level'] as 'debug' | 'info' | 'warn' | 'error',
     },
     ...(network !== undefined ? { network } : {}),
+    ...(endpoints !== undefined ? { endpoints } : {}),
     ...(chainProviders !== undefined ? { chainProviders } : {}),
   };
 }

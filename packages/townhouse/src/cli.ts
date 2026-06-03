@@ -150,6 +150,7 @@ Flags:
   --port         Override the API port (setup command, default 9400)
   --preset       Init from a named preset (init only). Supported: demo
   --network      Chain network for apex + nodes (init only): mainnet (default), testnet, devnet, custom
+  --evm-url / --sol-url   RPC URLs for --network custom (the project's dev chains; or EVM_URL/SOL_URL env)
   --yes          Non-interactive (init only); with --preset=demo uses demo password if --password absent
   --json         Machine-readable JSON output (node commands; NDJSON for \`logs\`)
   --lines        Number of historical log lines to fetch on attach (logs command, default 50)
@@ -256,7 +257,8 @@ async function handleInit(
   password?: string,
   preset?: 'demo',
   yes?: boolean,
-  network?: NetworkMode
+  network?: NetworkMode,
+  endpoints?: { evmUrl?: string; solUrl?: string }
 ): Promise<void> {
   const dir = resolve(configDir ?? DEFAULT_CONFIG_DIR);
   const configPath = join(dir, 'config.yaml');
@@ -295,9 +297,14 @@ async function handleInit(
     configToWrite.wallet.encrypted_path = join(dir, 'wallet.enc');
   }
   // Persist the network mode (mainnet/testnet/devnet/custom). Drives chain/RPC
-  // config for the apex connector and every node container (resolveNetworkProfile).
+  // config for the apex connector and every node container
+  // (resolveNetworkProfile). `custom` + `endpoints` carries operator-supplied
+  // RPC URLs pointing at the project's dev chains (e.g. the Akash anvil/solana).
   if (network !== undefined) {
     configToWrite.network = network;
+  }
+  if (endpoints && (endpoints.evmUrl || endpoints.solUrl)) {
+    configToWrite.endpoints = endpoints;
   }
   const yamlContent = stringify(configToWrite);
   writeFileSync(configPath, yamlContent, {
@@ -2546,6 +2553,8 @@ export async function main(
       port: { type: 'string' },
       preset: { type: 'string' },
       network: { type: 'string' },
+      'evm-url': { type: 'string' },
+      'sol-url': { type: 'string' },
       yes: { type: 'boolean' },
       'rotate-keys': { type: 'boolean' },
       'skip-preflight': { type: 'boolean' },
@@ -2647,13 +2656,25 @@ export async function main(
         process.exitCode = 1;
         break;
       }
+      const evmUrl =
+        (values['evm-url'] as string | undefined) ?? process.env['EVM_URL'];
+      const solUrl =
+        (values['sol-url'] as string | undefined) ?? process.env['SOL_URL'];
+      const endpoints =
+        evmUrl || solUrl
+          ? {
+              ...(evmUrl ? { evmUrl } : {}),
+              ...(solUrl ? { solUrl } : {}),
+            }
+          : undefined;
       await handleInit(
         values.force === true,
         values['config-dir'] as string | undefined,
         values.password as string | undefined,
         presetVal,
         values.yes === true,
-        networkVal as NetworkMode | undefined
+        networkVal as NetworkMode | undefined,
+        endpoints
       );
       break;
     }

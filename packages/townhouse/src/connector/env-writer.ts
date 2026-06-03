@@ -26,10 +26,7 @@ import {
   existsSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import {
-  resolveNetworkProfile,
-  type ChainProviderConfigEntry,
-} from '@toon-protocol/core';
+import { resolveConfigNetworkProfile } from '../config/network-profile.js';
 import type { TownhouseConfig } from '../config/schema.js';
 
 /** Result of {@link writeHsNodeEnvFile}. */
@@ -53,11 +50,7 @@ export function writeHsNodeEnvFile(
   const composeDir = join(configDir, 'compose');
   const envPath = join(composeDir, '.env');
 
-  const profile = resolveNetworkProfile(config.network ?? 'mainnet', {
-    customProviders: config.chainProviders as
-      | ChainProviderConfigEntry[]
-      | undefined,
-  });
+  const profile = resolveConfigNetworkProfile(config);
 
   // Serialize only keys with real values (absent ⇒ compose `${VAR:-}` default).
   const lines: string[] = [
