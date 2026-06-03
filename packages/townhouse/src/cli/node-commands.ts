@@ -460,6 +460,9 @@ interface NodeEntry {
   status: 'connected' | 'disconnected' | 'unknown';
   enabledAt: string;
   lastSeenAt: string | null;
+  // x-only Nostr pubkey (hex). Optional for backward compatibility with nodes
+  // provisioned before issue #81. Surfaced verbatim in `node list --json`.
+  nostrPubkey?: string;
 }
 
 export async function handleNodeList(options: NodeListOptions): Promise<void> {

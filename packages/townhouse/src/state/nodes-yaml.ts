@@ -24,6 +24,16 @@ const NodesYamlEntrySchema = z
     peerId: z.string().min(1),
     ilpAddress: z.string().min(1),
     derivationIndex: z.number().int().nonnegative(),
+    // x-only Nostr pubkey (32-byte / 64-char lowercase hex) derived from the
+    // node's secret key at provisioning time. Surfaced by `node list --json`
+    // so operators / SDK clients can read e.g. the mill pubkey (for streamSwap
+    // seal verification) without re-deriving from the secret (issue #81).
+    // Optional for backward compatibility with nodes.yaml files written before
+    // the field existed.
+    nostrPubkey: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/, 'must be 64-char lowercase hex')
+      .optional(),
     enabledAt: z.string().datetime({ offset: true }),
     lastSeenAt: z.string().datetime({ offset: true }).nullable(),
   })

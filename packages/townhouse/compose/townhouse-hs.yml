@@ -296,7 +296,11 @@ services:
       # (env-writer). 'none' makes the town node run relay-only (no settlement).
       TOON_CHAIN: ${EVM_CHAIN:-}
       TOON_RPC_URL: ${EVM_RPC_URL:-}
-      NODE_NOSTR_PUBKEY: ''
+      # x-only pubkey derived from the node secret at provisioning time and
+      # injected by the API (nodes-lifecycle buildNodeEnv → TOWN_NOSTR_PUBKEY).
+      # Informational — lets operators / SDK clients read it via `docker inspect`
+      # or `node list --json` without re-deriving from the secret (issue #81).
+      NODE_NOSTR_PUBKEY: '${TOWN_NOSTR_PUBKEY:-}'
       NODE_EVM_ADDRESS: ''
       # Derived from HD wallet at runtime (Story 45.4 / Epic 46).
       NODE_NOSTR_SECRET_KEY: '${TOWN_SECRET_KEY:-}'
@@ -353,7 +357,10 @@ services:
       SETTLEMENT_TOKEN_ADDRESS: ${EVM_USDC_ADDRESS:-}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL:-}
       SOLANA_USDC_MINT: ${SOLANA_USDC_MINT:-}
-      NODE_NOSTR_PUBKEY: ''
+      # x-only pubkey injected by the API (buildNodeEnv → MILL_NOSTR_PUBKEY).
+      # SDK clients need the mill pubkey for streamSwap seal verification —
+      # surfacing it here avoids re-deriving from the secret (issue #81).
+      NODE_NOSTR_PUBKEY: '${MILL_NOSTR_PUBKEY:-}'
       NODE_EVM_ADDRESS: ''
       # Derived from HD wallet at runtime (Story 45.4 / Epic 46).
       MILL_MNEMONIC: '${MILL_MNEMONIC:-}'
@@ -397,7 +404,10 @@ services:
       CONNECTOR_URL: ws://connector:3000
       FEE_PER_JOB: '0'
       DVM_KIND: '5094'
-      NODE_NOSTR_PUBKEY: ''
+      # x-only pubkey injected by the API (buildNodeEnv → DVM_NOSTR_PUBKEY).
+      # Informational — readable via `docker inspect` / `node list --json`
+      # without re-deriving from the secret (issue #81).
+      NODE_NOSTR_PUBKEY: '${DVM_NOSTR_PUBKEY:-}'
       NODE_EVM_ADDRESS: ''
       # Derived from HD wallet at runtime (Story 45.4 / Epic 46).
       NODE_NOSTR_SECRET_KEY: '${DVM_SECRET_KEY:-}'

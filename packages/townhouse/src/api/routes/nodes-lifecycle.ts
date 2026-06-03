@@ -224,6 +224,7 @@ export function buildNetworkNodeEnv(
 function buildNodeEnv(
   type: NodeType,
   nostrSecretKeyHex: string,
+  nostrPubkeyHex: string,
   evmPrivateKeyHex: string,
   mnemonic: string | null,
   apexEvmAddress: string,
@@ -235,10 +236,17 @@ function buildNodeEnv(
   // crashes at boot with `TOON_SETTLEMENT_PRIVATE_KEY must be a 0x-prefixed
   // 32-byte hex string`. Story 46.4 live gate run (Finding O, 2026-05-12).
   const evmPrivateKeyHex0x = `0x${evmPrivateKeyHex}`;
+  // The *_NOSTR_PUBKEY overlay is interpolated into each service's
+  // NODE_NOSTR_PUBKEY env in the HS compose template. It is the x-only pubkey
+  // derived from the same secret the container already receives — purely
+  // informational so operators / SDK clients can read it via `docker inspect`
+  // or `node list --json` without re-deriving from the secret (issue #81).
+  // Safe to log (public key), unlike the *_SECRET_KEY overlay.
   switch (type) {
     case 'town':
       return {
         TOWN_SECRET_KEY: nostrSecretKeyHex,
+        TOWN_NOSTR_PUBKEY: nostrPubkeyHex,
         TOWN_SETTLEMENT_PRIVATE_KEY: evmPrivateKeyHex0x,
         APEX_EVM_ADDRESS: apexEvmAddress,
         ...chainEnv,
@@ -246,6 +254,7 @@ function buildNodeEnv(
     case 'mill':
       return {
         MILL_SECRET_KEY: nostrSecretKeyHex,
+        MILL_NOSTR_PUBKEY: nostrPubkeyHex,
         MILL_SETTLEMENT_PRIVATE_KEY: evmPrivateKeyHex0x,
         MILL_MNEMONIC: mnemonic ?? '',
         APEX_EVM_ADDRESS: apexEvmAddress,
@@ -255,6 +264,7 @@ function buildNodeEnv(
       // DVM does no on-chain settlement — no chain env needed.
       return {
         DVM_SECRET_KEY: nostrSecretKeyHex,
+        DVM_NOSTR_PUBKEY: nostrPubkeyHex,
       };
   }
 }
@@ -316,6 +326,11 @@ export function registerNodeLifecycleRoutes(
         status,
         enabledAt: entry.enabledAt,
         lastSeenAt: entry.lastSeenAt,
+        // x-only Nostr pubkey (issue #81). Undefined for legacy yaml entries
+        // written before the field existed — omitted from the JSON in that case.
+        ...(entry.nostrPubkey !== undefined
+          ? { nostrPubkey: entry.nostrPubkey }
+          : {}),
       };
     });
 
@@ -473,6 +488,9 @@ export function registerNodeLifecycleRoutes(
           peerId,
           ilpAddress,
           derivationIndex,
+          // x-only pubkey derived from the node secret — persisted so
+          // `node list --json` can surface it without re-deriving (issue #81).
+          nostrPubkey: keys.nostrPubkey,
           enabledAt,
           lastSeenAt: null,
         };
@@ -570,6 +588,7 @@ export function registerNodeLifecycleRoutes(
         const nodeEnv = buildNodeEnv(
           type,
           nostrSecretKeyHex,
+          keys.nostrPubkey,
           evmPrivateKeyHex,
           mnemonicSnapshot,
           apexEvmAddress,

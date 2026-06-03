@@ -309,6 +309,61 @@ describe('POST /api/nodes success path', () => {
     expect(new Date(entry.enabledAt).getTime()).not.toBeNaN();
   });
 
+  // ── Issue #81: NODE_NOSTR_PUBKEY injection + persistence ───────────────────
+  it('persists nostrPubkey (x-only hex) in the nodes.yaml entry', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'town' }),
+    });
+
+    const yaml = await readNodesYaml(nodesYamlPath);
+    const entry = yaml.entries[0] ?? ({} as NodesYamlEntry);
+    // Equals the pubkey the wallet derived (FAKE_KEYS.nostrPubkey).
+    expect(entry.nostrPubkey).toBe('a'.repeat(64));
+  });
+
+  it.each([
+    ['town', 'TOWN_NOSTR_PUBKEY'],
+    ['mill', 'MILL_NOSTR_PUBKEY'],
+    ['dvm', 'DVM_NOSTR_PUBKEY'],
+  ] as const)(
+    'injects %s pubkey into the container env as %s (= derived x-only pubkey)',
+    async (type, envKey) => {
+      // MILL_RELAYS is stubbed globally in beforeEach, so the mill path passes
+      // its pre-flight check here without extra setup.
+      await app.inject({
+        method: 'POST',
+        url: '/api/nodes',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type }),
+      });
+
+      expect(orchestrator.startNodeViaComposeFn).toHaveBeenCalledWith(
+        type,
+        expect.objectContaining({ [envKey]: 'a'.repeat(64) })
+      );
+    }
+  );
+
+  it('GET /api/nodes surfaces nostrPubkey so `node list --json` exposes it', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'town' }),
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/nodes' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      nodes: { id: string; nostrPubkey?: string }[];
+    };
+    const town = body.nodes.find((n) => n.id === 'town');
+    expect(town?.nostrPubkey).toBe('a'.repeat(64));
+  });
+
   it('calls registerPeer with correct id, BTP URL, authToken, and routes', async () => {
     await app.inject({
       method: 'POST',

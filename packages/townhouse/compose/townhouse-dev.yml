@@ -228,7 +228,8 @@ services:
       CONNECTOR_URL: ws://townhouse-dev-connector:3000
       CONNECTOR_ADMIN_URL: http://townhouse-dev-connector:9401
       FEE_PER_EVENT: '0'
-      NODE_NOSTR_PUBKEY: ''
+      # Interpolated from TOWN_01_NOSTR_PUBKEY exported by townhouse-dev-infra.sh (issue #81).
+      NODE_NOSTR_PUBKEY: '${TOWN_01_NOSTR_PUBKEY:-}'
       NODE_EVM_ADDRESS: ''
       # Interpolated from TOWN_01_SECRET_KEY exported by townhouse-dev-infra.sh.
       NODE_NOSTR_SECRET_KEY: '${TOWN_01_SECRET_KEY:?TOWN_01_SECRET_KEY required — source scripts/townhouse-dev-infra.sh first}'
@@ -265,7 +266,8 @@ services:
       CONNECTOR_URL: ws://townhouse-dev-connector:3000
       CONNECTOR_ADMIN_URL: http://townhouse-dev-connector:9401
       FEE_PER_EVENT: '0'
-      NODE_NOSTR_PUBKEY: ''
+      # Interpolated from TOWN_02_NOSTR_PUBKEY exported by townhouse-dev-infra.sh (issue #81).
+      NODE_NOSTR_PUBKEY: '${TOWN_02_NOSTR_PUBKEY:-}'
       NODE_EVM_ADDRESS: ''
       # Interpolated from TOWN_02_SECRET_KEY exported by townhouse-dev-infra.sh.
       NODE_NOSTR_SECRET_KEY: '${TOWN_02_SECRET_KEY:?TOWN_02_SECRET_KEY required — source scripts/townhouse-dev-infra.sh first}'
@@ -303,7 +305,8 @@ services:
       # nosemgrep: detect-insecure-websocket -- Docker-internal, TLS unnecessary
       CONNECTOR_URL: ws://townhouse-dev-connector:3000
       FEE_BASIS_POINTS: '0'
-      NODE_NOSTR_PUBKEY: ''
+      # Interpolated from MILL_01_NOSTR_PUBKEY exported by townhouse-dev-infra.sh (issue #81).
+      NODE_NOSTR_PUBKEY: '${MILL_01_NOSTR_PUBKEY:-}'
       NODE_EVM_ADDRESS: ''
       # MILL_MNEMONIC takes priority over NODE_NOSTR_SECRET_KEY for BIP-32 swap key derivation.
       # Interpolated from MILL_01_MNEMONIC exported by townhouse-dev-infra.sh.
@@ -347,7 +350,8 @@ services:
       # nosemgrep: detect-insecure-websocket -- Docker-internal, TLS unnecessary
       CONNECTOR_URL: ws://townhouse-dev-connector:3000
       FEE_BASIS_POINTS: '0'
-      NODE_NOSTR_PUBKEY: ''
+      # Interpolated from MILL_02_NOSTR_PUBKEY exported by townhouse-dev-infra.sh (issue #81).
+      NODE_NOSTR_PUBKEY: '${MILL_02_NOSTR_PUBKEY:-}'
       NODE_EVM_ADDRESS: ''
       # MILL_MNEMONIC takes priority over NODE_NOSTR_SECRET_KEY for BIP-32 swap key derivation.
       # Interpolated from MILL_02_MNEMONIC exported by townhouse-dev-infra.sh.
@@ -388,7 +392,8 @@ services:
       # nosemgrep: detect-insecure-websocket -- Docker-internal, TLS unnecessary
       CONNECTOR_URL: ws://townhouse-dev-connector:3000
       FEE_PER_JOB: '0'
-      NODE_NOSTR_PUBKEY: ''
+      # Interpolated from DVM_01_NOSTR_PUBKEY exported by townhouse-dev-infra.sh (issue #81).
+      NODE_NOSTR_PUBKEY: '${DVM_01_NOSTR_PUBKEY:-}'
       NODE_EVM_ADDRESS: ''
       # Interpolated from DVM_01_SECRET_KEY exported by townhouse-dev-infra.sh.
       NODE_NOSTR_SECRET_KEY: '${DVM_01_SECRET_KEY:?DVM_01_SECRET_KEY required — source scripts/townhouse-dev-infra.sh first}'
