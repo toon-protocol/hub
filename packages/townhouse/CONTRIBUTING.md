@@ -25,14 +25,35 @@ This command:
 1. Builds `toon:town`, `toon:mill`, `toon:dvm` Docker images (Docker layer cache applies on subsequent runs)
 2. Starts Anvil (EVM), Solana test-validator, and Mina lightnet chain devnets
 3. Deploys Mock USDC to Anvil and the Solana payment-channel program
-4. Starts the standalone connector with all 5 child peers registered
-5. Starts 5 child nodes with deterministic Nostr keys
-6. Polls each child's `/health` endpoint until ready (60 s timeout per node)
-7. Prints a success banner listing every endpoint URL
-8. Writes `.env.townhouse-dev` at the workspace root
+4. Bootstraps the deterministic Mock USDC mint + faucet treasury on the Solana validator (idempotent — see "Solana swap redeemability" below)
+5. Starts the standalone connector with all 5 child peers registered
+6. Starts 5 child nodes with deterministic Nostr keys
+7. Polls each child's `/health` endpoint until ready (60 s timeout per node)
+8. Prints a success banner listing every endpoint URL
+9. Writes `.env.townhouse-dev` at the workspace root
 
 **First run** (no cached images): ~5 minutes (dominated by image pulls).
 **Subsequent runs**: ~90 seconds (cached images, warm Docker daemon).
+
+### Solana swap redeemability (EVM→Solana)
+
+The stack bootstraps the deterministic Solana Mock USDC mint
+(`6GbdrVghwNKTz9raga7y3Y4qqX5Zgg3AC4d48Kt7C59Q`) and faucet treasury on `up`,
+reusing `infra/solana/bootstrap-usdc.mjs` (the same module the Akash production
+image bakes in). The step is idempotent and non-fatal: a rerun against an
+already-bootstrapped ledger is a no-op, and a bootstrap failure only warns.
+
+**Mint only — the on-chain swap channel is not opened here.** The mill signs
+valid off-chain `solana:devnet` balance-proof claims against a *logical*
+channelId (`dev-mill-01-sol-ch1`), so a client `streamSwap` RECEIVES a valid
+signed target-chain claim and EVM→Solana swaps verify at the **claim-issuance
+layer**. They are **not yet on-chain redeemable**: the on-chain channel account
+is a PDA of `(participantA, participantB, mint, program)` derived from the
+mill's + client's runtime-ephemeral settlement keys (see
+`packages/sdk/tests/e2e/docker-solana-settlement-e2e.test.ts`
+`openChannel`/`deriveChannelPDA`) plus an on-chain deposit — none of which are
+statically reproducible by a bootstrap script. Issue #82 tracks the mint
+bootstrap (done) and notes the channel/deposit gap.
 
 ### Endpoint banner
 
