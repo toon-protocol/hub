@@ -479,6 +479,16 @@ describe('SnapshotWriter', () => {
   });
 
   it('[case 11] stop() clears timer; idempotent', async () => {
+    // Capture the real setImmediate BEFORE fake timers replace it. Each tick's
+    // runTick() does a real fs append (a libuv macrotask), which
+    // advanceTimersByTimeAsync does NOT await — it only drains microtasks and
+    // timers. If the next fake-timer fire lands while that fs write is still in
+    // flight, the SnapshotWriter re-entrancy guard (tickPending) SKIPS the tick,
+    // so tickCount becomes nondeterministic (2–4 ticks under CI load). Yielding
+    // to the real event loop between advances lets each tick's fs write settle
+    // and tickPending clear, so every fire produces a tick.
+    const realSetImmediate = setImmediate;
+    const flushIo = () => new Promise<void>((r) => realSetImmediate(r));
     vi.useFakeTimers();
     try {
       const snapshotPath = join(tmpHome, 'earnings-snapshots.jsonl');
@@ -499,12 +509,12 @@ describe('SnapshotWriter', () => {
 
       writer.start();
 
-      // Advance one interval at a time so the async tick completes between fires.
-      // Each advanceTimersByTimeAsync drains microtasks after firing the timer.
-      await vi.advanceTimersByTimeAsync(50);
-      await vi.advanceTimersByTimeAsync(50);
-      await vi.advanceTimersByTimeAsync(50);
-      await vi.advanceTimersByTimeAsync(50);
+      // Advance one interval at a time, flushing real I/O after each fire so the
+      // in-flight tick fully completes (and tickPending clears) before the next.
+      for (let i = 0; i < 4; i++) {
+        await vi.advanceTimersByTimeAsync(50);
+        await flushIo();
+      }
       expect(tickCount).toBeGreaterThanOrEqual(3);
 
       const countBeforeStop = tickCount;
