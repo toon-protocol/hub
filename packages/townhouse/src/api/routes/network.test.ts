@@ -85,7 +85,7 @@ describe('PATCH /api/network', () => {
     await app.close();
   });
 
-  it('custom + endpoints surfaces the akash-anvil dev-chain profile', async () => {
+  it('custom + endpoints surfaces the anvil (31337) dev-chain profile', async () => {
     const { app, deps } = build();
     registerNetworkRoutes(app, deps);
     const res = await app.inject({
@@ -102,7 +102,7 @@ describe('PATCH /api/network', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.network).toBe('custom');
-    expect(body.nodeEnv.EVM_CHAIN).toBe('akash-anvil');
+    expect(body.nodeEnv.EVM_CHAIN).toBe('anvil');
     expect(body.nodeEnv.EVM_RPC_URL).toBe('https://anvil.akash');
     expect(body.status.evm).toBe('configured');
     expect(deps.config.endpoints).toEqual({

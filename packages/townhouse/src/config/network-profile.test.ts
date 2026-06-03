@@ -17,7 +17,7 @@ describe('resolveConfigNetworkProfile', () => {
     expect(p.nodeEnv.EVM_CHAIN).toBe('base-mainnet');
   });
 
-  it('custom + endpoints → akash-anvil + operator URLs reach the node env', () => {
+  it('custom + endpoints → anvil (31337) + operator URLs reach the node env', () => {
     const p = resolveConfigNetworkProfile(
       cfg({
         network: 'custom',
@@ -27,8 +27,8 @@ describe('resolveConfigNetworkProfile', () => {
         },
       })
     );
-    expect(p.nodeEnv.EVM_CHAIN).toBe('akash-anvil');
-    expect(p.nodeEnv.EVM_CHAIN_ID).toBe('31338');
+    expect(p.nodeEnv.EVM_CHAIN).toBe('anvil');
+    expect(p.nodeEnv.EVM_CHAIN_ID).toBe('31337');
     expect(p.nodeEnv.EVM_RPC_URL).toBe('https://anvil.akash');
     expect(p.nodeEnv.SOLANA_RPC_URL).toBe('https://sol.akash');
     expect(p.status.evm).toBe('configured');
