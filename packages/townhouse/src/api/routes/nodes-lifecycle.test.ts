@@ -323,6 +323,12 @@ describe('POST /api/nodes success path', () => {
         url: 'ws://townhouse-hs-town:3000',
         authToken: '',
         routes: [{ prefix: 'g.townhouse.town', priority: 0 }],
+        // Regression: provisioned nodes MUST register as apex CHILDREN so the
+        // apex forwards client-paid PREPAREs to them for free (parent→child is
+        // free). Without `relation: 'child'` the connector treats the node as a
+        // settlement peer and rejects every paid packet with T00.
+        relation: 'child',
+        transport: 'direct',
       })
     );
   });
@@ -383,6 +389,44 @@ describe('POST /api/nodes success path', () => {
     expect(Array.isArray(config.channels['solana:devnet'])).toBe(true);
     expect(config.channels['solana:devnet'].length).toBeGreaterThan(0);
     expect(config.inventory['solana:devnet']).toBe('0');
+
+    // Regression (#6): the Solana channel sentinel MUST be a valid-format
+    // base58 32-byte address, NOT an EVM 0x… word — else streamSwap's
+    // client-side validateChainAddress rejects the echoed channelId and the
+    // swap fails with FULFILL_DECODE_FAILED. '1'×32 = the all-zero pubkey.
+    const solCh = config.channels['solana:devnet'][0] as { channelId: string };
+    expect(solCh.channelId).not.toMatch(/^0x/);
+    expect(solCh.channelId).toBe('1'.repeat(32));
+  });
+
+  it('provisions mill node — writes chainProviders for the claim service (no keyId)', async () => {
+    // Regression (#6): without chainProviders the mill's per-packet claim
+    // service is unconfigured and rejects every swap with
+    // T00 "Per-packet claim service not configured". keyId MUST be stripped —
+    // the mill signs claims with its OWN derived settlement key.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'mill' }),
+    });
+    expect(res.statusCode).toBe(201);
+
+    const config = JSON.parse(await fs.readFile(millConfigPath, 'utf-8')) as {
+      chainProviders?: Record<string, unknown>[];
+    };
+    const providers = config.chainProviders ?? [];
+    expect(providers.length).toBeGreaterThan(0);
+    expect(providers[0]).toHaveProperty('chainId');
+    for (const p of providers) {
+      expect(p).not.toHaveProperty('keyId');
+    }
+
+    // Regression (#2): mill.config.json is bind-mounted read-only into a
+    // container running as a different uid (the `toon` user), so it MUST be
+    // group/other-readable (0o644). A 0o600 file → mill EACCES crash-loop.
+    const mode = (await fs.stat(millConfigPath)).mode & 0o777;
+    expect(mode & 0o044).not.toBe(0);
   });
 
   it('provisions mill node — swapPairs reads fromChain from chainProviders[0].chainId', async () => {

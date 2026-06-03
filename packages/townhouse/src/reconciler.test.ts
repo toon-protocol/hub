@@ -90,11 +90,19 @@ describe('BootReconciler', () => {
     await r.reconcile();
 
     expect(client.registerPeer).toHaveBeenCalledTimes(1);
+    // Re-registration MUST mirror the provisioning-path peer config: every
+    // nodes.yaml entry is an apex-owned child dialled over direct (non-SOCKS5)
+    // transport. Regression: omitting `relation: 'child'` here means a connector
+    // restart silently demotes children to settlement 'peer's, so paid packets
+    // forwarded to them are rejected T00; omitting `transport: 'direct'` routes
+    // the re-dial through the anon SOCKS5 proxy → HostUnreachable on Docker DNS.
     expect(client.registerPeer).toHaveBeenCalledWith({
       id: 'peer-town-01',
       url: 'ws://townhouse-town:3000',
       authToken: '',
       routes: [{ prefix: 'g.toon.peer.town01', priority: 0 }],
+      relation: 'child',
+      transport: 'direct',
     });
 
     const log = readFileSync(logPath, 'utf-8');

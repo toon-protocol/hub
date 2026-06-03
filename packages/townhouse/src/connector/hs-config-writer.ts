@@ -25,6 +25,14 @@ const HS_DIR = '/var/lib/anon/hs';
 /** Port the connector's BTP server listens on (inside the container). */
 const HS_PORT = 3000;
 
+/**
+ * HTTP handler endpoint of the dvm node container. Unlike town/mill, the dvm
+ * runs a standalone ILP HTTP handler (it does NOT run a BTP server the apex can
+ * dial), so the connector reaches it via `localDelivery` rather than a peer
+ * route. Host + port match the dvm service in townhouse-hs.yml (HANDLER_PORT).
+ */
+const DVM_HANDLER_URL = 'http://townhouse-hs-dvm:3300';
+
 // HS detection: parse the YAML and check anon.enabled === true. This avoids
 // false negatives from YAML formatting differences (dotted key vs. nested block).
 
@@ -119,6 +127,36 @@ export function writeHsConnectorConfig(
   const baseYaml = generator.toYaml(hsRuntimeConfig);
   const parsed = parse(baseYaml) as Record<string, unknown>;
   parsed['anon'] = { enabled: true };
+
+  // DVM job intake. The dvm node has no BTP server, so the apex cannot route to
+  // it as a peer; instead it locally-delivers packets addressed to its OWN
+  // nodeId to the dvm's HTTP handler. Clients publish kind:5094 job requests to
+  // the apex address (g.townhouse) and the connector forwards them here. This is
+  // a no-op when no dvm is provisioned (nothing is sent to the bare apex
+  // address), and does not shadow the more-specific g.townhouse.<node> peer
+  // routes (longest-prefix match wins). Without it the dvm can never receive a
+  // job — it neither subscribes to a relay nor runs a dialable BTP server.
+  const apexNodeId =
+    typeof parsed['nodeId'] === 'string'
+      ? (parsed['nodeId'] as string)
+      : 'g.townhouse';
+  parsed['localDelivery'] = { enabled: true, handlerUrl: DVM_HANDLER_URL };
+  const existingRoutes = Array.isArray(parsed['routes'])
+    ? (parsed['routes'] as Record<string, unknown>[])
+    : [];
+  if (
+    !existingRoutes.some(
+      (r) => r['prefix'] === apexNodeId && r['nextHop'] === 'local'
+    )
+  ) {
+    existingRoutes.push({
+      prefix: apexNodeId,
+      nextHop: 'local',
+      priority: 100,
+    });
+  }
+  parsed['routes'] = existingRoutes;
+
   const finalYaml = yamlStringify(parsed);
 
   // Write atomically: writeFileSync is not atomic on all platforms, but since

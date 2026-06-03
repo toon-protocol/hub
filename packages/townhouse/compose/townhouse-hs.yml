@@ -93,7 +93,12 @@ services:
     user: root
     # anon (Tor-based) requires the HS dir to be mode 0700 — too-permissive
     # directories cause an immediate abort. Docker creates volumes as root 755.
-    command: ['sh', '-c', 'mkdir -p /data && chown -R 1000:1000 /data && chmod 700 /data']
+    command:
+      [
+        'sh',
+        '-c',
+        'mkdir -p /data && chown -R 1000:1000 /data && chmod 700 /data',
+      ]
     volumes:
       - townhouse-hs-anon:/data
     restart: 'no'
@@ -231,7 +236,14 @@ services:
       # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal probe
       # Use 127.0.0.1 (not localhost) to avoid IPv6 resolution surprises. The
       # townhouse-api exposes /api/transport (not /api/health).
-      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:28090/api/transport']
+      test:
+        [
+          'CMD',
+          'wget',
+          '-q',
+          '--spider',
+          'http://127.0.0.1:28090/api/transport',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -269,7 +281,13 @@ services:
       CONNECTOR_URL: ws://connector:3000
       ILP_ADDRESS: g.townhouse.town
       NODE_ID: town
-      PARENT_PEER_ID: apex
+      # MUST equal the apex connector's nodeId (g.townhouse). The child connector
+      # keys peerRelations by the auth-declared peerId of the inbound session, so
+      # a mismatched value (e.g. the old literal 'apex') means the child never
+      # applies the 'parent' relation → it F06-rejects every paid PREPARE the
+      # apex forwards ("No payment channel claim attached"). entrypoint-town maps
+      # PARENT_PEER_ID → TOON_PARENT_PEER_ID.
+      PARENT_PEER_ID: g.townhouse
       FEE_PER_EVENT: '0'
       # Chain selection — driven by the `network` flag (resolveNetworkProfile).
       # EVM_CHAIN is the primary EVM preset name (e.g. base-mainnet) → town
@@ -322,6 +340,13 @@ services:
     environment:
       # nosemgrep: detect-insecure-websocket -- Docker-internal
       CONNECTOR_URL: ws://connector:3000
+      # MUST equal the apex connector's nodeId (g.townhouse) so the mill's
+      # embedded connector applies the 'parent' relation to the apex session and
+      # treats forwarded swap PREPAREs as free parent traffic. entrypoint-mill
+      # reads TOON_PARENT_PEER_ID directly (it does NOT map PARENT_PEER_ID like
+      # town does); without it the mill defaults to 'apex' and rejects swaps with
+      # T00 "Per-packet claim service not configured".
+      TOON_PARENT_PEER_ID: g.townhouse
       FEE_BASIS_POINTS: '0'
       SETTLEMENT_RPC_URL: ${EVM_RPC_URL:-}
       SETTLEMENT_CHAIN_ID: ${EVM_CHAIN_ID:-}

@@ -23,7 +23,11 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { resolveConfigNetworkProfile } from '../../config/network-profile.js';
 import type { ApiDeps } from '../types.js';
 import type { NodeType } from '../types.js';
-import type { TownhouseConfig } from '../../config/schema.js';
+import type {
+  TownhouseConfig,
+  ChainProviderEntry,
+} from '../../config/schema.js';
+import { DEFAULT_HS_CHAIN_PROVIDERS } from '../../config/defaults.js';
 import { readNodesYaml, writeNodesYaml } from '../../state/nodes-yaml.js';
 import {
   readImageManifest,
@@ -75,6 +79,49 @@ const APEX_ILP_ADDRESS = 'g.townhouse';
  * checks MILL_RELAYS before calling this function, so a missing env var is
  * caught before any file is written.
  */
+/**
+ * A valid-FORMAT zero/sentinel channelId for `chain` that never matches a real
+ * on-chain channel. The format is chain-specific and is validated client-side:
+ * `streamSwap`'s `validateChainAddress` rejects a `0x…`-format channelId echoed
+ * back for a `solana:*` target (it must base58-decode to 32 bytes), which
+ * surfaces as `FULFILL_DECODE_FAILED` on the sender. So Solana uses the all-zero
+ * base58 pubkey (`'1' × 32` → 32 zero bytes); EVM uses the 0x 32-byte zero word.
+ */
+function zeroChannelIdForChain(chain: string): string {
+  if (chain.startsWith('solana:')) return '1'.repeat(32);
+  return '0x' + '0'.repeat(64);
+}
+
+/**
+ * The mill's per-packet claim service signs a TARGET-chain settlement claim per
+ * swap packet; without a `chainProviders` entry covering `pair.to.chain` the
+ * embedded connector rejects every swap with `T00 "Per-packet claim service not
+ * configured"`. We thread the operator's configured chains through (the same
+ * source the apex connector + child env use), falling back to the dev-Anvil EVM
+ * default so a fresh install still validates. `keyId` is stripped — the mill
+ * derives its OWN settlement key from `MILL_MNEMONIC`/`SETTLEMENT_PRIVATE_KEY`
+ * and must sign claims with it (a baked-in dev keyId would make the recipient's
+ * claim settle against the wrong signer). NOTE: cross-chain swaps to Solana
+ * additionally require the operator to register a `solana:*` provider (via
+ * `townhouse chains add --chain-type solana`) — the network presets carry no
+ * Solana program id — and to fund the mill's target-chain inventory.
+ */
+function buildMillChainProviders(
+  config: TownhouseConfig
+): ChainProviderEntry[] {
+  const source: readonly ChainProviderEntry[] =
+    config.chainProviders && config.chainProviders.length > 0
+      ? config.chainProviders
+      : DEFAULT_HS_CHAIN_PROVIDERS;
+  return source.map((provider) => {
+    // Drop keyId (secret) — the mill supplies its own settlement key at runtime.
+    const { keyId: _keyId, ...rest } = provider as ChainProviderEntry & {
+      keyId?: string;
+    };
+    return rest as ChainProviderEntry;
+  });
+}
+
 function buildMillSwapPairConfig(config: TownhouseConfig): object {
   // Both absent (undefined) and explicitly empty ([]) fall through to the
   // dev-Anvil sentinel — if a live EVM chain is configured, ensure
@@ -97,12 +144,13 @@ function buildMillSwapPairConfig(config: TownhouseConfig): object {
     ],
     chains: ['evm', 'solana'],
     // Bootstrap: validateConfig() requires a non-empty channels array for
-    // each distinct pair.to.chain. The zero channelId is a valid-format
-    // sentinel that will never match a real on-chain channel.
+    // each distinct pair.to.chain. The sentinel channelId is valid-FORMAT for
+    // the target chain (see zeroChannelIdForChain) and never matches a real
+    // on-chain channel.
     channels: {
       [toChain]: [
         {
-          channelId: '0x' + '0'.repeat(64),
+          channelId: zeroChannelIdForChain(toChain),
           cumulativeAmount: '0',
           nonce: '0',
         },
@@ -112,6 +160,8 @@ function buildMillSwapPairConfig(config: TownhouseConfig): object {
     inventory: {
       [toChain]: '0',
     },
+    // Per-packet claim service config — REQUIRED for the mill to accept swaps.
+    chainProviders: buildMillChainProviders(config),
   };
 }
 
@@ -462,9 +512,17 @@ export function registerNodeLifecycleRoutes(
             // mkdir mode is a no-op on existing dirs — chmod explicitly so the
             // parent is 0o700 even if it pre-existed (P3).
             await fs.chmod(dirname(millConfigPath), 0o700);
+            // 0o644 (NOT 0o600): this file is bind-mounted read-only into the
+            // mill container, which runs as a DIFFERENT uid (the image's `toon`
+            // user, uid 1001) than the api that writes it (the operator's host
+            // uid). A 0o600 file owned by the writer is unreadable by `toon` →
+            // the mill crash-loops on `EACCES /config/mill.config.json` and
+            // `node add mill` fails the health check. The mill's secret key is
+            // injected via env (MILL_SECRET_KEY/MILL_MNEMONIC), NOT this file,
+            // so world-readable swap-pair/chain metadata is acceptable.
             await fs.writeFile(millConfigPath, defaultMillConfig, {
               encoding: 'utf-8',
-              mode: 0o600,
+              mode: 0o644,
             });
             millConfigWritten = true;
           } catch (err: unknown) {
@@ -627,6 +685,16 @@ export function registerNodeLifecycleRoutes(
             url: btpUrl,
             authToken: '',
             routes: [{ prefix: ilpAddress, priority: 0 }],
+            // Tag every provisioned node as a CHILD of the apex. The connector's
+            // `requiresSettlementClaim()` returns false for children, so the apex
+            // forwards client-paid PREPAREs to the node for FREE (parent→child
+            // packets carry no per-packet claim — the apex settles in aggregate).
+            // Without this the peer defaults to 'peer' and every paid packet
+            // forwarded to a town/mill/dvm node is rejected `T00 No payment
+            // channel available for peer`. Pairs with the child-side
+            // `TOON_PARENT_PEER_ID` in townhouse-hs.yml (which MUST equal the
+            // apex connector's nodeId so the child applies the parent relation).
+            relation: 'child',
             // Force direct (non-SOCKS5) BTP dial for this Docker-sibling
             // peer. The apex connector runs with `transport.type: socks5`
             // so the .anyone HS can publish; without this override, every

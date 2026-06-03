@@ -108,6 +108,13 @@ export class BootReconciler {
             url: deriveBtpUrl(entry),
             authToken: '',
             routes: [{ prefix: entry.ilpAddress, priority: 0 }],
+            // Re-registration must mirror the provisioning-path peer config
+            // (nodes-lifecycle.ts), or a connector restart silently restores
+            // peers as settlement 'peer's (paid packets → T00) dialled over the
+            // global SOCKS5 transport (Docker-internal hostnames → HostUnreachable).
+            // Every nodes.yaml entry is an apex-owned child.
+            relation: 'child',
+            transport: 'direct',
           });
           summary.reregistered++;
           await this.tryAppendLog({

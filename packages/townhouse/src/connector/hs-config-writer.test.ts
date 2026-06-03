@@ -77,6 +77,29 @@ describe('writeHsConnectorConfig', () => {
     expect(opts['hiddenServicePort']).toBe(3000);
   });
 
+  // Regression: the dvm node runs a standalone HTTP handler (no BTP server), so
+  // the apex must locally-deliver packets addressed to its own nodeId to the
+  // dvm handler. Without this block a provisioned dvm can never receive a
+  // kind:5094 job (it neither subscribes to a relay nor runs a dialable peer).
+  it('wires localDelivery + a self-route to the dvm handler (DVM job intake)', () => {
+    const config = getDefaultConfig();
+    const { yamlPath } = writeHsConnectorConfig(tmpDir, config);
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const localDelivery = parsed['localDelivery'] as Record<string, unknown>;
+    expect(localDelivery?.['enabled']).toBe(true);
+    expect(localDelivery?.['handlerUrl']).toBe('http://townhouse-hs-dvm:3300');
+
+    const nodeId = parsed['nodeId'] as string;
+    const routes = parsed['routes'] as Record<string, unknown>[];
+    const selfRoute = routes.find(
+      (r) => r['prefix'] === nodeId && r['nextHop'] === 'local'
+    );
+    expect(selfRoute, 'expected a g.townhouse → local self-route').toBeTruthy();
+  });
+
   it('preserves existing file when it contains the HS marker (idempotency)', () => {
     const config = getDefaultConfig();
     // First write
