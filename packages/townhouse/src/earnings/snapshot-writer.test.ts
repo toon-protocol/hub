@@ -479,14 +479,16 @@ describe('SnapshotWriter', () => {
   });
 
   it('[case 11] stop() clears timer; idempotent', async () => {
-    // Capture the real setImmediate BEFORE fake timers replace it. Each tick's
-    // runTick() does a real fs append (a libuv macrotask), which
-    // advanceTimersByTimeAsync does NOT await — it only drains microtasks and
-    // timers. If the next fake-timer fire lands while that fs write is still in
-    // flight, the SnapshotWriter re-entrancy guard (tickPending) SKIPS the tick,
-    // so tickCount becomes nondeterministic (2–4 ticks under CI load). Yielding
-    // to the real event loop between advances lets each tick's fs write settle
-    // and tickPending clear, so every fire produces a tick.
+    // Capture the real setImmediate BEFORE fake timers replace it, so we can
+    // yield to the real event loop between advances. Each tick's runTick() does a
+    // real fs append (a libuv macrotask) that advanceTimersByTimeAsync does NOT
+    // await — it only drains microtasks and timers. flushIo() lets that write
+    // settle so the re-entrancy guard (tickPending) clears before the next fire.
+    // Even so, the exact tick count is NOT guaranteed under CI load: a fire that
+    // lands while a write is still in flight is skipped (tickCount has been
+    // observed at 2 when 4 fires were issued). This test exercises stop()
+    // SEMANTICS, not tick frequency, so it only requires that the timer fired at
+    // least once while running and that it stops firing after stop().
     const realSetImmediate = setImmediate;
     const flushIo = () => new Promise<void>((r) => realSetImmediate(r));
     vi.useFakeTimers();
@@ -510,12 +512,15 @@ describe('SnapshotWriter', () => {
       writer.start();
 
       // Advance one interval at a time, flushing real I/O after each fire so the
-      // in-flight tick fully completes (and tickPending clears) before the next.
+      // in-flight tick completes (and tickPending clears) before the next.
       for (let i = 0; i < 4; i++) {
         await vi.advanceTimersByTimeAsync(50);
         await flushIo();
       }
-      expect(tickCount).toBeGreaterThanOrEqual(3);
+      // At least one tick must have fired — proof the timer is running. The exact
+      // count is nondeterministic under load (see comment above); the meaningful
+      // assertion is the post-stop() check below, which must see NO further ticks.
+      expect(tickCount).toBeGreaterThanOrEqual(1);
 
       const countBeforeStop = tickCount;
       writer.stop();
