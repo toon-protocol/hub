@@ -1,15 +1,35 @@
 # @toon-protocol/townhouse
 
-**Run a TOON node on your own machine with two commands.**
+**The operator CLI for running a TOON Protocol node stack on your own machine.**
 
-TOON is a pay-to-write, free-to-read [Nostr](https://nostr.com) relay network: writers pay a tiny per-byte fee to publish, anyone reads for free. `townhouse` is the command-line installer and dashboard for running your own node. It sets up your keys, starts the node in Docker, and publishes it as a private hidden-service address so peers can reach you without exposing anything to the public internet.
+TOON Protocol is a **pay-to-write, free-to-read** [Nostr](https://nostr.com) network over [Interledger](https://interledger.org): writers attach a tiny signed payment to publish an event, and anyone reads for free. `townhouse` is the command-line tool an **operator** uses to stand up and run that infrastructure — it generates your keys, boots the stack in Docker, and publishes a private hidden-service address so paying clients can reach you without exposing anything to the public internet.
 
 ```bash
 npx @toon-protocol/townhouse init     # 1. create your config + wallet (one time)
-npx @toon-protocol/townhouse hs up     # 2. start your node
+npx @toon-protocol/townhouse hs up    # 2. boot your apex (connector + hidden service)
+npx @toon-protocol/townhouse node add # 3. add a service node that earns fees (default: a town relay)
 ```
 
-That's it — `hs up` prints `Apex live at <your-address>` when your node is running.
+`hs up` prints `Apex live at <your-address>.anon` once the stack is reachable. Share that address with clients; they pay you over it.
+
+> **Are you trying to _publish_ events, not run a node?** You want [`@toon-protocol/client`](https://www.npmjs.com/package/@toon-protocol/client) instead — the client library that pays a townhouse apex and publishes to it. `townhouse` (this package) is the **operator** side; `@toon-protocol/client` is the **client** side.
+
+---
+
+## What is a townhouse? (vocabulary)
+
+This package uses a few terms precisely. Getting them straight up front prevents a lot of confusion:
+
+| Term | What it is |
+| --- | --- |
+| **TOON Protocol** | The pay-to-write Nostr-over-ILP network. Writes cost a signed off-chain payment claim; reads are free. |
+| **townhouse** | This CLI — the **operator product**. It runs one **apex** plus the service nodes you attach to it. |
+| **apex** | What `hs up` boots: the **ILP connector** (node id `g.townhouse`, the *parent*) **+ an `.anon` hidden service**. The apex is the front door — it validates incoming client payments, takes its fee, and forwards traffic to your service nodes. It earns routing fees but is **not** itself a relay/swap/compute node. |
+| **service node** (a **child** of the apex) | What `node add` provisions. Three types **earn fees**: **town** = a Nostr relay (pay-per-event publish); **mill** = a multi-chain token-swap node; **dvm** = a [NIP-90](https://github.com/nostr-protocol/nips/blob/master/90.md) compute node (e.g. Arweave blob storage — the job request *is* the payment). Clients pay at the apex edge; the apex then forwards to the child **for free** (parent→child packets carry no per-packet claim, settled in aggregate). |
+| **operator** (you) | Runs `townhouse`, owns the wallet, earns the fees. |
+| **client** | An end-user or app using [`@toon-protocol/client`](https://www.npmjs.com/package/@toon-protocol/client) to pay your apex and publish. Not this package. |
+
+**`town` is one service node; `townhouse` is the whole operator product** (the apex plus every node you attach). Adding a town relay is just `townhouse node add town`.
 
 ---
 
@@ -17,13 +37,13 @@ That's it — `hs up` prints `Apex live at <your-address>` when your node is run
 
 You'll need:
 
-- [ ] **Docker** running — verify with `docker version` (it pulls and runs your node's containers)
+- [ ] **Docker** running — verify with `docker version` (it pulls and runs the apex and node containers)
 - [ ] **Node.js 20+** — verify with `node --version`
-- [ ] **Network access to `ghcr.io`** — your node's container images are pulled from there
+- [ ] **Network access to `ghcr.io`** — container images are pulled from there
 - [ ] **A few free ports on `127.0.0.1`** — `9401`, `28090`, `7100`, `3100`, `3200`, `3400` (all loopback-only)
 - [ ] A little disk space for container images
 
-> Supported on Linux and macOS (including WSL2). Everything binds to `127.0.0.1` only — nothing is exposed to the public internet except your node's hidden-service address.
+> Supported on Linux and macOS (including WSL2). Everything binds to `127.0.0.1` only — nothing is exposed to the public internet except your apex's `.anon` hidden-service address.
 
 ---
 
@@ -62,20 +82,20 @@ Next — start your node:
 
 **Write the seed phrase down.** It is shown only once and is the only way to recover your keys.
 
-`init` needs a password to encrypt the wallet. It will prompt you when run in a terminal, or you can pass one non-interactively:
+`init` needs a password to encrypt the wallet. Provide it with the `--password` flag or the `TOWNHOUSE_WALLET_PASSWORD` env var:
 
 ```bash
 npx @toon-protocol/townhouse init --password "<your-password>"
 # or: export TOWNHOUSE_WALLET_PASSWORD=...  then run init
 ```
 
-### 2. Start your node — `hs up`
+### 2. Boot your apex — `hs up`
 
 ```bash
 npx @toon-protocol/townhouse hs up
 ```
 
-The first run pulls images and bootstraps the hidden service, narrating each stage:
+This starts the **apex** (the ILP connector plus its `.anon` hidden service) — the front door that clients pay. The first run pulls images and bootstraps the hidden service, narrating each stage:
 
 ```text
 Pulling 2 apex images...
@@ -85,11 +105,23 @@ Bootstrapping hidden service (this takes 30–90s)…
 Apex live at uagxuabpuvm6mf4l4zptgth2442sbct5lvtur2nffpqnouesgawyv2ad.anon
 ```
 
-The address on the final line is **your node's hidden-service address** — share it with peers, who reach you at `wss://<your-address>/btp`. It's also saved to `~/.townhouse/host.json`. On a cold image cache the first boot can take a few minutes; later boots are faster.
+The address on the final line is **your apex's `.anon` hidden-service address** — share it with clients, who pay you over BTP at `wss://<your-address>.anon/btp` (through a SOCKS5h proxy). It's also saved to `~/.townhouse/host.json`. On a cold image cache the first boot can take a few minutes; later boots are faster.
 
-If you run it in an interactive terminal, a live dashboard opens after the node is up. Press `Ctrl-C` to exit the dashboard — your node keeps running.
+If you run it in an interactive terminal, a live dashboard opens once the apex is up. Press `Ctrl-C` to exit the dashboard — your apex keeps running.
 
-### 3. Stop your node — `hs down`
+### 3. Add a service node — `node add`
+
+The apex on its own only routes and takes a fee. To actually **earn**, attach a service node (a *child* of the apex). The default is a `town` Nostr relay:
+
+```bash
+npx @toon-protocol/townhouse node add        # provision a town relay (default)
+npx @toon-protocol/townhouse node add mill   # or a multi-chain swap node
+npx @toon-protocol/townhouse node add dvm    # or a NIP-90 compute / Arweave node
+```
+
+`node add` provisions the container, registers it as a child of your apex, and routes paid client traffic to it for free. List and remove nodes with `node list` and `node remove <id>`.
+
+### 4. Stop your apex — `hs down`
 
 ```bash
 npx @toon-protocol/townhouse hs down
@@ -99,27 +131,30 @@ npx @toon-protocol/townhouse hs down
 Apex stopped. Volumes preserved — your .anyone address is stable.
 ```
 
-Your hidden-service address stays the same across stop/start. To deliberately rotate to a brand-new address, use `npx @toon-protocol/townhouse hs down --rotate-keys`.
+Your hidden-service address stays the same across stop/start. To deliberately rotate to a brand-new address, use `npx @toon-protocol/townhouse hs down --rotate-keys` (this **deletes** the current keypair, so the next `hs up` publishes a different address).
 
 ---
 
 ## Everyday commands
 
-| Command                                            | What it does                                           |
-| -------------------------------------------------- | ------------------------------------------------------ |
-| `townhouse init`                                   | Create config + wallet (one time)                      |
-| `townhouse hs up`                                  | Start your node and publish its hidden-service address |
-| `townhouse hs down`                                | Stop your node (address preserved)                     |
-| `townhouse status`                                 | Show node status                                       |
-| `townhouse health`                                 | Health summary                                         |
-| `townhouse logs <node-id> [-f]`                    | Tail a node's logs                                     |
-| `townhouse wallet show`                            | Show your derived addresses                            |
-| `townhouse node list` / `node add` / `node remove` | Manage child nodes                                     |
-| `townhouse --help`                                 | Full command list                                      |
+| Command                                            | What it does                                                 |
+| -------------------------------------------------- | ------------------------------------------------------------ |
+| `townhouse init`                                   | Create config + wallet (one time)                            |
+| `townhouse hs up`                                  | Boot the apex (connector + `.anon` hidden service)           |
+| `townhouse hs down`                                | Stop the apex (address preserved)                            |
+| `townhouse node add [town\|mill\|dvm]`             | Provision a service node (child of the apex; default `town`) |
+| `townhouse node list` / `node remove <id>`         | List / deprovision service nodes                             |
+| `townhouse status`                                 | Show apex + node status and connector metrics                |
+| `townhouse health`                                 | Probe apex / API / nodes / `.anon` health                    |
+| `townhouse logs <node-id> [-f]`                    | Tail a node's logs (`-f` accepted; follow is the default)    |
+| `townhouse wallet show`                            | Show derived addresses for each node                         |
+| `townhouse wallet seed --confirm`                  | Reprint your BIP-39 seed phrase (password-gated)             |
+| `townhouse credits buy` / `credits balance`        | Fund / check Arweave upload credits (for the DVM node)       |
+| `townhouse --help`                                 | Full command list                                            |
 
 (Prefix each with `npx @toon-protocol/townhouse`, or install once and call `townhouse` directly.)
 
-> Running with a config in a non-default location? Add `-c <path-to-config.yaml>` to any command. `init`'s next-step hint includes the right `-c` flag automatically when you use `--config-dir`.
+> Running with a config outside the default `~/.townhouse`? Pass `-c <path-to-config.yaml>` (the path to the **config file**, not its directory) on any command. When you initialize with `init --config-dir <dir>`, `init`'s printed next-step already includes the matching `-c` flag.
 
 ---
 
