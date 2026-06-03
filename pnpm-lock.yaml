@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: false
   excludeLinksFromLockfile: false
 
+neverBuiltDependencies:
+  - '@anyone-protocol/anyone-client'
+
 overrides:
   protobufjs: '>=7.2.5'
   ws@>=7.0.0 <7.5.10: '>=7.5.10'
@@ -1168,7 +1171,6 @@ packages:
   /@anyone-protocol/anyone-client@1.1.3:
     resolution: {integrity: sha512-QIkIhOnQo6R8xn4VsqCbmG8JtKaAsSWnHb230NU0x7Oo5EEPW0kVeEIztIvHARWEAmQ0ntK+yVgFNK4MY8fSeA==}
     hasBin: true
-    requiresBuild: true
     dependencies:
       '@types/node': 20.19.32
       '@types/unzipper': 0.10.11
