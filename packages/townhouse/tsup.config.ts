@@ -1,5 +1,12 @@
 import { defineConfig } from 'tsup';
-import { cp, mkdir, readFile, writeFile, access, chmod } from 'node:fs/promises';
+import {
+  cp,
+  mkdir,
+  readFile,
+  writeFile,
+  access,
+  chmod,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 
 // Shared digest extractor + validator. Single source of truth for what makes
@@ -24,6 +31,11 @@ export default defineConfig({
   // hit a runtime version-skew against townhouse's own @noble/@scure versions.
   noExternal: [
     '@toon-protocol/mill',
+    // Apex Solana/Mina settlement-key encoding (base58Encode +
+    // hexToMinaBase58PrivateKey) is imported from core; inline it so the
+    // published package keeps ZERO @toon-protocol/* runtime deps (same rule as
+    // mill above — see package-structure guard test).
+    '@toon-protocol/core',
     '@scure/bip39',
     '@scure/bip32',
     '@noble/curves',
@@ -43,7 +55,10 @@ export default defineConfig({
     await mkdir(composeDistDir, { recursive: true });
 
     // Copy dev template verbatim (no digest substitution — uses local toon:* tags).
-    await cp('compose/townhouse-dev.yml', join(composeDistDir, 'townhouse-dev.yml'));
+    await cp(
+      'compose/townhouse-dev.yml',
+      join(composeDistDir, 'townhouse-dev.yml')
+    );
 
     // Render HS template — substitute digest placeholders from image-manifest.json
     // if present. When the manifest file is absent (typical local dev), emit a
@@ -66,7 +81,7 @@ export default defineConfig({
     } catch {
       console.warn(
         '[tsup] dist/image-manifest.json not found — shipping unsubstituted ' +
-        'townhouse-hs.yml. This is fine for local dev but invalid for npm publish.'
+          'townhouse-hs.yml. This is fine for local dev but invalid for npm publish.'
       );
     }
 
@@ -75,11 +90,17 @@ export default defineConfig({
       const manifest = JSON.parse(manifestRaw); // throws SyntaxError on malformed JSON
 
       const subs: [string, string][] = [
-        ['${TOON_TOWNHOUSE_API_DIGEST}', `@${getImageDigest(manifest, 'townhouse-api')}`],
-        ['${TOON_TOWN_DIGEST}',          `@${getImageDigest(manifest, 'town')}`],
-        ['${TOON_MILL_DIGEST}',          `@${getImageDigest(manifest, 'mill')}`],
-        ['${TOON_DVM_DIGEST}',           `@${getImageDigest(manifest, 'dvm')}`],
-        ['${TOON_CONNECTOR_DIGEST}',     `@${getImageDigest(manifest, 'connector')}`],
+        [
+          '${TOON_TOWNHOUSE_API_DIGEST}',
+          `@${getImageDigest(manifest, 'townhouse-api')}`,
+        ],
+        ['${TOON_TOWN_DIGEST}', `@${getImageDigest(manifest, 'town')}`],
+        ['${TOON_MILL_DIGEST}', `@${getImageDigest(manifest, 'mill')}`],
+        ['${TOON_DVM_DIGEST}', `@${getImageDigest(manifest, 'dvm')}`],
+        [
+          '${TOON_CONNECTOR_DIGEST}',
+          `@${getImageDigest(manifest, 'connector')}`,
+        ],
       ];
 
       for (const [placeholder, replacement] of subs) {
@@ -89,6 +110,6 @@ export default defineConfig({
 
     const hsOutPath = join(composeDistDir, 'townhouse-hs.yml');
     await writeFile(hsOutPath, hsRendered, 'utf-8');
-    await chmod(hsOutPath, 0o600);  // NFR8 — operator-secret file mode (R2-MINOR fix)
+    await chmod(hsOutPath, 0o600); // NFR8 — operator-secret file mode (R2-MINOR fix)
   },
 });

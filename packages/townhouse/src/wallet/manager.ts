@@ -57,6 +57,10 @@ import type {
 // npm runtime dep of townhouse. The `noExternal` rule in tsup.config.ts bundles
 // this into dist so the published package has zero @toon-protocol/* runtime deps.
 import { deriveMillKeys } from '@toon-protocol/mill/wallet';
+import {
+  base58Encode as coreBase58Encode,
+  hexToMinaBase58PrivateKey,
+} from '@toon-protocol/core';
 
 const BASE58_ALPHABET =
   '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -299,30 +303,77 @@ export class WalletManager {
    *
    * Returns the EVM private key as a `0x`-prefixed 64-char hex string — the
    * form the connector config's `keyId` expects (matches the dev placeholder
-   * `0x7c85…`). Throws when the wallet is locked. Structured as an object so
-   * Solana/Mina apex keys can be added in a later phase.
+   * `0x7c85…`). Also returns Solana + Mina settlement keys (connector 3.9.0)
+   * derived at the same `ACCOUNT_INDEX_APEX`, in the RAW base58 form the
+   * connector resolves a non-EVM `keyId` as:
+   *   - Solana: base58 of the 32-byte Ed25519 seed,
+   *   - Mina:   `EK…` base58check (via `hexToMinaBase58PrivateKey`).
+   *
+   * EVM derivation must always succeed (it throws on failure). Solana/Mina
+   * derivation is best-effort: if `deriveMillKeys` throws (unsupported
+   * platform, library load error) the corresponding key is OMITTED rather than
+   * failing the whole method, so the EVM keyId path is never blocked.
+   *
+   * Async because `deriveMillKeys` is async. Throws when the wallet is locked.
    */
-  getApexSettlementKeys(): { evmPrivateKeyHex: string } {
+  async getApexSettlementKeys(): Promise<{
+    evmPrivateKeyHex: string;
+    solanaPrivateKeyBase58?: string;
+    minaPrivateKeyBase58?: string;
+  }> {
     if (!this.state) {
       throw new Error(
         'Wallet not initialized. Call generate() or fromMnemonic() first.'
       );
     }
+    const mnemonic = this.state.mnemonic;
     let seed: Uint8Array | undefined;
+    let evmPrivateKeyHex: string;
     try {
-      seed = mnemonicToSeedSync(this.state.mnemonic);
+      seed = mnemonicToSeedSync(mnemonic);
       // Same path the per-node EVM derivation uses (m/44'/60'/{idx}'/0/0).
       const path = `m/44'/60'/${ACCOUNT_INDEX_APEX}'/0/0`;
       const hd = HDKey.fromMasterSeed(seed).derive(path);
       if (!hd.privateKey) {
         throw new Error(`Apex EVM private key missing at ${path}`);
       }
-      return {
-        evmPrivateKeyHex: `0x${bytesToHex(new Uint8Array(hd.privateKey))}`,
-      };
+      evmPrivateKeyHex = `0x${bytesToHex(new Uint8Array(hd.privateKey))}`;
     } finally {
       if (seed) seed.fill(0);
     }
+
+    // Solana + Mina apex keys (best-effort — omit on failure, never block EVM).
+    let solanaPrivateKeyBase58: string | undefined;
+    let minaPrivateKeyBase58: string | undefined;
+    try {
+      const chainKeys = await deriveMillKeys({
+        mnemonic,
+        chains: ['solana', 'mina'],
+        accountIndex: ACCOUNT_INDEX_APEX,
+      });
+      if (chainKeys.solana) {
+        // Connector resolves a Solana keyId as base58 of the 32-byte Ed25519 seed.
+        solanaPrivateKeyBase58 = coreBase58Encode(chainKeys.solana.privateKey);
+      }
+      if (chainKeys.mina) {
+        // deriveMillKeys emits a big-endian hex scalar (no mina-signer); convert
+        // to the `EK…` base58check form the connector resolves as a Mina keyId.
+        minaPrivateKeyBase58 = hexToMinaBase58PrivateKey(
+          chainKeys.mina.privateKey
+        );
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[WalletManager] deriveMillKeys failed for apex (accountIndex=${ACCOUNT_INDEX_APEX}): ${errMsg} — Solana/Mina apex keys omitted`
+      );
+    }
+
+    return {
+      evmPrivateKeyHex,
+      ...(solanaPrivateKeyBase58 ? { solanaPrivateKeyBase58 } : {}),
+      ...(minaPrivateKeyBase58 ? { minaPrivateKeyBase58 } : {}),
+    };
   }
 
   /**

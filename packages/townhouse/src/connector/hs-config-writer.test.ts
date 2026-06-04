@@ -286,4 +286,103 @@ describe('writeHsConnectorConfig', () => {
     // Bare dev boot keeps the funded Anvil placeholder, NOT the apex key.
     expect(cps[0]?.['keyId']).not.toBe(APEX_EVM_KEY);
   });
+
+  // ── Solana/Mina apex keyId injection (connector 3.9.0 non-EVM keyId) ───────
+  const APEX_SOLANA_KEY = '4'.repeat(44); // representative base58 Solana keyId
+  const APEX_MINA_KEY = `EK${'a'.repeat(50)}`; // representative EK… Mina keyId
+
+  it('fills a missing Solana keyId with the apex Solana key', () => {
+    const config = getDefaultConfig();
+    config.chainProviders = [
+      {
+        chainType: 'solana',
+        chainId: 'solana:devnet',
+        rpcUrl: 'https://api.devnet.solana.com',
+        programId: 'EdJxYPDxGvaJuu57DSUptf4soLv8enpdyQJJhHDLiydG',
+        // keyId omitted
+      },
+    ];
+    const { yamlPath } = writeHsConnectorConfig(tmpDir, config, {
+      force: true,
+      apexSettlementKeys: {
+        evmPrivateKeyHex: APEX_EVM_KEY,
+        solanaPrivateKeyBase58: APEX_SOLANA_KEY,
+        minaPrivateKeyBase58: APEX_MINA_KEY,
+      },
+    });
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const cps = parsed['chainProviders'] as Record<string, unknown>[];
+    expect(cps[0]?.['chainType']).toBe('solana');
+    expect(cps[0]?.['keyId']).toBe(APEX_SOLANA_KEY);
+  });
+
+  it('fills a missing Mina keyId with the apex Mina key', () => {
+    const config = getDefaultConfig();
+    config.chainProviders = [
+      {
+        chainType: 'mina',
+        chainId: 'mina:devnet',
+        graphqlUrl: 'https://api.minascan.io/node/devnet/v1/graphql',
+        zkAppAddress: 'B62qtestzkappaddressplaceholderxxxxxxxxxxxxxxxxxxxxx',
+        // keyId omitted
+      },
+    ];
+    const { yamlPath } = writeHsConnectorConfig(tmpDir, config, {
+      force: true,
+      apexSettlementKeys: {
+        evmPrivateKeyHex: APEX_EVM_KEY,
+        solanaPrivateKeyBase58: APEX_SOLANA_KEY,
+        minaPrivateKeyBase58: APEX_MINA_KEY,
+      },
+    });
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const cps = parsed['chainProviders'] as Record<string, unknown>[];
+    expect(cps[0]?.['chainType']).toBe('mina');
+    expect(cps[0]?.['keyId']).toBe(APEX_MINA_KEY);
+  });
+
+  it('does NOT override an explicit Solana/Mina operator keyId', () => {
+    const explicitSol = '5'.repeat(44);
+    const explicitMina = `EK${'b'.repeat(50)}`;
+    const config = getDefaultConfig();
+    config.chainProviders = [
+      {
+        chainType: 'solana',
+        chainId: 'solana:devnet',
+        rpcUrl: 'https://api.devnet.solana.com',
+        programId: 'EdJxYPDxGvaJuu57DSUptf4soLv8enpdyQJJhHDLiydG',
+        keyId: explicitSol,
+      },
+      {
+        chainType: 'mina',
+        chainId: 'mina:devnet',
+        graphqlUrl: 'https://api.minascan.io/node/devnet/v1/graphql',
+        zkAppAddress: 'B62qtestzkappaddressplaceholderxxxxxxxxxxxxxxxxxxxxx',
+        keyId: explicitMina,
+      },
+    ];
+    const { yamlPath } = writeHsConnectorConfig(tmpDir, config, {
+      force: true,
+      apexSettlementKeys: {
+        evmPrivateKeyHex: APEX_EVM_KEY,
+        solanaPrivateKeyBase58: APEX_SOLANA_KEY,
+        minaPrivateKeyBase58: APEX_MINA_KEY,
+      },
+    });
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const cps = parsed['chainProviders'] as Record<string, unknown>[];
+    const sol = cps.find((c) => c['chainType'] === 'solana');
+    const mina = cps.find((c) => c['chainType'] === 'mina');
+    expect(sol?.['keyId']).toBe(explicitSol);
+    expect(mina?.['keyId']).toBe(explicitMina);
+  });
 });

@@ -61,7 +61,11 @@ export function writeHsConnectorConfig(
      * operators never paste a settlement key into `chains add`. The raw key
      * lands ONLY in the generated `connector.yaml` (0600), never in config.yaml.
      */
-    apexSettlementKeys?: { evmPrivateKeyHex: string };
+    apexSettlementKeys?: {
+      evmPrivateKeyHex?: string;
+      solanaPrivateKeyBase58?: string;
+      minaPrivateKeyBase58?: string;
+    };
   } = {}
 ): WriteHsConnectorConfigResult {
   const yamlPath = join(configDir, 'connector.yaml');
@@ -102,24 +106,37 @@ export function writeHsConnectorConfig(
   // `hs up`). Used both as the fallback key for network-profile-derived
   // providers and to fill any configured provider that lacks an explicit keyId.
   const apexEvmKey = options.apexSettlementKeys?.evmPrivateKeyHex;
+  const apexSolanaKey = options.apexSettlementKeys?.solanaPrivateKeyBase58;
+  const apexMinaKey = options.apexSettlementKeys?.minaPrivateKeyBase58;
 
   const derived = resolveConfigNetworkProfile(
     config,
     apexEvmKey ?? DEFAULT_HS_CHAIN_PROVIDERS[0]?.keyId
   ).chainProviders as ChainProviderEntry[];
 
-  // Fill a missing EVM keyId with the mnemonic-derived apex key. Precedence:
+  // Fill a missing keyId with the matching mnemonic-derived apex key, per
+  // chainType. Precedence (all chains):
   //   1. explicit keyId on the provider (operator `--key-id`, or the dev e2e's
   //      funded Anvil key) — left untouched,
   //   2. mnemonic-derived apex key (here).
-  // (Solana/Mina apex keys are a later phase.) The bare DEFAULT fallback below
+  // The connector (3.9.0) resolves a non-EVM keyId as a RAW base58 private key
+  // (Solana: base58 of a 32-byte Ed25519 seed; Mina: `EK…` base58check) —
+  // identical contract to the EVM keyId path. The bare DEFAULT fallback below
   // keeps its funded Anvil placeholder key so a no-chains dev boot is unchanged.
   const fillApexKey = (providers: ChainProviderEntry[]): ChainProviderEntry[] =>
-    providers.map((p) =>
-      !p.keyId && p.chainType === 'evm' && apexEvmKey
-        ? { ...p, keyId: apexEvmKey }
-        : p
-    );
+    providers.map((p) => {
+      if (p.keyId) return p;
+      if (p.chainType === 'evm' && apexEvmKey) {
+        return { ...p, keyId: apexEvmKey };
+      }
+      if (p.chainType === 'solana' && apexSolanaKey) {
+        return { ...p, keyId: apexSolanaKey };
+      }
+      if (p.chainType === 'mina' && apexMinaKey) {
+        return { ...p, keyId: apexMinaKey };
+      }
+      return p;
+    });
 
   const hsConfig: TownhouseConfig =
     derived.length > 0

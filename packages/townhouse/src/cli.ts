@@ -1854,7 +1854,7 @@ async function handleHsUp(
     // configured chainProvider lacking an explicit keyId is signed by the
     // operator's own key — no manual `--key-id` needed. The raw key lands only
     // in connector.yaml (0600), never in config.yaml.
-    const apexSettlementKeys = walletManager.getApexSettlementKeys();
+    const apexSettlementKeys = await walletManager.getApexSettlementKeys();
     writeHsConnectorConfig(configDir, config, { force, apexSettlementKeys });
 
     // Step 2: materialize compose template.
