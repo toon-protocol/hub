@@ -168,7 +168,7 @@ export class ConnectorConfigGenerator {
             rpcUrl: p.rpcUrl,
             registryAddress: p.registryAddress,
             tokenAddress: p.tokenAddress,
-            keyId: p.keyId,
+            ...(p.keyId !== undefined ? { keyId: p.keyId } : {}),
           };
         }
         if (p.chainType === 'solana') {
@@ -179,7 +179,7 @@ export class ConnectorConfigGenerator {
             ...(p.wsUrl !== undefined ? { wsUrl: p.wsUrl } : {}),
             programId: p.programId,
             ...(p.tokenMint !== undefined ? { tokenMint: p.tokenMint } : {}),
-            keyId: p.keyId,
+            ...(p.keyId !== undefined ? { keyId: p.keyId } : {}),
           };
         }
         // mina

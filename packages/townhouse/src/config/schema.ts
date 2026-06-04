@@ -100,8 +100,13 @@ export interface EvmChainProvider {
   registryAddress: string;
   /** Settlement token (USDC, etc.) contract. */
   tokenAddress: string;
-  /** Hex private key / key id the connector signs settlement claims with. */
-  keyId: string;
+  /**
+   * Hex private key / key id the connector signs settlement claims with.
+   * Optional: when omitted, `townhouse hs up` fills it with the operator's
+   * mnemonic-derived apex settlement key (acct index 3). Set it only to use an
+   * external/hardware key.
+   */
+  keyId?: string;
 }
 
 /** Solana settlement chain. */
@@ -117,8 +122,11 @@ export interface SolanaChainProvider {
   programId: string;
   /** Settlement token mint (base58). */
   tokenMint?: string;
-  /** Key id the connector signs settlement claims with. */
-  keyId: string;
+  /**
+   * Key id the connector signs settlement claims with. Optional — when omitted,
+   * `townhouse hs up` fills it with the operator's mnemonic-derived apex key.
+   */
+  keyId?: string;
 }
 
 /** Mina settlement chain. */

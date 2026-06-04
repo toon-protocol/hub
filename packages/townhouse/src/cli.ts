@@ -1849,8 +1849,13 @@ async function handleHsUp(
     // Cold-boot path. (The idempotency probe runs earlier — above the preflight —
     // so an already-live apex re-attaches instead of failing the port check.)
 
-    // Step 1: write connector.yaml with anon.enabled: true (AC #3).
-    writeHsConnectorConfig(configDir, config, { force });
+    // Step 1: write connector.yaml with anon.enabled: true (AC #3). Derive the
+    // apex settlement key from the (already-unlocked) operator mnemonic so any
+    // configured chainProvider lacking an explicit keyId is signed by the
+    // operator's own key — no manual `--key-id` needed. The raw key lands only
+    // in connector.yaml (0600), never in config.yaml.
+    const apexSettlementKeys = walletManager.getApexSettlementKeys();
+    writeHsConnectorConfig(configDir, config, { force, apexSettlementKeys });
 
     // Step 2: materialize compose template.
     const materialize =
@@ -2368,9 +2373,10 @@ Usage:
   townhouse chains add  --chain-type <evm|solana|mina> --chain-id <id> [fields] [-c <path>]
   townhouse chains remove <chainId> [-c <path>]
 
-Fields by chain type:
-  evm:    --rpc-url <url> --registry <0x..> --token-address <0x..> --key-id <0x..>
-  solana: --rpc-url <url> --program-id <addr> --key-id <id> [--ws-url <url>] [--token-mint <addr>]
+Fields by chain type ([--key-id] is OPTIONAL — defaults to the operator's
+mnemonic-derived apex settlement key; pass it only for an external/hardware key):
+  evm:    --rpc-url <url> --registry <0x..> --token-address <0x..> [--key-id <0x..>]
+  solana: --rpc-url <url> --program-id <addr> [--key-id <id>] [--ws-url <url>] [--token-mint <addr>]
   mina:   --graphql-url <url> --zkapp <addr> [--key-id <id>]`;
 
 interface ChainsFlags {
@@ -2400,6 +2406,9 @@ function buildChainProviderFromFlags(f: ChainsFlags): ChainProviderEntry {
     return val;
   };
 
+  // `--key-id` is OPTIONAL: when omitted, `townhouse hs up` fills it with the
+  // operator's mnemonic-derived apex settlement key. Pass it only for an
+  // external/hardware key.
   if (chainType === 'evm') {
     return {
       chainType: 'evm',
@@ -2407,7 +2416,7 @@ function buildChainProviderFromFlags(f: ChainsFlags): ChainProviderEntry {
       rpcUrl: require('--rpc-url', f.rpcUrl),
       registryAddress: require('--registry', f.registry),
       tokenAddress: require('--token-address', f.tokenAddress),
-      keyId: require('--key-id', f.keyId),
+      ...(f.keyId ? { keyId: f.keyId } : {}),
     };
   }
   if (chainType === 'solana') {
@@ -2418,7 +2427,7 @@ function buildChainProviderFromFlags(f: ChainsFlags): ChainProviderEntry {
       ...(f.wsUrl ? { wsUrl: f.wsUrl } : {}),
       programId: require('--program-id', f.programId),
       ...(f.tokenMint ? { tokenMint: f.tokenMint } : {}),
-      keyId: require('--key-id', f.keyId),
+      ...(f.keyId ? { keyId: f.keyId } : {}),
     };
   }
   // mina

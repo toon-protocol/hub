@@ -291,11 +291,15 @@ export function validateConfig(raw: unknown): TownhouseConfig {
             `${path}.tokenAddress must match /^0x[a-fA-F0-9]+$/`
           );
         }
-        assertString(entry['keyId'], `${path}.keyId`);
-        if (!HEX_ADDRESS.test(entry['keyId'] as string)) {
-          throw new ConfigValidationError(
-            `${path}.keyId must match /^0x[a-fA-F0-9]+$/`
-          );
+        // keyId is OPTIONAL — `hs up` fills it from the operator's
+        // mnemonic-derived apex key when absent. Validate only when present.
+        if (entry['keyId'] !== undefined) {
+          assertString(entry['keyId'], `${path}.keyId`);
+          if (!HEX_ADDRESS.test(entry['keyId'] as string)) {
+            throw new ConfigValidationError(
+              `${path}.keyId must match /^0x[a-fA-F0-9]+$/`
+            );
+          }
         }
         return {
           chainType: 'evm' as const,
@@ -303,14 +307,19 @@ export function validateConfig(raw: unknown): TownhouseConfig {
           rpcUrl: entry['rpcUrl'] as string,
           registryAddress: entry['registryAddress'] as string,
           tokenAddress: entry['tokenAddress'] as string,
-          keyId: entry['keyId'] as string,
+          ...(entry['keyId'] !== undefined
+            ? { keyId: entry['keyId'] as string }
+            : {}),
         };
       }
 
       if (chainType === 'solana') {
         assertString(entry['rpcUrl'], `${path}.rpcUrl`);
         assertString(entry['programId'], `${path}.programId`);
-        assertString(entry['keyId'], `${path}.keyId`);
+        // keyId is OPTIONAL (see EVM note above).
+        if (entry['keyId'] !== undefined) {
+          assertString(entry['keyId'], `${path}.keyId`);
+        }
         if (entry['wsUrl'] !== undefined) {
           assertString(entry['wsUrl'], `${path}.wsUrl`);
         }
@@ -328,7 +337,9 @@ export function validateConfig(raw: unknown): TownhouseConfig {
           ...(entry['tokenMint'] !== undefined
             ? { tokenMint: entry['tokenMint'] as string }
             : {}),
-          keyId: entry['keyId'] as string,
+          ...(entry['keyId'] !== undefined
+            ? { keyId: entry['keyId'] as string }
+            : {}),
         };
       }
 

@@ -611,4 +611,29 @@ describe('WalletManager', () => {
       expect(jwk.qi).toBe('');
     }, 120_000);
   });
+
+  describe('getApexSettlementKeys()', () => {
+    it('throws when the wallet is locked / not initialized', () => {
+      expect(() => manager.getApexSettlementKeys()).toThrow(
+        /Wallet not initialized/
+      );
+    });
+
+    it('returns a 0x-prefixed 32-byte EVM key, deterministic per mnemonic', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
+      const a = manager.getApexSettlementKeys();
+      expect(a.evmPrivateKeyHex).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(manager.getApexSettlementKeys().evmPrivateKeyHex).toBe(
+        a.evmPrivateKeyHex
+      );
+    });
+
+    it('derives a key distinct from the town/mill/dvm node keys (apex acct index 3)', async () => {
+      await manager.fromMnemonic(TEST_MNEMONIC_12);
+      const apex = manager.getApexSettlementKeys().evmPrivateKeyHex.slice(2);
+      for (const node of ['town', 'mill', 'dvm'] as const) {
+        expect(apex).not.toBe(manager.getEvmPrivateKeyHex(node));
+      }
+    });
+  });
 });

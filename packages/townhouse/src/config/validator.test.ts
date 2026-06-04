@@ -462,7 +462,7 @@ describe('validateConfig', () => {
     );
   });
 
-  it('rejects chainProvider with missing keyId', () => {
+  it('accepts a chainProvider with missing keyId (filled from the apex key at hs up)', () => {
     const raw = validRaw();
     raw['chainProviders'] = [
       {
@@ -471,11 +471,28 @@ describe('validateConfig', () => {
         rpcUrl: 'http://127.0.0.1:8545',
         registryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
         tokenAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
-        // keyId omitted
+        // keyId omitted — now optional; the operator's mnemonic-derived apex
+        // key is injected at `townhouse hs up`.
+      },
+    ];
+    const cfg = validateConfig(raw);
+    expect(cfg.chainProviders?.[0]).not.toHaveProperty('keyId');
+  });
+
+  it('still rejects a chainProvider with a non-hex keyId', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = [
+      {
+        chainType: 'evm',
+        chainId: 'evm:base:31337',
+        rpcUrl: 'http://127.0.0.1:8545',
+        registryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+        tokenAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+        keyId: 'not-hex',
       },
     ];
     expect(() => validateConfig(raw)).toThrow(
-      'config.chainProviders[0].keyId must be a string'
+      'config.chainProviders[0].keyId must match'
     );
   });
 });

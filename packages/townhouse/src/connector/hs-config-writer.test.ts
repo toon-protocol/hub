@@ -217,4 +217,73 @@ describe('writeHsConnectorConfig', () => {
     expect(chainProviders[0]?.['chainId']).toBe('evm:base:8453');
     expect(chainProviders[0]?.['rpcUrl']).toBe('https://mainnet.base.org');
   });
+
+  // ── apex settlement keyId injection (mnemonic-derived; drops manual --key-id)
+  const APEX_EVM_KEY = `0x${'ab'.repeat(32)}`;
+
+  it('fills a missing EVM keyId with the apex settlement key', () => {
+    const config = getDefaultConfig();
+    config.chainProviders = [
+      {
+        chainType: 'evm',
+        chainId: 'evm:base:8453',
+        rpcUrl: 'https://mainnet.base.org',
+        registryAddress: '0xaaaa1725E7734CE288F8367e1Bb143E90bb3F0512',
+        tokenAddress: '0xbbbbb2315678afecb367f032d93F642f64180aa3',
+        // keyId omitted — operator did not pass --key-id
+      },
+    ];
+
+    const { yamlPath } = writeHsConnectorConfig(tmpDir, config, {
+      force: true,
+      apexSettlementKeys: { evmPrivateKeyHex: APEX_EVM_KEY },
+    });
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const cps = parsed['chainProviders'] as Record<string, unknown>[];
+    expect(cps[0]?.['keyId']).toBe(APEX_EVM_KEY);
+  });
+
+  it('does NOT override an explicit operator keyId with the apex key', () => {
+    const explicit = `0x${'cc'.repeat(32)}`;
+    const config = getDefaultConfig();
+    config.chainProviders = [
+      {
+        chainType: 'evm',
+        chainId: 'evm:base:8453',
+        rpcUrl: 'https://mainnet.base.org',
+        registryAddress: '0xaaaa1725E7734CE288F8367e1Bb143E90bb3F0512',
+        tokenAddress: '0xbbbbb2315678afecb367f032d93F642f64180aa3',
+        keyId: explicit,
+      },
+    ];
+
+    const { yamlPath } = writeHsConnectorConfig(tmpDir, config, {
+      force: true,
+      apexSettlementKeys: { evmPrivateKeyHex: APEX_EVM_KEY },
+    });
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const cps = parsed['chainProviders'] as Record<string, unknown>[];
+    expect(cps[0]?.['keyId']).toBe(explicit);
+  });
+
+  it('keeps the funded dev placeholder key for the no-chains default fallback', () => {
+    const config = getDefaultConfig(); // no chainProviders
+    const { yamlPath } = writeHsConnectorConfig(tmpDir, config, {
+      force: true,
+      apexSettlementKeys: { evmPrivateKeyHex: APEX_EVM_KEY },
+    });
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const cps = parsed['chainProviders'] as Record<string, unknown>[];
+    // Bare dev boot keeps the funded Anvil placeholder, NOT the apex key.
+    expect(cps[0]?.['keyId']).not.toBe(APEX_EVM_KEY);
+  });
 });

@@ -52,7 +52,17 @@ export interface WriteHsConnectorConfigResult {
 export function writeHsConnectorConfig(
   configDir: string,
   config: TownhouseConfig,
-  options: { force?: boolean } = {}
+  options: {
+    force?: boolean;
+    /**
+     * Apex settlement key(s) derived from the operator mnemonic
+     * (`WalletManager.getApexSettlementKeys()`). When present, a chainProvider
+     * that has NO explicit `keyId` is filled with the matching derived key, so
+     * operators never paste a settlement key into `chains add`. The raw key
+     * lands ONLY in the generated `connector.yaml` (0600), never in config.yaml.
+     */
+    apexSettlementKeys?: { evmPrivateKeyHex: string };
+  } = {}
 ): WriteHsConnectorConfigResult {
   const yamlPath = join(configDir, 'connector.yaml');
 
@@ -88,13 +98,32 @@ export function writeHsConnectorConfig(
   // practice the apex still uses (3) for now while the child nodes already get the
   // real public RPCs from the same network profile. The dev key from (3) is reused
   // so derived providers are complete the moment the preset addresses are filled in.
+  // Apex settlement key derived from the operator mnemonic (when supplied by
+  // `hs up`). Used both as the fallback key for network-profile-derived
+  // providers and to fill any configured provider that lacks an explicit keyId.
+  const apexEvmKey = options.apexSettlementKeys?.evmPrivateKeyHex;
+
   const derived = resolveConfigNetworkProfile(
     config,
-    DEFAULT_HS_CHAIN_PROVIDERS[0]?.keyId
+    apexEvmKey ?? DEFAULT_HS_CHAIN_PROVIDERS[0]?.keyId
   ).chainProviders as ChainProviderEntry[];
+
+  // Fill a missing EVM keyId with the mnemonic-derived apex key. Precedence:
+  //   1. explicit keyId on the provider (operator `--key-id`, or the dev e2e's
+  //      funded Anvil key) — left untouched,
+  //   2. mnemonic-derived apex key (here).
+  // (Solana/Mina apex keys are a later phase.) The bare DEFAULT fallback below
+  // keeps its funded Anvil placeholder key so a no-chains dev boot is unchanged.
+  const fillApexKey = (providers: ChainProviderEntry[]): ChainProviderEntry[] =>
+    providers.map((p) =>
+      !p.keyId && p.chainType === 'evm' && apexEvmKey
+        ? { ...p, keyId: apexEvmKey }
+        : p
+    );
+
   const hsConfig: TownhouseConfig =
     derived.length > 0
-      ? { ...config, chainProviders: derived }
+      ? { ...config, chainProviders: fillApexKey(derived) }
       : { ...config, chainProviders: [...DEFAULT_HS_CHAIN_PROVIDERS] };
 
   // Build the HS runtime config by extending the base generated config.

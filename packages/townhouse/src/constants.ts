@@ -50,6 +50,14 @@ export const DEFAULT_CONNECTOR_IMAGE =
 export const ACCOUNT_INDEX_TOWN = 0;
 export const ACCOUNT_INDEX_MILL = 1;
 export const ACCOUNT_INDEX_DVM = 2;
+/**
+ * Apex (connector) settlement account. The apex is the parent connector
+ * (`g.townhouse`) that signs settlement claims; its key is derived from the
+ * operator mnemonic at this index so the operator never has to supply a raw
+ * settlement key. Index 3 continues the town/mill/dvm sequence (and matches the
+ * dev convention where the apex is Anvil account[3], 0x90F79bf6…).
+ */
+export const ACCOUNT_INDEX_APEX = 3;
 
 /** BLS health port exposed by each node container type (internal Docker port). */
 export const TOWN_HEALTH_PORT = 3100;

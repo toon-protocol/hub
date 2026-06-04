@@ -41,6 +41,7 @@ import {
   ACCOUNT_INDEX_TOWN,
   ACCOUNT_INDEX_MILL,
   ACCOUNT_INDEX_DVM,
+  ACCOUNT_INDEX_APEX,
 } from '../constants.js';
 import type {
   WalletManagerConfig,
@@ -289,6 +290,39 @@ export class WalletManager {
   getEvmPrivateKeyHex(nodeType: NodeType): string {
     const keys = this.getNodeKeys(nodeType);
     return bytesToHex(keys.evmPrivateKey);
+  }
+
+  /**
+   * Derive the APEX (connector) settlement key from the operator mnemonic at
+   * ACCOUNT_INDEX_APEX. The apex signs settlement claims with this key, so the
+   * operator never has to supply a raw `keyId` to `townhouse chains add`.
+   *
+   * Returns the EVM private key as a `0x`-prefixed 64-char hex string — the
+   * form the connector config's `keyId` expects (matches the dev placeholder
+   * `0x7c85…`). Throws when the wallet is locked. Structured as an object so
+   * Solana/Mina apex keys can be added in a later phase.
+   */
+  getApexSettlementKeys(): { evmPrivateKeyHex: string } {
+    if (!this.state) {
+      throw new Error(
+        'Wallet not initialized. Call generate() or fromMnemonic() first.'
+      );
+    }
+    let seed: Uint8Array | undefined;
+    try {
+      seed = mnemonicToSeedSync(this.state.mnemonic);
+      // Same path the per-node EVM derivation uses (m/44'/60'/{idx}'/0/0).
+      const path = `m/44'/60'/${ACCOUNT_INDEX_APEX}'/0/0`;
+      const hd = HDKey.fromMasterSeed(seed).derive(path);
+      if (!hd.privateKey) {
+        throw new Error(`Apex EVM private key missing at ${path}`);
+      }
+      return {
+        evmPrivateKeyHex: `0x${bytesToHex(new Uint8Array(hd.privateKey))}`,
+      };
+    } finally {
+      if (seed) seed.fill(0);
+    }
   }
 
   /**
