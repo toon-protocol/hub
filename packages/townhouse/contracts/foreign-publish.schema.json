@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://toon-protocol.org/schemas/foreign-publish.schema.json",
-  "title": "TOON Foreign-TOON-Client Pod Publish Contract",
-  "description": "Wire-shape contract between the persistent Akash foreign-TOON-client pod (story 49.3) and its consumers (49.4 settlement smoke, 49.5 live e2e gate, third-party developers). Drift = build break. See _bmad-output/implementation-artifacts/49-3-persistent-akash-foreign-client-pod.md § 'Schema-Contract Discipline'.",
+  "title": "TOON toon-client pod Publish Contract",
+  "description": "Wire-shape contract between the persistent Akash toon-client pod (story 49.3) and its consumers (49.4 settlement smoke, 49.5 live e2e gate, third-party developers). Drift = build break. See _bmad-output/implementation-artifacts/49-3-persistent-akash-foreign-client-pod.md § 'Schema-Contract Discipline'.",
   "$comment": "Idempotency is handled at the Nostr layer (event.id = SHA-256 of canonical event). Pod is stateless w.r.t. replay — retries MUST reuse the same signed event object (re-stamping created_at produces a new event.id which bypasses relay dedup).",
   "definitions": {
     "Hex64": {

@@ -3,7 +3,7 @@
  *
  * Exercises the full EVM settlement loop end-to-end against real Akash
  * infrastructure:
- *   AC #1  Foreign pod with TOON_FEE_PER_EVENT=1000000 POSTs /publish to
+ *   AC #1  toon-client pod with TOON_FEE_PER_EVENT=1000000 POSTs /publish to
  *          local apex → connector processes non-zero ILP claim → credit
  *          appears in /api/earnings within 90 s (pod.evmAddr bucket or
  *          apex.routingFees).
@@ -11,7 +11,7 @@
  *          type:'mill' but the inbound EVM claim path does not flow through
  *          Mill's ILP address (g.townhouse.mill). The connector only routes
  *          packets TO Mill when a sender targets g.townhouse.mill explicitly;
- *          the foreign pod targets g.townhouse.town. Per story OQ-2 resolution:
+ *          the toon-client pod targets g.townhouse.town. Per story OQ-2 resolution:
  *          mill.config.json starts with swapPairs:[] (empty), and no routing
  *          logic redirects apex inbound claims to Mill. Test 5 degrades to
  *          "Mill registered + resolves to type:mill" fallback. Filed as Epic
@@ -28,18 +28,18 @@
  *          captured to ./e2e-49-4-logs/<timestamp>/ on failure.
  *   AC #8  No new persistent leases; deployment discipline documented.
  *
- * Gate: requires live Akash foreign-pod at AKASH_FOREIGN_POD_URL + live
+ * Gate: requires live Akash toon-client at AKASH_TOON_CLIENT_URL + live
  * Akash-Anvil + live Akash-Solana + local townhouse hs up. Run before marking
  * story done.
  *
  * Prerequisites:
  *   RUN_AKASH_SMOKE=1
- *   AKASH_FOREIGN_POD_URL=https://<pod-ingress>
+ *   AKASH_TOON_CLIENT_URL=https://<pod-ingress>
  *   SKIP_DOCKER unset or falsy
  *   pnpm --filter @toon-protocol/townhouse build
  *   Pod MUST be deployed with TOON_FEE_PER_EVENT=1000000:
- *     sed -i 's/TOON_FEE_PER_EVENT=0/TOON_FEE_PER_EVENT=1000000/' deploy/akash/foreign-toon-client.sdl.yaml
- *     bash scripts/akash-deploy.sh foreign-toon-client
+ *     sed -i 's/TOON_FEE_PER_EVENT=0/TOON_FEE_PER_EVENT=1000000/' deploy/akash/toon-client.sdl.yaml
+ *     bash scripts/akash-deploy.sh toon-client
  *   ports 9401 (connector admin) + 28090 (townhouse-api) free
  *
  * NOTE: NODE_TLS_REJECT_UNAUTHORIZED=0 is required when running against Akash
@@ -114,16 +114,16 @@ function expectMatchesSchema(body: unknown, label: string): void {
 
 const SKIP_DOCKER = isTruthyEnv(process.env['SKIP_DOCKER']);
 const RUN_SMOKE = process.env['RUN_AKASH_SMOKE'] === '1';
-const POD_URL_FROM_ENV = process.env['AKASH_FOREIGN_POD_URL'] ?? '';
+const POD_URL_FROM_ENV = process.env['AKASH_TOON_CLIENT_URL'] ?? '';
 const shouldRun = RUN_SMOKE && !SKIP_DOCKER && POD_URL_FROM_ENV.length > 0;
 
 if (!shouldRun) {
   console.warn(
     '\n⚠️  Skipping Akash paid-earnings smoke (Story 49.4).\n' +
-      '   Set RUN_AKASH_SMOKE=1 and AKASH_FOREIGN_POD_URL=https://<pod-ingress>.\n' +
+      '   Set RUN_AKASH_SMOKE=1 and AKASH_TOON_CLIENT_URL=https://<pod-ingress>.\n' +
       '   Ensure SKIP_DOCKER is unset and pnpm --filter @toon-protocol/townhouse build.\n' +
       '   Pod must be deployed with TOON_FEE_PER_EVENT=1000000\n' +
-      '   (sed + scripts/akash-deploy.sh foreign-toon-client — see story Task 4.1).\n'
+      '   (sed + scripts/akash-deploy.sh toon-client — see story Task 4.1).\n'
   );
 }
 
@@ -171,7 +171,7 @@ interface LeaseEntry {
 interface Leases {
   anvil: LeaseEntry;
   solana: LeaseEntry;
-  'foreign-toon-client': LeaseEntry;
+  'toon-client': LeaseEntry;
   [k: string]: LeaseEntry;
 }
 
@@ -525,20 +525,20 @@ describe('preflight unit — AC #6 fail-fast probes (Story 49.4)', () => {
     ).rejects.toThrow(/Akash solana RPC unreachable/);
   }, 15_000);
 
-  it('probe fails fast when foreign pod /healthz is unreachable', async () => {
+  it('probe fails fast when toon-client pod /healthz is unreachable', async () => {
     const badUrl = 'https://example.invalid/akash-pod-probe-49-4';
     await expect(
       probeAkashEndpoint(
         badUrl,
-        'foreign-toon-client pod',
-        'run scripts/akash-deploy.sh foreign-toon-client to redeploy',
+        'toon-client pod',
+        'run scripts/akash-deploy.sh toon-client to redeploy',
         '/healthz'
       )
-    ).rejects.toThrow(/Akash foreign-toon-client pod RPC unreachable/);
+    ).rejects.toThrow(/Akash toon-client pod RPC unreachable/);
   }, 15_000);
 });
 
-// ── Live smoke suite (gated by RUN_AKASH_SMOKE=1 + AKASH_FOREIGN_POD_URL) ───
+// ── Live smoke suite (gated by RUN_AKASH_SMOKE=1 + AKASH_TOON_CLIENT_URL) ───
 
 describe.skipIf(!shouldRun)(
   'akash paid earnings smoke — EVM leg (Story 49.4)',
@@ -575,19 +575,18 @@ describe.skipIf(!shouldRun)(
             `wait for scripts/akash-deploy.sh to complete, then retry`
         );
       }
-      podUrl = (
-        POD_URL_FROM_ENV ||
-        leases['foreign-toon-client']?.url ||
+      podUrl = (POD_URL_FROM_ENV || leases['toon-client']?.url || '').replace(
+        /\/+$/,
         ''
-      ).replace(/\/+$/, '');
+      );
       if (!podUrl) {
         throw new Error(
-          'No foreign-toon-client URL: set AKASH_FOREIGN_POD_URL or run scripts/akash-deploy.sh foreign-toon-client'
+          'No toon-client URL: set AKASH_TOON_CLIENT_URL or run scripts/akash-deploy.sh toon-client'
         );
       }
       if (!podUrl.startsWith('http://') && !podUrl.startsWith('https://')) {
         throw new Error(
-          `AKASH_FOREIGN_POD_URL must include scheme (http:// or https://), got: ${podUrl}`
+          `AKASH_TOON_CLIENT_URL must include scheme (http:// or https://), got: ${podUrl}`
         );
       }
 
@@ -623,8 +622,8 @@ describe.skipIf(!shouldRun)(
 
       const healthzBody = await probeAkashEndpoint(
         podUrl,
-        'foreign-toon-client pod',
-        'run scripts/akash-deploy.sh foreign-toon-client to redeploy',
+        'toon-client pod',
+        'run scripts/akash-deploy.sh toon-client to redeploy',
         '/healthz'
       );
       let healthz: {
@@ -638,7 +637,7 @@ describe.skipIf(!shouldRun)(
       } catch (e) {
         throw new Error(
           `Pod /healthz returned non-JSON body (first 200): ${healthzBody.slice(0, 200)} (${(e as Error).message}) — ` +
-            `run scripts/akash-deploy.sh foreign-toon-client to redeploy`
+            `run scripts/akash-deploy.sh toon-client to redeploy`
         );
       }
       if (!healthz.anyoneReady) {
@@ -1300,7 +1299,7 @@ describe.skipIf(!shouldRun)(
           publishRes.status,
           `Expected 202 from pod /publish — got ${publishRes.status}: ${publishBodyText.slice(0, 300)}\n` +
             `Hint: if TOON_FEE_PER_EVENT=0 on pod, connector skips claim; ` +
-            `redeploy with fee=1000000 (scripts/akash-deploy.sh foreign-toon-client)`
+            `redeploy with fee=1000000 (scripts/akash-deploy.sh toon-client)`
         ).toBe(202);
         // AC #1 response-shape assertions: eventId + claimHash + chainId.
         expect(publishBody['eventId']).toBe(event.id);
@@ -1390,7 +1389,7 @@ describe.skipIf(!shouldRun)(
               `  sinceMs: ${new Date(sinceMs).toISOString()}\n` +
               `  externalDelta: ${externalDelta}, apexDelta: ${apexDelta}, matchedClaim: null\n` +
               `  Hint: verify pod TOON_FEE_PER_EVENT=1000000 ` +
-              `(redeploy: scripts/akash-deploy.sh foreign-toon-client). ` +
+              `(redeploy: scripts/akash-deploy.sh toon-client). ` +
               `With fee=0 the connector skips claim generation.`
           );
         }
@@ -1513,7 +1512,7 @@ describe.skipIf(!shouldRun)(
       // OQ-2 resolution: AC #2 is BLOCKED-STRUCTURAL.
       //
       // Architecture analysis:
-      //   • The foreign pod sends ILP packets to g.townhouse.town (the relay).
+      //   • The toon-client pod sends ILP packets to g.townhouse.town (the relay).
       //   • Mill is registered at g.townhouse.mill. Packets to town NEVER flow
       //     to g.townhouse.mill — the connector routes by destination address.
       //   • `townhouse node add mill` creates mill.config.json with
@@ -1559,7 +1558,7 @@ describe.skipIf(!shouldRun)(
       console.warn(
         '⚠️  Test 5 BLOCKED-STRUCTURAL (AC #2 OQ-2 resolution):\n' +
           '   Mill is registered (peerId=mill, type=mill) but receives no SOL claims\n' +
-          '   from the foreign pod. The inbound EVM claim path (g.townhouse.town) does\n' +
+          '   from the toon-client pod. The inbound EVM claim path (g.townhouse.town) does\n' +
           '   not route through Mill (g.townhouse.mill). A new story is needed to design\n' +
           '   SOL settlement routing before AC #2 can be implemented.\n' +
           '   → Epic 49.5 close-out blocker filed.'
@@ -1627,7 +1626,7 @@ describe.skipIf(!shouldRun)(
       );
 
       // AC #8 discipline: leases.json entry-count is unchanged. Three pre-existing
-      // leases (anvil/faucet/foreign-toon-client) may have been REPLACED with
+      // leases (anvil/faucet/toon-client) may have been REPLACED with
       // fresh DSEQs mid-campaign (their original on-chain deployments auto-closed),
       // but the entry COUNT must match the beforeAll baseline. Mill is registered
       // SYNTHETICALLY (no container, no new lease).

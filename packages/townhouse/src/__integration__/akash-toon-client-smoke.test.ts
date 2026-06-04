@@ -1,7 +1,7 @@
 /**
- * Live smoke gate — Persistent Akash Foreign-TOON-Client Pod (Story 49.3)
+ * Live smoke gate — Persistent Akash TOON-Client Pod (Story 49.3)
  *
- * Drives a live Akash deployment of `docker/Dockerfile.foreign-toon-client`
+ * Drives a live Akash deployment of `docker/Dockerfile.toon-client`
  * against a local `townhouse hs up` apex. Proves that:
  *   AC #1   Pod is healthy + faucet auto-funded both chains on boot
  *   AC #2   POST /publish round-trips a kind:1 event in <120s
@@ -10,12 +10,12 @@
  *   AC #6   Real .anyone transport invariants (socks5h://, regex shape)
  *   AC #9   Rate-limit kicks in past the configured per-minute budget
  *
- * Gate: requires live Akash foreign-pod at AKASH_FOREIGN_POD_URL + local
+ * Gate: requires live Akash toon-client at AKASH_TOON_CLIENT_URL + local
  * townhouse hs up. Run before marking story done.
  *
  * Prerequisites:
  *   RUN_AKASH_SMOKE=1                       — opt-in to the live-Akash gate
- *   AKASH_FOREIGN_POD_URL=https://…         — pod ingress (e.g. https://*.ingress.boogle.cloud)
+ *   AKASH_TOON_CLIENT_URL=https://…         — pod ingress (e.g. https://*.ingress.boogle.cloud)
  *   SKIP_DOCKER unset or falsy              — local townhouse hs up needs Docker
  *   dist/image-manifest.json present        — for the local apex stack
  *   pnpm --filter @toon-protocol/townhouse build
@@ -36,7 +36,7 @@
  * already proved is mechanically possible but doubles the wall budget. The
  * single-host smoke is sufficient to gate this story; the multi-host
  * hot-swap is documented as a manual verification step in
- * _bmad-output/implementation-artifacts/49-3-persistent-akash-foreign-client-pod.md
+ * _bmad-output/implementation-artifacts/49-3-persistent-akash-toon-client-pod.md
  * § "Story Close-Out Checklist".
  */
 
@@ -75,13 +75,13 @@ import { PeerTypeResolver } from '../registry/peer-type-resolver.js';
 
 const SKIP_DOCKER = isTruthyEnv(process.env['SKIP_DOCKER']);
 const RUN_SMOKE = process.env['RUN_AKASH_SMOKE'] === '1';
-const POD_URL = process.env['AKASH_FOREIGN_POD_URL'] || '';
+const POD_URL = process.env['AKASH_TOON_CLIENT_URL'] || '';
 const shouldRun = RUN_SMOKE && !SKIP_DOCKER && POD_URL.length > 0;
 
 if (!shouldRun) {
   console.warn(
-    '\n⚠️  Skipping Akash foreign-pod smoke (Story 49.3).\n' +
-      '   Set RUN_AKASH_SMOKE=1 and AKASH_FOREIGN_POD_URL=https://<pod-ingress>.\n' +
+    '\n⚠️  Skipping Akash toon-client smoke (Story 49.3).\n' +
+      '   Set RUN_AKASH_SMOKE=1 and AKASH_TOON_CLIENT_URL=https://<pod-ingress>.\n' +
       '   Ensure SKIP_DOCKER is unset and packages/townhouse/dist/image-manifest.json exists.\n' +
       '   Run `bash scripts/townhouse-test-infra.sh up` to warm the image cache.\n'
   );
@@ -204,7 +204,7 @@ function buildSchemaValidators(): {
 // ── Suite ────────────────────────────────────────────────────────────────────
 
 describe.skipIf(!shouldRun)(
-  'akash foreign-pod smoke — POST /publish → local townhouse hs up (Story 49.3)',
+  'akash toon-client smoke — POST /publish → local townhouse hs up (Story 49.3)',
   () => {
     let tmpDirA: string;
     let hostnameA: string;
@@ -237,7 +237,7 @@ describe.skipIf(!shouldRun)(
       cleanupContainersAndVolumes();
 
       // Boot the local townhouse hs up apex (mirror 49.1's Sub-path A2 init).
-      tmpDirA = mkdtempSync(join(tmpdir(), 'akash-foreign-pod-A-'));
+      tmpDirA = mkdtempSync(join(tmpdir(), 'akash-toon-client-A-'));
 
       const init = runCli('init', {
         configDir: tmpDirA,
@@ -626,7 +626,7 @@ describe.skipIf(!shouldRun)(
       const event: NostrEvent = finalizeEvent(
         {
           kind: 1,
-          content: `49.3 akash foreign-pod smoke @ ${new Date().toISOString()}`,
+          content: `49.3 akash toon-client smoke @ ${new Date().toISOString()}`,
           tags: [['t', '49.3-smoke']],
           created_at: Math.floor(Date.now() / 1000),
         },

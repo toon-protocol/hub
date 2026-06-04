@@ -1,13 +1,13 @@
 /**
  * Story 49.3 schema-contract DoD — ajv-validates the request + response
- * shapes the persistent Akash foreign-TOON-client pod emits against the
+ * shapes the persistent Akash toon-client pod emits against the
  * canonical schema at packages/townhouse/contracts/foreign-publish.schema.json.
  *
  * Schema drift between the deployed pod's wire shape and the schema file =
  * build break (this test fails in the normal unit suite — runs without
  * Docker and without a live pod). Mirrors faucet-contract.test.ts.
  *
- * The pod entrypoint at docker/src/entrypoint-foreign-pod.ts imports the
+ * The pod entrypoint at docker/src/entrypoint-toon-client.ts imports the
  * SAME schema file via JSON import — producer and consumer both ajv-validate
  * against one source of truth.
  */
