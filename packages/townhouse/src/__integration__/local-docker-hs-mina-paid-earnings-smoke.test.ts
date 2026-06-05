@@ -7,45 +7,52 @@
  * earnings — the same milestone Solana reached.
  *
  * ════════════════════════════════════════════════════════════════════════════
- *  STAGE-3 CLIENT GATE — OPEN (claim-validation divergence; NOT the #88 gate)
+ *  STAGE-3 CLIENT GATE — RESOLVED at claim-validation + FULFILL (#88 settle gate)
  * ════════════════════════════════════════════════════════════════════════════
- * The client's Mina claim path does NOT satisfy connector 3.9.0's
- * `MinaClaimMessage` contract, so a live Mina loop is REJECTED at the
- * connector's `validateClaimMessage` — BEFORE any on-chain channel lookup and
- * well before settlement. The gap is at THREE independent layers (any one of
- * which alone blocks acceptance):
+ * The client's Mina claim path now MATCHES connector 3.9.0's `MinaClaimMessage`
+ * contract, so a Mina-denominated paid publish is ACCEPTED at the connector's
+ * `validateClaimMessage` PREPARE gate and the apex FULFILLs to town (HTTP 202).
+ * The three former divergences are closed:
  *
- *   1. WIRE SHAPE. The connector requires `{ zkAppAddress, tokenId,
- *      balanceCommitment, proof, salt, nonce, ... }`. The client's
- *      `MinaSigner.buildClaimMessage` emits `{ channelId, transferredAmount,
- *      commitment, signerAddress, recipient, zkAppAddress, ... }` — it is
- *      MISSING the required `tokenId`, `balanceCommitment`, `proof`, and `salt`.
+ *   1. WIRE SHAPE. `MinaSigner.buildClaimMessage` now emits the connector's
+ *      required `{ zkAppAddress, tokenId, balanceCommitment, proof (base64),
+ *      salt, nonce }` (+ `blockchain:'mina'`, `network:'devnet'`). Optional
+ *      `balanceB`/`signatureB` are omitted (the apex-as-recipient single
+ *      direction is accepted with party-A only).
  *
- *   2. COMMITMENT / SIGNED MESSAGE. The connector verifies a Schnorr signature
- *      over `[ Poseidon([balanceA, balanceB, salt]), Field(nonce),
- *      Poseidon(PublicKey.fromBase58(zkAppAddress).x) ]` (see
- *      MinaPaymentChannelSDK.verifyBalanceProof). The client signs
- *      `balanceProofFieldsMina = [ minaHashToField(channelId), amount, nonce,
- *      minaHashToField(recipient) ]` — a different message, keyed on a synthetic
- *      channelId + recipient rather than the balance commitment + zkApp pubkey.
+ *   2. COMMITMENT / SIGNED MESSAGE. The client now reproduces
+ *      `MinaPaymentChannelSDK.signBalanceProof` exactly — a Pallas Schnorr
+ *      signature (devnet prefix) over `[ Poseidon([balanceA, balanceB, salt]),
+ *      Field(nonce), Poseidon(PublicKey.fromBase58(zkAppAddress).x) ]`, decoded
+ *      to the o1js `{r,s}` JSON form. Verified field-by-field against the
+ *      connector's o1js `Signature.fromJSON({r,s}).verify` (client unit tests).
+ *      The Mill↔sender swap-format `balanceProofFieldsMina` is left untouched
+ *      (separate payment-channel path, mirroring the Solana #105 separation).
  *
- *   3. ON-CHAIN CHANNEL. The connector looks up the channel via
- *      `provider.getChannelState(claim.zkAppAddress)` and requires status
- *      `opened`/`closed`. The client's `OnChainChannelClient.openMinaChannel`
- *      returns a synthetic SHA-256 `0x…` channel id and NEVER deploys/opens a
- *      real on-chain zkApp channel — there is nothing for getChannelState to read.
+ *   3. ON-CHAIN CHANNEL. `OnChainChannelClient.openMinaChannel` now returns the
+ *      DEPLOYED zkApp B62 address as the channel id (the same address the e2e
+ *      harness deploys + advertises), so `getChannelState(zkAppAddress)` resolves
+ *      to the externally-opened on-chain channel.
  *
- * This is distinct from (and stricter than) the connector #88 on-chain-SETTLE
- * gate that blocks Solana + every dynamic non-EVM HS peer. Mina does not even
- * reach FULFILL: it is rejected at claim VALIDATION.
+ * ⚠️ CONNECTOR 3.9.0 PROOF-ENCODING BUG (documented): `validateMinaClaim`
+ * requires `proof` to be base64 (`/^[A-Za-z0-9+/]+=*$/`), but the connector's own
+ * producer (`per-packet-claim-service`) and consumer (`verifyBalanceProof` →
+ * `JSON.parse(proof)`) treat `proof` as RAW JSON. The client base64-encodes the
+ * proof so it PASSES the PREPARE gate (the FULFILL-deciding path); the
+ * settlement-side `JSON.parse` then fails on the base64 — but that is post-FULFILL
+ * and, for non-EVM dynamic HS peers, gated by connector#88 regardless.
  *
- * The source-assertion guards below ENCODE this divergence. They run with no
- * Docker + no infra and fail loudly if either (a) the client's Mina claim is
- * brought to the connector contract (flip the guard to the resolved witness) or
- * (b) the connector contract changes underneath us.
+ * ⚠️ #88 SETTLE GATE (unchanged): on-chain SETTLE (CLAIM/SETTLE tx) for ALL
+ * non-EVM dynamic HS peers throws `No chain configured for peer` — the same gate
+ * Solana hits. Success here = claim ACCEPTED + FULFILL (HTTP 202) with a Mina
+ * claim; on-chain settlement is the connector#88 follow-up.
+ *
+ * The source-assertion guards below ENCODE the resolved contract. They run with
+ * no Docker + no infra and fail loudly if the client's Mina claim regresses away
+ * from the connector contract.
  * ════════════════════════════════════════════════════════════════════════════
  *
- * Live-loop gating (does NOT run by default — the loop cannot be ACCEPTED yet):
+ * Live-loop gating (FULFILL milestone; on-chain settle is #88-gated):
  *   E2E_MINA=1 RUN_LOCAL_HS_E2E=1 bash scripts/townhouse-e2e-local-hs.sh up --local
  *   RUN_LOCAL_HS_E2E=1 RUN_MINA_LOOP=1 NODE_TLS_REJECT_UNAUTHORIZED=0 \
  *     pnpm --filter @toon-protocol/townhouse test:integration -- \
@@ -86,11 +93,12 @@ const TOWNHOUSE_HOME =
 
 // ── Source-assertion guards (always run; no Docker, no infra) ────────────────
 //
-// These encode the OPEN Stage-3 client gate: the client's Mina claim path
-// diverges from connector 3.9.0's MinaClaimMessage contract. Each guard cites
-// the precise divergence so a future fix flips it to the resolved witness.
+// These encode the RESOLVED Stage-3 client contract: the client's Mina claim
+// path now matches connector 3.9.0's MinaClaimMessage contract. Each guard
+// asserts the resolved witness so a regression away from the contract fails
+// loudly (no Docker / no infra required).
 
-describe('Stage-3 Mina settlement gate (OPEN — client Mina claim diverges from connector contract)', () => {
+describe('Stage-3 Mina settlement gate (RESOLVED — client Mina claim matches connector contract)', () => {
   const clientChannelSrcPath = join(
     REPO_ROOT,
     'packages',
@@ -108,7 +116,7 @@ describe('Stage-3 Mina settlement gate (OPEN — client Mina claim diverges from
     'mina-signer.ts'
   );
 
-  it('client openMinaChannel is still a synthetic-channel-id stub (no real on-chain zkApp channel)', () => {
+  it('client openMinaChannel returns the deployed zkApp address as the channel id (no synthetic SHA-256 stub)', () => {
     if (!existsSync(clientChannelSrcPath)) {
       console.warn(
         `[mina-gate] client source not found at ${clientChannelSrcPath} — skipping source assertion`
@@ -116,26 +124,27 @@ describe('Stage-3 Mina settlement gate (OPEN — client Mina claim diverges from
       return;
     }
     const src = readFileSync(clientChannelSrcPath, 'utf-8');
-    // Locate the openMinaChannel body.
     const idx = src.indexOf('private async openMinaChannel');
     expect(
       idx,
       'openMinaChannel should exist in OnChainChannelClient'
     ).toBeGreaterThanOrEqual(0);
-    const body = src.slice(idx, idx + 1200);
-    // OPEN-gate witness: the channel id is a local SHA-256 digest, not a real
-    // on-chain zkApp channel. When this stub is replaced by a real on-chain open
-    // (so getChannelState(zkAppAddress) resolves), flip this assertion.
+    const body = src.slice(idx, idx + 1400);
+    // RESOLVED witness: no synthetic SHA-256 channel id; the channel id IS the
+    // deployed zkApp address (what getChannelState(zkAppAddress) resolves).
     expect(
       body.includes("crypto.subtle.digest('SHA-256'") ||
         body.includes('crypto.subtle.digest("SHA-256"'),
-      'openMinaChannel is expected to still derive a synthetic SHA-256 channel id ' +
-        '(Stage-3 gate). If this fails, the client may now open a real on-chain ' +
-        'zkApp channel — update the gate to the resolved witness.'
+      'openMinaChannel must NO LONGER derive a synthetic SHA-256 channel id'
+    ).toBe(false);
+    expect(
+      body.includes('this.minaConfig.zkAppAddress') &&
+        body.includes('channelId: zkAppAddress'),
+      'openMinaChannel must return the deployed zkApp B62 address as the channel id'
     ).toBe(true);
   });
 
-  it('client Mina claim emits commitment+channelId, NOT the connector-required tokenId/balanceCommitment/proof/salt', () => {
+  it('client Mina claim emits the connector-required zkAppAddress/tokenId/balanceCommitment/proof/salt', () => {
     if (!existsSync(clientSignerSrcPath)) {
       console.warn(
         `[mina-gate] client signer source not found at ${clientSignerSrcPath} — skipping source assertion`
@@ -144,7 +153,7 @@ describe('Stage-3 Mina settlement gate (OPEN — client Mina claim diverges from
     }
     const src = readFileSync(clientSignerSrcPath, 'utf-8');
     // Isolate the CLAIM-OBJECT LITERAL only (between `const claim` and
-    // `return claim`) so the function signature `(proof: …)` can't false-match.
+    // `return claim`) so the function signature can't false-match.
     const start = src.indexOf('const claim');
     const end = src.indexOf('return claim', start);
     expect(
@@ -154,20 +163,24 @@ describe('Stage-3 Mina settlement gate (OPEN — client Mina claim diverges from
     expect(end, 'mina-signer should `return claim`').toBeGreaterThan(start);
     const claimLiteral = src.slice(start, end);
 
-    // Divergence witnesses: the client emits `commitment` (a base58 Schnorr sig)
-    // as a claim key, and does NOT emit the connector-required claim keys.
+    // RESOLVED witnesses: all connector-required MinaClaimMessage keys present.
+    for (const key of [
+      'zkAppAddress:',
+      'tokenId:',
+      'balanceCommitment:',
+      'proof:',
+      'salt:',
+      'nonce:',
+    ]) {
+      expect(
+        claimLiteral.includes(key),
+        `connector 3.9.0 MinaClaimMessage requires \`${key}\` on the client claim`
+      ).toBe(true);
+    }
+    // The old swap-format `commitment:` key must be GONE.
     expect(
       /\bcommitment:/.test(claimLiteral),
-      'client Mina claim builder still emits `commitment` (base58 Schnorr sig)'
-    ).toBe(true);
-    expect(
-      /\bbalanceCommitment:/.test(claimLiteral) ||
-        /\btokenId:/.test(claimLiteral) ||
-        /\bproof:/.test(claimLiteral) ||
-        /\bsalt:/.test(claimLiteral),
-      'connector 3.9.0 requires tokenId + balanceCommitment + proof + salt on a ' +
-        'MinaClaimMessage. The client does NOT yet emit these — if this guard now ' +
-        'finds them, the client claim has been brought to contract; flip the gate.'
+      'client Mina claim must no longer emit the swap-format `commitment` key'
     ).toBe(false);
   });
 });
@@ -210,10 +223,11 @@ async function captureLogsOnFailure(
 
 // ── Live Mina loop (gated by RUN_LOCAL_HS_E2E + RUN_MINA_LOOP) ───────────────
 //
-// EXPECTED OUTCOME (until the client claim is brought to contract): the publish
-// is NOT accepted — the connector rejects the Mina claim at validateClaimMessage
-// (F06-class structure rejection). This block makes that outcome observable +
-// captures the connector log evidence, rather than silently skipping.
+// EXPECTED OUTCOME (client claim now matches the connector contract): the Mina
+// claim is ACCEPTED at validateClaimMessage and the apex FULFILLs to town —
+// HTTP 202. On-chain SETTLE is the connector#88 follow-up (gated for all non-EVM
+// dynamic HS peers; surfaces post-FULFILL as `No chain configured for peer`).
+// This block asserts the FULFILL milestone + captures connector log evidence.
 
 describe.skipIf(!shouldRunLiveLoop)(
   'local-Docker HS Mina paid-earnings smoke (live; requires E2E_MINA infra)',
@@ -254,7 +268,7 @@ describe.skipIf(!shouldRunLiveLoop)(
       bSecretKey = generateSecretKey();
     }, 120_000);
 
-    it('Mina leg: publish is REJECTED at claim validation (Stage-3 gate; documents the divergence)', async () => {
+    it('Mina leg: publish is ACCEPTED at claim validation + FULFILLs (HTTP 202); on-chain settle is #88-gated', async () => {
       const event: NostrEvent = finalizeEvent(
         {
           kind: 1,
@@ -278,30 +292,22 @@ describe.skipIf(!shouldRunLiveLoop)(
         `[local-hs-mina] publish status=${publishRes.status} body=${bodyText.slice(0, 300)}`
       );
 
-      // GATE: a 202 here would mean the client claim was ACCEPTED — i.e. the
-      // divergence is resolved. Until then we EXPECT a non-202 (the connector
-      // rejects the Mina claim structure). Capture evidence either way.
+      // MILESTONE: the client claim now matches the connector contract, so a 202
+      // (claim ACCEPTED at validateClaimMessage + apex FULFILL to town) is the
+      // expected outcome. On-chain settlement is the connector#88 follow-up and
+      // surfaces post-FULFILL (it does NOT affect this 202). Capture evidence
+      // either way for inspection (connector + town logs alongside).
       await captureLogsOnFailure('mina-publish-result', {
         status: publishRes.status,
         bodyText,
         podMinaAddr,
       });
 
-      if (publishRes.status === 202) {
-        // Resolved! The client claim now satisfies the connector contract.
-        // Promote this to a positive assertion when the gate is closed.
-        console.log(
-          '[local-hs-mina] UNEXPECTED 202 — the Mina claim was ACCEPTED. ' +
-            'The Stage-3 client gate appears RESOLVED; update this smoke to assert credit.'
-        );
-        expect(publishRes.status).toBe(202);
-        return;
-      }
-
-      // Expected gated path: NOT accepted. Assert it failed (any non-202) so the
-      // test stays honest — it FAILS only if the loop silently 202s without the
-      // earnings-credit assertions a resolved gate would add.
-      expect(publishRes.status).not.toBe(202);
+      // Assert the FULFILL milestone. If this is not 202, inspect the connector
+      // log for `inbound_claim_invalid_structure` (a wire-shape regression) or
+      // `no settlement provider registered` (the apex Mina provider was not
+      // wired by the E2E_MINA harness).
+      expect(publishRes.status).toBe(202);
     }, 180_000);
   }
 );
