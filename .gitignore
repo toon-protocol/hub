@@ -53,6 +53,8 @@ coverage/
 # Live-smoke failure-capture log dirs (Epic 49 stories)
 packages/townhouse/e2e-real-hs-logs/
 packages/townhouse/e2e-49-4-logs/
+# Local-HS smoke failure-capture log dir (local-docker-hs-*-paid-earnings-smoke)
+packages/townhouse/e2e-local-hs-logs/
 # Root-level log dir for scripts/townhouse-e2e-real-hs.sh (NFR18)
 e2e-real-hs-logs/
 
