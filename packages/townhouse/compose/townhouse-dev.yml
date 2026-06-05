@@ -48,7 +48,7 @@ services:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   townhouse-dev-connector:
     # Image tag must match DEFAULT_CONNECTOR_IMAGE in packages/townhouse/src/constants.ts
-    image: ghcr.io/toon-protocol/connector:3.9.0
+    image: ghcr.io/toon-protocol/connector:3.9.1
     container_name: townhouse-dev-connector
     networks:
       - townhouse-dev-net
