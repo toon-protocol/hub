@@ -107,6 +107,34 @@ export interface EvmChainProvider {
    * external/hardware key.
    */
   keyId?: string;
+  /**
+   * Settlement tuning knobs. The connector reads its GLOBAL settlement
+   * threshold from the FIRST EVM chainProvider that carries `settlementOptions`
+   * (connector `connector-node.ts`: `chainProviders.find(evm && settlementOptions)`)
+   * and applies that single `threshold` as the `defaultThreshold` for the
+   * event-driven settlement monitor across ALL chains (EVM, Solana, Mina).
+   *
+   * When omitted the connector falls back to a default threshold of `1000000`,
+   * which exactly equals the per-publish fee (1 USDC at scale 6). Because the
+   * monitor triggers on `cumulativeAmount > threshold` (STRICTLY greater), a
+   * single paid publish at the default never crosses it and on-chain
+   * settlement (`claimFromChannel`/`SETTLE_CHANNEL`) is never triggered for a
+   * dynamically-registered (anonymous HS) peer. Set `threshold` BELOW the
+   * per-publish fee to make a single paid publish settle on-chain.
+   *
+   * Mirrors the connector's `EVMProviderConfig.settlementOptions` contract.
+   */
+  settlementOptions?: {
+    /** Cumulative balance (in token base units, as a decimal string) that
+     * must be exceeded before the connector settles a peer on-chain. */
+    threshold?: string;
+    /** Channel settlement timeout in seconds (connector default 86400). */
+    settlementTimeoutSecs?: number;
+    /** Initial channel deposit multiplier (connector default 1). */
+    initialDepositMultiplier?: number;
+    /** Settlement polling interval in ms (legacy poll-based monitor). */
+    pollingIntervalMs?: number;
+  };
 }
 
 /** Solana settlement chain. */

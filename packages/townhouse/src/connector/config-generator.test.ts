@@ -549,5 +549,74 @@ describe('ConnectorConfigGenerator', () => {
       expect(yaml).toMatch(/chainId:\s*evm:base:31337/);
       expect(yaml).toMatch(/chainId:\s*evm:base:8453/);
     });
+
+    it('omits settlementOptions when not configured on an EVM provider', () => {
+      const config = configWithNodes(['town'], {
+        chainProviders: [
+          {
+            chainType: 'evm',
+            chainId: 'evm:base:31337',
+            rpcUrl: 'http://127.0.0.1:8545',
+            registryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+            tokenAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+            keyId:
+              '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+          },
+        ],
+      });
+      const generator = new ConnectorConfigGenerator(config);
+      const yaml = generator.toYaml(generator.generate(['town']));
+
+      expect(yaml).not.toMatch(/settlementOptions:/);
+    });
+
+    it('passes through settlementOptions.threshold on an EVM provider so the connector lowers its global settlement threshold (non-EVM SETTLE fix)', () => {
+      const config = configWithNodes(['town'], {
+        chainProviders: [
+          {
+            chainType: 'evm',
+            chainId: 'evm:base:31337',
+            rpcUrl: 'http://127.0.0.1:8545',
+            registryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+            tokenAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+            keyId:
+              '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+            settlementOptions: {
+              threshold: '1',
+              settlementTimeoutSecs: 86400,
+              initialDepositMultiplier: 2,
+            },
+          },
+        ],
+      });
+      const generator = new ConnectorConfigGenerator(config);
+      const yaml = generator.toYaml(generator.generate(['town']));
+
+      expect(yaml).toMatch(/settlementOptions:/);
+      // threshold below the 1_000_000 per-publish fee → a single paid publish
+      // crosses the connector's `cumulativeAmount > threshold` trigger.
+      expect(yaml).toMatch(/threshold:\s*['"]?1['"]?/);
+      expect(yaml).toMatch(/settlementTimeoutSecs:\s*86400/);
+      expect(yaml).toMatch(/initialDepositMultiplier:\s*2/);
+    });
+
+    it('does not emit settlementOptions for Solana/Mina providers (connector reads threshold only from EVM)', () => {
+      const config = configWithNodes(['town'], {
+        chainProviders: [
+          {
+            chainType: 'solana',
+            chainId: 'solana:devnet',
+            rpcUrl: 'https://api.devnet.solana.com',
+            programId: 'PpayMENtCha1Ne1Program111111111111111111111',
+            tokenMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+          },
+        ],
+      });
+      const generator = new ConnectorConfigGenerator(config);
+      const yaml = generator.toYaml(generator.generate(['town']));
+
+      expect(yaml).toMatch(/chainType:\s*solana/);
+      expect(yaml).not.toMatch(/settlementOptions:/);
+    });
   });
 });

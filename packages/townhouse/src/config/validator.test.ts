@@ -341,6 +341,51 @@ describe('validateConfig', () => {
     expect(config.chainProviders?.[0]?.chainId).toBe('evm:base:31337');
   });
 
+  it('preserves settlementOptions on an EVM chainProvider (non-EVM SETTLE threshold fix)', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = [
+      {
+        chainType: 'evm',
+        chainId: 'evm:base:31337',
+        rpcUrl: 'http://127.0.0.1:8545',
+        registryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+        tokenAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+        keyId:
+          '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+        settlementOptions: {
+          threshold: '1',
+          settlementTimeoutSecs: 86400,
+          initialDepositMultiplier: 2,
+        },
+      },
+    ];
+    const config = validateConfig(raw);
+    const entry = config.chainProviders?.[0];
+    expect(entry?.chainType).toBe('evm');
+    if (entry?.chainType === 'evm') {
+      expect(entry.settlementOptions?.threshold).toBe('1');
+      expect(entry.settlementOptions?.settlementTimeoutSecs).toBe(86400);
+      expect(entry.settlementOptions?.initialDepositMultiplier).toBe(2);
+    }
+  });
+
+  it('rejects a non-integer settlementOptions.threshold', () => {
+    const raw = validRaw();
+    raw['chainProviders'] = [
+      {
+        chainType: 'evm',
+        chainId: 'evm:base:31337',
+        rpcUrl: 'http://127.0.0.1:8545',
+        registryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+        tokenAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+        settlementOptions: { threshold: '1.5' },
+      },
+    ];
+    expect(() => validateConfig(raw)).toThrow(
+      'config.chainProviders[0].settlementOptions.threshold must be a non-negative integer string'
+    );
+  });
+
   it('rejects chainProviders when not an array', () => {
     const raw = validRaw();
     raw['chainProviders'] = { chainType: 'evm' };

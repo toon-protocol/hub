@@ -301,6 +301,61 @@ export function validateConfig(raw: unknown): TownhouseConfig {
             );
           }
         }
+        // settlementOptions is OPTIONAL. The connector reads its GLOBAL
+        // settlement threshold from the first EVM provider that carries this,
+        // applying the single `threshold` across all chains. Validate the
+        // fields we support and pass them through (the validator otherwise
+        // rebuilds entries, which would silently drop unknown keys).
+        let settlementOptions:
+          | {
+              threshold?: string;
+              settlementTimeoutSecs?: number;
+              initialDepositMultiplier?: number;
+              pollingIntervalMs?: number;
+            }
+          | undefined;
+        if (entry['settlementOptions'] !== undefined) {
+          const soPath = `${path}.settlementOptions`;
+          assertObject(entry['settlementOptions'], soPath);
+          const so = entry['settlementOptions'] as Record<string, unknown>;
+          settlementOptions = {};
+          if (so['threshold'] !== undefined) {
+            assertString(so['threshold'], `${soPath}.threshold`);
+            if (!/^\d+$/.test(so['threshold'] as string)) {
+              throw new ConfigValidationError(
+                `${soPath}.threshold must be a non-negative integer string (token base units)`
+              );
+            }
+            settlementOptions.threshold = so['threshold'] as string;
+          }
+          if (so['settlementTimeoutSecs'] !== undefined) {
+            assertNumber(
+              so['settlementTimeoutSecs'],
+              `${soPath}.settlementTimeoutSecs`
+            );
+            settlementOptions.settlementTimeoutSecs = so[
+              'settlementTimeoutSecs'
+            ] as number;
+          }
+          if (so['initialDepositMultiplier'] !== undefined) {
+            assertNumber(
+              so['initialDepositMultiplier'],
+              `${soPath}.initialDepositMultiplier`
+            );
+            settlementOptions.initialDepositMultiplier = so[
+              'initialDepositMultiplier'
+            ] as number;
+          }
+          if (so['pollingIntervalMs'] !== undefined) {
+            assertNumber(
+              so['pollingIntervalMs'],
+              `${soPath}.pollingIntervalMs`
+            );
+            settlementOptions.pollingIntervalMs = so[
+              'pollingIntervalMs'
+            ] as number;
+          }
+        }
         return {
           chainType: 'evm' as const,
           chainId: entry['chainId'] as string,
@@ -310,6 +365,7 @@ export function validateConfig(raw: unknown): TownhouseConfig {
           ...(entry['keyId'] !== undefined
             ? { keyId: entry['keyId'] as string }
             : {}),
+          ...(settlementOptions !== undefined ? { settlementOptions } : {}),
         };
       }
 

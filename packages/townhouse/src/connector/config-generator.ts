@@ -169,6 +169,15 @@ export class ConnectorConfigGenerator {
             registryAddress: p.registryAddress,
             tokenAddress: p.tokenAddress,
             ...(p.keyId !== undefined ? { keyId: p.keyId } : {}),
+            // The connector reads its GLOBAL settlement threshold from the
+            // first EVM chainProvider carrying `settlementOptions`. Pass it
+            // through so operators can lower the threshold below the
+            // per-publish fee and have single paid publishes settle on-chain
+            // (including for Solana/Mina dynamic peers — one defaultThreshold
+            // governs all chains). See EvmChainProvider.settlementOptions.
+            ...(p.settlementOptions !== undefined
+              ? { settlementOptions: p.settlementOptions }
+              : {}),
           };
         }
         if (p.chainType === 'solana') {
