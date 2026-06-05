@@ -183,6 +183,68 @@ describe('Stage-3 Mina settlement gate (RESOLVED — client Mina claim matches c
       'client Mina claim must no longer emit the swap-format `commitment` key'
     ).toBe(false);
   });
+
+  // ── Harness guard: deterministic zkApp deploy under o1js 2.14 ───────────────
+  // The deploy script (scripts/deploy-mina-zkapp.ts) must keep three fixes that
+  // were required to deploy the payment-channel zkApp on the lightnet under o1js
+  // 2.14 (proven live: tx included in block, account on-chain, idempotent):
+  //
+  //   1. o1js + the CJS-compiled `@toon-protocol/mina-zkapp` must load through
+  //      ONE shared o1js module instance — resolved via `createRequire` (CJS),
+  //      NOT a bare ESM `import('o1js')`. The ESM/CJS split gives each build its
+  //      own `activeInstance`, so `setActiveInstance` on the ESM instance leaves
+  //      the zkApp's CJS instance unset → `Must call Mina.setActiveInstance
+  //      first` at deploy (the exact 2.14 failure this guards against).
+  //   2. The lightnet accounts-manager `/acquire-account` is HTTP GET (POST →
+  //      "Method Not Allowed" on `compatible-latest-lightnet`).
+  //   3. The deploy transaction must set an explicit fee (the implicit/zero
+  //      default is rejected with "Insufficient fee").
+  it('deploy-mina-zkapp.ts keeps the o1js-2.14 deploy fixes (CJS require, GET acquire, explicit fee)', () => {
+    const deployScriptPath = join(REPO_ROOT, 'scripts', 'deploy-mina-zkapp.ts');
+    if (!existsSync(deployScriptPath)) {
+      console.warn(
+        `[mina-gate] deploy script not found at ${deployScriptPath} — skipping source assertion`
+      );
+      return;
+    }
+    const src = readFileSync(deployScriptPath, 'utf-8');
+
+    // (1) Shared module instance: createRequire(CJS), not a bare ESM import.
+    expect(
+      src.includes('createRequire'),
+      'deploy script must resolve o1js via createRequire (CJS) so it shares the ' +
+        'active Mina instance with the CJS-compiled @toon-protocol/mina-zkapp'
+    ).toBe(true);
+    expect(
+      /await import\(\s*['"]o1js['"]\s*\)/.test(src),
+      'deploy script must NOT load o1js via a bare ESM `import("o1js")` — that ' +
+        'creates a separate activeInstance from the zkApp (the setActiveInstance bug)'
+    ).toBe(false);
+
+    // (2) accounts-manager acquire is GET.
+    const acquireIdx = src.indexOf('/acquire-account');
+    expect(
+      acquireIdx,
+      'deploy script should call the accounts-manager /acquire-account'
+    ).toBeGreaterThanOrEqual(0);
+    const acquireBlock = src.slice(acquireIdx - 200, acquireIdx + 200);
+    expect(
+      /method:\s*['"]POST['"]/.test(acquireBlock),
+      'accounts-manager /acquire-account must be GET, not POST'
+    ).toBe(false);
+
+    // (3) explicit fee on the deploy transaction. Match the actual call
+    // (`Mina.transaction(`), not the prose mentions in the comment block.
+    const txIdx = src.indexOf('Mina.transaction(');
+    expect(
+      txIdx,
+      'deploy script should build a Mina.transaction(...)'
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      /\bfee:/.test(src.slice(txIdx, txIdx + 200)),
+      'deploy transaction must set an explicit fee (implicit default → "Insufficient fee")'
+    ).toBe(true);
+  });
 });
 
 // ── Helpers (mirrored from the Solana smoke) ─────────────────────────────────
