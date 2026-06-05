@@ -64,6 +64,7 @@
   "devDependencies": {
     "@eslint/js": "^9.0.0",
     "@hono/node-server": "^1.13.7",
+    "@noble/curves": "^1.8.0",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/git": "^10.0.1",
     "@toon-format/toon": "^1.0.0",
@@ -82,7 +83,8 @@
     "typescript": "^5.3.0",
     "typescript-eslint": "^8.0.0",
     "vitest": "^1.0.0",
-    "ws": "^8.19.0"
+    "ws": "^8.19.0",
+    "zod": "^3.25.0"
   },
   "dependencies": {
     "@ardrive/turbo-sdk": "^1.41.0",

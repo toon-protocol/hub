@@ -24,21 +24,24 @@ export const NODE_BTP_PORT = 3000;
  *   manifest.images.connector.tag
  */
 export const DEFAULT_CONNECTOR_IMAGE =
-  // v3.9.2 — fixes Mina settlement-side proof encoding (#90). The settlement
-  // executor's `JSON.parse(proof)` failed when the proof arrived base64-encoded
-  // instead of as a JSON string; 3.9.2 normalizes the encoding so Mina claims
-  // verify through to on-chain settle. Builds on 3.9.1's #88 fix
-  // (SettlementExecutor now resolves the settlement chain for dynamic anonymous
-  // HS peers) and 3.9.1's blockchain-typed inbound claim validation
-  // (validateClaimMessage switches on claim.blockchain → validateEVMClaim /
-  // validateSolanaClaim / validateMinaClaim). validateSolanaClaim accepts
-  // { blockchain:'solana', programId, channelAccount (base58), nonce,
-  // transferredAmount, signature, signerPublicKey (base58), cluster? }. No
-  // breaking changes to the SDK/admin contract within 3.x (verified >=3.3.2
-  // through 3.9.2 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest resolved
-  // via `docker buildx imagetools inspect` for tag 3.9.2 (manifest-index
+  // v3.9.3 — fixes the Solana settle-executor channel-lookup (#92). The settle
+  // executor looked up the external channel by an EVM-derived `tokenId`, which
+  // never matched the programId-keyed Solana external channel, so it opened a
+  // NEW channel and the Solana settle tx failed with #5508010 (fee-payer not a
+  // TransactionSendingSigner). 3.9.3 resolves the channel by the correct
+  // programId-keyed identifier so the full Solana on-chain settle
+  // (CLAIM_FROM_CHANNEL + SETTLE_CHANNEL) executes. Builds on 3.9.2's Mina
+  // settlement-side proof-encoding fix (#90), 3.9.1's #88 fix (SettlementExecutor
+  // resolves the settlement chain for dynamic anonymous HS peers), and 3.9.1's
+  // blockchain-typed inbound claim validation (validateClaimMessage switches on
+  // claim.blockchain → validateEVMClaim / validateSolanaClaim / validateMinaClaim).
+  // validateSolanaClaim accepts { blockchain:'solana', programId, channelAccount
+  // (base58), nonce, transferredAmount, signature, signerPublicKey (base58),
+  // cluster? }. No breaking changes to the SDK/admin contract within 3.x (verified
+  // >=3.3.2 through 3.9.3 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
+  // resolved via `docker buildx imagetools inspect` for tag 3.9.3 (manifest-index
   // digest). To bump: see CONNECTOR_RELEASE_CONTRACT.md.
-  'ghcr.io/toon-protocol/connector@sha256:9f55d55db02a5c6a4c5b0989cd30005e30c53d3119d00698facc3cb2d6d20ff0';
+  'ghcr.io/toon-protocol/connector@sha256:f5dbd1ca71ca8720ee7682dadaaa4b856fe7f2fc49b14d145ccda9230bdfaa6a';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).

@@ -40,6 +40,9 @@ importers:
       '@hono/node-server':
         specifier: ^1.13.7
         version: 1.19.9(hono@4.12.7)
+      '@noble/curves':
+        specifier: ^1.8.0
+        version: 1.9.7
       '@semantic-release/changelog':
         specifier: ^6.0.3
         version: 6.0.3(semantic-release@24.2.9)
@@ -97,6 +100,9 @@ importers:
       ws:
         specifier: ^8.19.0
         version: 8.19.0
+      zod:
+        specifier: ^3.25.0
+        version: 3.25.76
 
   docker:
     dependencies:
@@ -116,8 +122,8 @@ importers:
         specifier: workspace:*
         version: link:../packages/client
       '@toon-protocol/connector':
-        specifier: ^3.9.2
-        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.3
+        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../packages/core
@@ -159,7 +165,7 @@ importers:
         version: 2.23.0(typescript@5.9.3)
       viem:
         specifier: ^2.47.0
-        version: 2.47.2(typescript@5.9.3)
+        version: 2.47.2(typescript@5.9.3)(zod@3.25.76)
       ws:
         specifier: ^8.18.0
         version: 8.19.0
@@ -199,7 +205,7 @@ importers:
         version: 2.23.1(typescript@5.9.3)
       viem:
         specifier: ^2.0.0
-        version: 2.45.1(typescript@5.9.3)
+        version: 2.45.1(typescript@5.9.3)(zod@3.25.76)
       ws:
         specifier: ^8.0.0
         version: 8.19.0
@@ -220,8 +226,8 @@ importers:
   examples/sdk-example:
     dependencies:
       '@toon-protocol/connector':
-        specifier: ^3.9.2
-        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.3
+        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -236,7 +242,7 @@ importers:
         version: 9.14.0
       viem:
         specifier: ^2.0.0
-        version: 2.45.1(typescript@5.9.3)
+        version: 2.45.1(typescript@5.9.3)(zod@3.25.76)
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -251,8 +257,8 @@ importers:
   examples/town-example:
     dependencies:
       '@toon-protocol/connector':
-        specifier: ^3.9.2
-        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.3
+        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -270,7 +276,7 @@ importers:
         version: 9.14.0
       viem:
         specifier: ^2.21.0
-        version: 2.45.1(typescript@5.9.3)
+        version: 2.45.1(typescript@5.9.3)(zod@3.25.76)
       ws:
         specifier: ^8.0.0
         version: 8.19.0
@@ -347,7 +353,7 @@ importers:
         version: 2.23.0(typescript@5.9.3)
       viem:
         specifier: ^2.0.0
-        version: 2.45.1(typescript@5.9.3)
+        version: 2.45.1(typescript@5.9.3)(zod@3.25.76)
     optionalDependencies:
       '@solana/web3.js':
         specifier: ^1.90.0
@@ -506,8 +512,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.1
       '@toon-protocol/connector':
-        specifier: ^3.9.2
-        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.3
+        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../core
@@ -750,8 +756,8 @@ importers:
         version: 2.23.1(typescript@5.9.3)
     devDependencies:
       '@toon-protocol/connector':
-        specifier: ^3.9.2
-        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.3
+        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/relay':
         specifier: workspace:*
         version: link:../relay
@@ -769,7 +775,7 @@ importers:
         version: 5.9.3
       viem:
         specifier: ^2.0.0
-        version: 2.45.1(typescript@5.9.3)
+        version: 2.45.1(typescript@5.9.3)(zod@3.25.76)
       vitest:
         specifier: ^1.0.0
         version: 1.6.1(@types/node@20.19.32)(jsdom@24.1.3)
@@ -783,8 +789,8 @@ importers:
         specifier: ^1.0.0
         version: 1.19.9(hono@4.12.7)
       '@toon-protocol/connector':
-        specifier: ^3.9.2
-        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.3
+        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../core
@@ -805,7 +811,7 @@ importers:
         version: 2.23.1(typescript@5.9.3)
       viem:
         specifier: ^2.47.2
-        version: 2.47.2(typescript@5.9.3)
+        version: 2.47.2(typescript@5.9.3)(zod@3.25.76)
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.0.0
@@ -975,7 +981,7 @@ importers:
         version: 2.6.1
       viem:
         specifier: ^2.0.0
-        version: 2.47.2(typescript@5.9.3)
+        version: 2.47.2(typescript@5.9.3)(zod@3.25.76)
     devDependencies:
       '@axe-core/react':
         specifier: ^4.9.0
@@ -9852,8 +9858,8 @@ packages:
   /@toon-format/toon@1.4.0:
     resolution: {integrity: sha512-bjdhhIPjnX2oVk+pKy/nD3bwuESDLX/5fwW0TxwpV7Q4PVNkiRSv1S0sPeuy9TI4PfAlulow1HShdmMTnYvoLg==}
 
-  /@toon-protocol/connector@3.9.2(@types/node@20.19.32)(typescript@5.9.3):
-    resolution: {integrity: sha512-RadH/fEUs844GSEwAKF4IK+WPeDZ3c2wg0Eu0YT7ObLbRc/gEO2fXQxRaA+JnIcrN+UQL6Hxpfh5TeSTNiuknQ==}
+  /@toon-protocol/connector@3.9.3(@types/node@20.19.32)(typescript@5.9.3):
+    resolution: {integrity: sha512-I7P61OTs+p4lZBv004C0EnvJ/X8wW7R10AaB+aSDng/hImiS3q8MzjqABMYsxS/CJVuuiWPycknaLE38PgHwCw==}
     engines: {node: '>=22.11.0'}
     hasBin: true
     peerDependencies:
@@ -11459,7 +11465,6 @@ packages:
     dependencies:
       typescript: 5.9.3
       zod: 3.25.76
-    dev: false
 
   /abitype@1.2.3(typescript@5.9.3)(zod@4.3.6):
     resolution: {integrity: sha512-Ofer5QUnuUdTFsBRwARMoWKOH1ND5ehwYhJ3OJ/BQO+StkwQjHw0XyVh4vDttzHB7QOFhPHa/o413PJ82gU/Tg==}
@@ -11474,6 +11479,7 @@ packages:
     dependencies:
       typescript: 5.9.3
       zod: 4.3.6
+    dev: false
 
   /abort-controller@3.0.0:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
@@ -13572,6 +13578,7 @@ packages:
 
   /emoji-regex@8.0.0:
     resolution: {integrity: sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==}
+    requiresBuild: true
 
   /emoji-regex@9.2.2:
     resolution: {integrity: sha512-L18DaJsXSUk2+42pv8mLs5jJT2hqFkFE4j21wOmgbUqsZ2hL72NsUU785g9RXgo3s0ZNgVl42TiHp3ZtOv/Vyg==}
@@ -15416,6 +15423,7 @@ packages:
   /is-fullwidth-code-point@3.0.0:
     resolution: {integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==}
     engines: {node: '>=8'}
+    requiresBuild: true
 
   /is-fullwidth-code-point@4.0.0:
     resolution: {integrity: sha512-O4L094N2/dZ7xqVdrXhh9r1KODPJpFms8B5sGdJLPy664AgvXsreZUyCQQNItZRDlYug4xStLjNp/sz3HvBowQ==}
@@ -17712,7 +17720,7 @@ packages:
       wcwidth: 1.0.1
     optional: true
 
-  /ox@0.11.3(typescript@5.9.3):
+  /ox@0.11.3(typescript@5.9.3)(zod@3.25.76):
     resolution: {integrity: sha512-1bWYGk/xZel3xro3l8WGg6eq4YEKlaqvyMtVhfMFpbJzK2F6rj4EDRtqDCWVEJMkzcmEi9uW2QxsqELokOlarw==}
     peerDependencies:
       typescript: '>=5.4.0'
@@ -17726,32 +17734,11 @@ packages:
       '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@5.9.3)(zod@4.3.6)
+      abitype: 1.2.3(typescript@5.9.3)(zod@3.25.76)
       eventemitter3: 5.0.1
       typescript: 5.9.3
     transitivePeerDependencies:
       - zod
-
-  /ox@0.14.0(typescript@5.9.3):
-    resolution: {integrity: sha512-WLOB7IKnmI3Ol6RAqY7CJdZKl8QaI44LN91OGF1061YIeN6bL5IsFcdp7+oQShRyamE/8fW/CBRWhJAOzI35Dw==}
-    peerDependencies:
-      typescript: '>=5.4.0'
-    peerDependenciesMeta:
-      typescript:
-        optional: true
-    dependencies:
-      '@adraffy/ens-normalize': 1.11.1
-      '@noble/ciphers': 1.3.0
-      '@noble/curves': 1.9.1
-      '@noble/hashes': 1.8.0
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@5.9.3)(zod@4.3.6)
-      eventemitter3: 5.0.1
-      typescript: 5.9.3
-    transitivePeerDependencies:
-      - zod
-    dev: false
 
   /ox@0.14.0(typescript@5.9.3)(zod@3.22.4):
     resolution: {integrity: sha512-WLOB7IKnmI3Ol6RAqY7CJdZKl8QaI44LN91OGF1061YIeN6bL5IsFcdp7+oQShRyamE/8fW/CBRWhJAOzI35Dw==}
@@ -21386,7 +21373,7 @@ packages:
       - zod
     dev: false
 
-  /viem@2.45.1(typescript@5.9.3):
+  /viem@2.45.1(typescript@5.9.3)(zod@3.25.76):
     resolution: {integrity: sha512-LN6Pp7vSfv50LgwhkfSbIXftAM5J89lP9x8TeDa8QM7o41IxlHrDh0F9X+FfnCWtsz11pEVV5sn+yBUoOHNqYA==}
     peerDependencies:
       typescript: '>=5.0.4'
@@ -21398,38 +21385,15 @@ packages:
       '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@5.9.3)(zod@4.3.6)
+      abitype: 1.2.3(typescript@5.9.3)(zod@3.25.76)
       isows: 1.0.7(ws@8.18.3)
-      ox: 0.11.3(typescript@5.9.3)
+      ox: 0.11.3(typescript@5.9.3)(zod@3.25.76)
       typescript: 5.9.3
       ws: 8.18.3
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
       - zod
-
-  /viem@2.47.2(typescript@5.9.3):
-    resolution: {integrity: sha512-etDIwDgmDiGaPg8rUbJtUFuC3/nAJCbhMYyfh5dOcqNNkzBWTNcS2VluPSM5JVo+9U3b2hle2RkBEq3+xyvlvg==}
-    peerDependencies:
-      typescript: '>=5.0.4'
-    peerDependenciesMeta:
-      typescript:
-        optional: true
-    dependencies:
-      '@noble/curves': 1.9.1
-      '@noble/hashes': 1.8.0
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@5.9.3)(zod@4.3.6)
-      isows: 1.0.7(ws@8.18.3)
-      ox: 0.14.0(typescript@5.9.3)
-      typescript: 5.9.3
-      ws: 8.18.3
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-      - zod
-    dev: false
 
   /viem@2.47.2(typescript@5.9.3)(zod@3.22.4):
     resolution: {integrity: sha512-etDIwDgmDiGaPg8rUbJtUFuC3/nAJCbhMYyfh5dOcqNNkzBWTNcS2VluPSM5JVo+9U3b2hle2RkBEq3+xyvlvg==}
@@ -22335,6 +22299,7 @@ packages:
 
   /zod@4.3.6:
     resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
+    dev: false
 
   /zustand@5.0.0(@types/react@18.3.28)(react@18.3.1)(use-sync-external-store@1.4.0):
     resolution: {integrity: sha512-LE+VcmbartOPM+auOjCCLQOsQ05zUTp8RkgwRzefUk+2jISdMMFnxvyTjA4YNWr5ZGXYbVsEMZosttuxUBkojQ==}
