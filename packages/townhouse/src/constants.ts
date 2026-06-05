@@ -24,20 +24,21 @@ export const NODE_BTP_PORT = 3000;
  *   manifest.images.connector.tag
  */
 export const DEFAULT_CONNECTOR_IMAGE =
-  // v3.9.1 — fixes inbound claim validation to dispatch by blockchain type.
-  // validateClaimMessage now switches on claim.blockchain and routes to
-  // validateEVMClaim / validateSolanaClaim / validateMinaClaim. 3.9.0 ran the EVM
-  // validator unconditionally, so a Solana claim's base58 channelAccount was
-  // rejected with F06 "Invalid channelId format (expected 0x-prefixed 64-char
-  // hex)". validateSolanaClaim accepts { blockchain:'solana', programId,
-  // channelAccount (base58), nonce, transferredAmount, signature,
-  // signerPublicKey (base58), cluster? }. Builds on 3.9.0's Solana + Mina
-  // settlement wiring (#86); EVM settlement unchanged. No breaking changes to the
-  // SDK/admin contract within 3.x (verified >=3.3.2 through 3.9.1 — see
-  // packages/sdk/CONNECTOR_MIGRATION.md). Digest resolved via
-  // `docker buildx imagetools inspect` for tag 3.9.1. To bump: see
-  // CONNECTOR_RELEASE_CONTRACT.md.
-  'ghcr.io/toon-protocol/connector@sha256:a53fa02372203d31044564245d28d5ab9fc0e08c753c75deb573a5248d1a221b';
+  // v3.9.2 — fixes Mina settlement-side proof encoding (#90). The settlement
+  // executor's `JSON.parse(proof)` failed when the proof arrived base64-encoded
+  // instead of as a JSON string; 3.9.2 normalizes the encoding so Mina claims
+  // verify through to on-chain settle. Builds on 3.9.1's #88 fix
+  // (SettlementExecutor now resolves the settlement chain for dynamic anonymous
+  // HS peers) and 3.9.1's blockchain-typed inbound claim validation
+  // (validateClaimMessage switches on claim.blockchain → validateEVMClaim /
+  // validateSolanaClaim / validateMinaClaim). validateSolanaClaim accepts
+  // { blockchain:'solana', programId, channelAccount (base58), nonce,
+  // transferredAmount, signature, signerPublicKey (base58), cluster? }. No
+  // breaking changes to the SDK/admin contract within 3.x (verified >=3.3.2
+  // through 3.9.2 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest resolved
+  // via `docker buildx imagetools inspect` for tag 3.9.2 (manifest-index
+  // digest). To bump: see CONNECTOR_RELEASE_CONTRACT.md.
+  'ghcr.io/toon-protocol/connector@sha256:9f55d55db02a5c6a4c5b0989cd30005e30c53d3119d00698facc3cb2d6d20ff0';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).

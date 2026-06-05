@@ -116,8 +116,8 @@ importers:
         specifier: workspace:*
         version: link:../packages/client
       '@toon-protocol/connector':
-        specifier: ^3.9.1
-        version: 3.9.1(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.2
+        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../packages/core
@@ -220,8 +220,8 @@ importers:
   examples/sdk-example:
     dependencies:
       '@toon-protocol/connector':
-        specifier: ^3.9.0
-        version: 3.9.0(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.2
+        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -251,8 +251,8 @@ importers:
   examples/town-example:
     dependencies:
       '@toon-protocol/connector':
-        specifier: ^3.9.0
-        version: 3.9.0(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.2
+        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -500,8 +500,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.1
       '@toon-protocol/connector':
-        specifier: ^3.9.1
-        version: 3.9.1(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.2
+        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../core
@@ -744,8 +744,8 @@ importers:
         version: 2.23.1(typescript@5.9.3)
     devDependencies:
       '@toon-protocol/connector':
-        specifier: ^3.9.1
-        version: 3.9.1(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.2
+        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/relay':
         specifier: workspace:*
         version: link:../relay
@@ -777,8 +777,8 @@ importers:
         specifier: ^1.0.0
         version: 1.19.9(hono@4.12.7)
       '@toon-protocol/connector':
-        specifier: ^3.9.1
-        version: 3.9.1(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.2
+        version: 3.9.2(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../core
@@ -9846,70 +9846,8 @@ packages:
   /@toon-format/toon@1.4.0:
     resolution: {integrity: sha512-bjdhhIPjnX2oVk+pKy/nD3bwuESDLX/5fwW0TxwpV7Q4PVNkiRSv1S0sPeuy9TI4PfAlulow1HShdmMTnYvoLg==}
 
-  /@toon-protocol/connector@3.9.0(@types/node@20.19.32)(typescript@5.9.3):
-    resolution: {integrity: sha512-kswHibIeWFI7v3YtFCK/P9DLpFhJcknC1zUWZvm829BEOkc06lGOlWmqRmrjHH0pWWk6aarpNIlkEcCbGPoIQA==}
-    engines: {node: '>=22.11.0'}
-    hasBin: true
-    peerDependencies:
-      o1js: ^2.2.0
-      tigerbeetle-node: 0.16.68
-    peerDependenciesMeta:
-      o1js:
-        optional: true
-      tigerbeetle-node:
-        optional: true
-    dependencies:
-      '@anyone-protocol/anyone-client': 1.1.3
-      '@noble/ciphers': 1.3.0
-      '@noble/curves': 1.9.7
-      '@noble/hashes': 1.8.0
-      '@solana-program/token': 0.6.0(@solana/kit@3.0.3)
-      '@solana/kit': 3.0.3(typescript@5.9.3)(ws@8.20.0)
-      '@toon-protocol/mina-zkapp': link:packages/mina-zkapp
-      '@toon-protocol/shared': 1.2.0(patch_hash=6zqy2jkcrig54aoewdy5gcjfdq)
-      cors: 2.8.6
-      ethers: 6.16.0
-      express: 5.2.1
-      js-yaml: 4.1.1
-      netmask: 2.0.2
-      pino: 8.21.0
-      prom-client: 15.1.3
-      socks-proxy-agent: 8.0.5
-      tslib: 2.8.1
-      ws: 8.20.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
-      zod: 3.25.76
-    optionalDependencies:
-      '@ai-sdk/anthropic': 1.2.12(zod@3.25.76)
-      '@ai-sdk/openai': 1.3.24(zod@3.25.76)
-      '@aws-sdk/client-kms': 3.1038.0
-      '@azure/identity': 4.13.1
-      '@azure/keyvault-keys': 4.10.0
-      '@google-cloud/kms': 3.8.0
-      '@libsql/client': 0.14.0
-      ai: 4.3.19(zod@3.25.76)
-      bip39: 3.1.0
-      commander: 12.1.0
-      inquirer: 9.3.8(@types/node@20.19.32)
-      libsql: 0.4.7
-      nostr-tools: 2.23.1(typescript@5.9.3)
-      qrcode: 1.5.4
-      sharp: 0.33.5
-    transitivePeerDependencies:
-      - '@azure/core-client'
-      - '@types/node'
-      - aws-crt
-      - bufferutil
-      - debug
-      - encoding
-      - fastestsmallesttextencoderdecoder
-      - react
-      - supports-color
-      - typescript
-      - utf-8-validate
-    dev: false
-
-  /@toon-protocol/connector@3.9.1(@types/node@20.19.32)(typescript@5.9.3):
-    resolution: {integrity: sha512-qJ3RTKzvAuSjLbVOUsn2n8VPD3PtO83raojIaZwQrWkPVrR7RD6Pf4ZytuAhVOfeyBxVk2Q2KHIh0XyLNDStdg==}
+  /@toon-protocol/connector@3.9.2(@types/node@20.19.32)(typescript@5.9.3):
+    resolution: {integrity: sha512-RadH/fEUs844GSEwAKF4IK+WPeDZ3c2wg0Eu0YT7ObLbRc/gEO2fXQxRaA+JnIcrN+UQL6Hxpfh5TeSTNiuknQ==}
     engines: {node: '>=22.11.0'}
     hasBin: true
     peerDependencies:
