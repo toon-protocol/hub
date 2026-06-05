@@ -174,7 +174,7 @@ services:
       RUN_ARCHIVE_NODE: 'false'
       SLOT_TIME: '20000'
     ports:
-      - '127.0.0.1:28085:3101'   # GraphQL (direct to daemon)
+      - '127.0.0.1:28085:3085'   # GraphQL (direct to daemon)
       - '127.0.0.1:28181:8181'   # Accounts Manager
     networks:
       - townhouse-dev-net
@@ -187,7 +187,7 @@ services:
       test:
         [
           'CMD-SHELL',
-          'curl -sf -X POST -H "Content-Type: application/json" -d "{\"query\":\"{syncStatus}\"}" http://localhost:3101/graphql | grep -q SYNCED || exit 1',
+          'curl -sf -X POST -H "Content-Type: application/json" -d "{\"query\":\"{syncStatus}\"}" http://localhost:3085/graphql | grep -q SYNCED || exit 1',
         ]
       interval: 10s
       timeout: 10s
