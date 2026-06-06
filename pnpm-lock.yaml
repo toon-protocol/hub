@@ -122,8 +122,8 @@ importers:
         specifier: workspace:*
         version: link:../packages/client
       '@toon-protocol/connector':
-        specifier: ^3.9.3
-        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.6
+        version: 3.9.6(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../packages/core
@@ -226,8 +226,8 @@ importers:
   examples/sdk-example:
     dependencies:
       '@toon-protocol/connector':
-        specifier: ^3.9.3
-        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.6
+        version: 3.9.6(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -257,8 +257,8 @@ importers:
   examples/town-example:
     dependencies:
       '@toon-protocol/connector':
-        specifier: ^3.9.3
-        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.6
+        version: 3.9.6(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -512,8 +512,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.1
       '@toon-protocol/connector':
-        specifier: ^3.9.3
-        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.6
+        version: 3.9.6(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../core
@@ -756,8 +756,8 @@ importers:
         version: 2.23.1(typescript@5.9.3)
     devDependencies:
       '@toon-protocol/connector':
-        specifier: ^3.9.3
-        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.6
+        version: 3.9.6(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/relay':
         specifier: workspace:*
         version: link:../relay
@@ -789,8 +789,8 @@ importers:
         specifier: ^1.0.0
         version: 1.19.9(hono@4.12.7)
       '@toon-protocol/connector':
-        specifier: ^3.9.3
-        version: 3.9.3(@types/node@20.19.32)(typescript@5.9.3)
+        specifier: ^3.9.6
+        version: 3.9.6(@types/node@20.19.32)(typescript@5.9.3)
       '@toon-protocol/core':
         specifier: workspace:*
         version: link:../core
@@ -9858,8 +9858,8 @@ packages:
   /@toon-format/toon@1.4.0:
     resolution: {integrity: sha512-bjdhhIPjnX2oVk+pKy/nD3bwuESDLX/5fwW0TxwpV7Q4PVNkiRSv1S0sPeuy9TI4PfAlulow1HShdmMTnYvoLg==}
 
-  /@toon-protocol/connector@3.9.3(@types/node@20.19.32)(typescript@5.9.3):
-    resolution: {integrity: sha512-I7P61OTs+p4lZBv004C0EnvJ/X8wW7R10AaB+aSDng/hImiS3q8MzjqABMYsxS/CJVuuiWPycknaLE38PgHwCw==}
+  /@toon-protocol/connector@3.9.6(@types/node@20.19.32)(typescript@5.9.3):
+    resolution: {integrity: sha512-lVypQceW4g1YeNGV5h/Izs0bZUx+b+62x/nkSiR41apH08qPm4cceI7YaYf/ZhXvGU1hBNl95RowQTE4xBGe4A==}
     engines: {node: '>=22.11.0'}
     hasBin: true
     peerDependencies:
