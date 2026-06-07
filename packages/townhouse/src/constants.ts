@@ -24,6 +24,15 @@ export const NODE_BTP_PORT = 3000;
  *   manifest.images.connector.tag
  */
 export const DEFAULT_CONNECTOR_IMAGE =
+  // v3.9.9 — #118 advancing-claims acceptance in verifyBalanceProof. Resolves the
+  // nonce tension that blocked the Mina settle leg: the claim nonce was required to
+  // EQUAL the on-chain nonce, but `claimFromChannel` needs the claim to ADVANCE the
+  // channel (nonce > on-chain). 3.9.9 makes verifyBalanceProof accept advancing
+  // claims, so the connector can auto-drive `claimFromChannel` on a Mina publish.
+  // v3.9.8 — #117 Mina settlement-trigger fix. `CLAIM_RECEIVED` now emits the real
+  // `transferredAmount` (was hardcoded `BigInt(0)`), so the settlement-threshold
+  // check actually fires for Mina, triggering claimFromChannel().
+  // Together 3.9.8 + 3.9.9 complete the connector-driven on-chain Mina settle.
   // v3.9.7 — #114 inbound Mina claimFromChannel + #84 dual-party. Enables the
   // on-chain `claimFromChannel` for externally-opened (inbound) channels, fixing
   // the `_participantCache` miss (ACCOUNT_NOT_FOUND) + off-chain/on-chain
@@ -48,10 +57,10 @@ export const DEFAULT_CONNECTOR_IMAGE =
   // validateSolanaClaim accepts { blockchain:'solana', programId, channelAccount
   // (base58), nonce, transferredAmount, signature, signerPublicKey (base58),
   // cluster? }. No breaking changes to the SDK/admin contract within 3.x (verified
-  // >=3.3.2 through 3.9.7 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
-  // resolved via `docker buildx imagetools inspect` for tag 3.9.7 (manifest-index
+  // >=3.3.2 through 3.9.9 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
+  // resolved via `docker buildx imagetools inspect` for tag 3.9.9 (manifest-index
   // digest). To bump: see CONNECTOR_RELEASE_CONTRACT.md.
-  'ghcr.io/toon-protocol/connector@sha256:02c2417a05da87e638f96bd49a62b013c3bd302255f58e0c9166e753d16c7600';
+  'ghcr.io/toon-protocol/connector@sha256:13bfe4aa6830c6a41a5f395ad373e3a2d6dcd4ad6dd6fb8657ddd94dbda5af1d';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).
