@@ -24,6 +24,12 @@ export const NODE_BTP_PORT = 3000;
  *   manifest.images.connector.tag
  */
 export const DEFAULT_CONNECTOR_IMAGE =
+  // v3.9.10 — #121 claimFromChannel signatureA wrapper. `claimFromChannel` now
+  // accepts the `signBalanceProof` wrapper ({commitment,signature:{r,s},...}) as
+  // `signatureA` (was: INVALID_PARAMETERS "Invalid signatureA" — wrapper vs bare
+  // {r,s} mismatch threw before any tx). This is the LAST Mina settle blocker:
+  // with it the connector submits the on-chain Mina claimFromChannel tx and the
+  // zkApp nonce/balanceCommitment advance.
   // v3.9.9 — #118 advancing-claims acceptance in verifyBalanceProof. Resolves the
   // nonce tension that blocked the Mina settle leg: the claim nonce was required to
   // EQUAL the on-chain nonce, but `claimFromChannel` needs the claim to ADVANCE the
@@ -57,10 +63,10 @@ export const DEFAULT_CONNECTOR_IMAGE =
   // validateSolanaClaim accepts { blockchain:'solana', programId, channelAccount
   // (base58), nonce, transferredAmount, signature, signerPublicKey (base58),
   // cluster? }. No breaking changes to the SDK/admin contract within 3.x (verified
-  // >=3.3.2 through 3.9.9 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
-  // resolved via `docker buildx imagetools inspect` for tag 3.9.9 (manifest-index
+  // >=3.3.2 through 3.9.10 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
+  // resolved via `docker buildx imagetools inspect` for tag 3.9.10 (manifest-index
   // digest). To bump: see CONNECTOR_RELEASE_CONTRACT.md.
-  'ghcr.io/toon-protocol/connector@sha256:13bfe4aa6830c6a41a5f395ad373e3a2d6dcd4ad6dd6fb8657ddd94dbda5af1d';
+  'ghcr.io/toon-protocol/connector@sha256:97d4db77ce6bfa163542ab895f90d056f7cbe9696cde4f0999dd495eb8e04a4d';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).
