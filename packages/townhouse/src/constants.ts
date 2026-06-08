@@ -24,6 +24,12 @@ export const NODE_BTP_PORT = 3000;
  *   manifest.images.connector.tag
  */
 export const DEFAULT_CONNECTOR_IMAGE =
+  // v3.9.11 — #123 apex co-signs signatureB. `claimFromChannel` previously
+  // reused the client's signatureA as signatureB, so the on-chain dual-party
+  // verification reverted at `participant B signature verification failed`. With
+  // 3.9.11 the connector co-signs signatureB with the apex Mina key, so both
+  // signature checks pass and the on-chain Mina claimFromChannel tx lands
+  // (zkApp nonce/balanceCommitment advance). This was the LAST Mina blocker.
   // v3.9.10 — #121 claimFromChannel signatureA wrapper. `claimFromChannel` now
   // accepts the `signBalanceProof` wrapper ({commitment,signature:{r,s},...}) as
   // `signatureA` (was: INVALID_PARAMETERS "Invalid signatureA" — wrapper vs bare
@@ -63,10 +69,10 @@ export const DEFAULT_CONNECTOR_IMAGE =
   // validateSolanaClaim accepts { blockchain:'solana', programId, channelAccount
   // (base58), nonce, transferredAmount, signature, signerPublicKey (base58),
   // cluster? }. No breaking changes to the SDK/admin contract within 3.x (verified
-  // >=3.3.2 through 3.9.10 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
-  // resolved via `docker buildx imagetools inspect` for tag 3.9.10 (manifest-index
+  // >=3.3.2 through 3.9.11 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
+  // resolved via `docker buildx imagetools inspect` for tag 3.9.11 (manifest-index
   // digest). To bump: see CONNECTOR_RELEASE_CONTRACT.md.
-  'ghcr.io/toon-protocol/connector@sha256:97d4db77ce6bfa163542ab895f90d056f7cbe9696cde4f0999dd495eb8e04a4d';
+  'ghcr.io/toon-protocol/connector@sha256:8a75cd3f89cfac79a27b7624c4d65790913d0abd85f55c22d67515042d70feed';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).
