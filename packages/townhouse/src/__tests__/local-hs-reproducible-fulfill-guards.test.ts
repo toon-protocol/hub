@@ -186,4 +186,92 @@ describe('local-HS reproducible-FULFILL harness guards', () => {
     const upBody = src.slice(upIdx, src.indexOf('\n}', upIdx + 1));
     expect(upBody).toMatch(/if \[\[ "\$LOCAL_BUILD" == "1" \]\]/);
   });
+
+  // ── Reproducibility: mina-zkapp dist auto-build (no manual prereq) ──────────
+  it('the harness builds @toon-protocol/mina-zkapp before deploying the zkApp (folds the manual build prereq)', () => {
+    const src = read(HARNESS);
+    // A guarded builder must exist and run the fast tsc build for the package.
+    expect(src).toContain('ensure_mina_zkapp_built()');
+    expect(src).toMatch(/pnpm --filter @toon-protocol\/mina-zkapp build/);
+    // It must reference the package whose dist deploy-mina-zkapp.ts requires.
+    const fnIdx = src.indexOf('ensure_mina_zkapp_built() {');
+    const fnBody = src.slice(fnIdx, src.indexOf('\n}', fnIdx));
+    expect(fnBody).toContain('mina-zkapp');
+    expect(fnBody).toContain('dist/index.js');
+    // The deploy function must CALL the builder before the o1js deploy. Match the
+    // call line (indented) — not comment mentions — so ordering is meaningful.
+    const deployIdx = src.indexOf('deploy_mina_zkapp_deterministic() {');
+    const deployBody = src.slice(
+      deployIdx,
+      src.indexOf('\nup_townhouse_hs() {', deployIdx)
+    );
+    const builderCall = deployBody.indexOf('\n  ensure_mina_zkapp_built ');
+    // The real invocation line (npx tsx …deploy-mina-zkapp.ts), not the comment.
+    const deployTsx = deployBody.indexOf(
+      'npx tsx "${REPO_ROOT}/scripts/deploy-mina-zkapp.ts"'
+    );
+    expect(builderCall, 'builder call line present').toBeGreaterThanOrEqual(0);
+    expect(
+      deployTsx,
+      'deploy-mina-zkapp.ts invocation present'
+    ).toBeGreaterThanOrEqual(0);
+    expect(builderCall).toBeLessThan(deployTsx);
+  });
+
+  // ── Reproducibility: fresh Mina ledger for E2E_MINA (no manual wipe) ────────
+  it('the harness recreates townhouse-dev-mina with a fresh ledger for E2E_MINA (folds the manual wipe prereq)', () => {
+    const src = read(HARNESS);
+    expect(src).toContain('ensure_fresh_mina_ledger()');
+    const fnIdx = src.indexOf('ensure_fresh_mina_ledger()');
+    const fnBody = src.slice(
+      fnIdx,
+      src.indexOf('\nensure_dev_chains_on_hs_net', fnIdx)
+    );
+    // Gated to E2E_MINA, and recreates the lightnet with fresh anon volumes.
+    expect(fnBody).toMatch(/E2E_MINA.*== "1"/);
+    expect(fnBody).toContain('--force-recreate');
+    expect(fnBody).toContain('--renew-anon-volumes');
+    expect(fnBody).toContain('townhouse-dev-mina');
+    // It waits for the lightnet to SYNC before returning.
+    expect(fnBody).toContain('SYNCED');
+    // cmd_up must CALL it before bringing up the apex (which deploys the zkApp).
+    // Match indented call lines (not comment mentions) so ordering is meaningful.
+    const upIdx = src.indexOf('cmd_up() {');
+    const upBody = src.slice(upIdx, src.indexOf('\n}', upIdx));
+    const ledgerCall = upBody.indexOf('\n  ensure_fresh_mina_ledger\n');
+    const apexCall = upBody.indexOf('\n  up_townhouse_hs ');
+    expect(
+      ledgerCall,
+      'ensure_fresh_mina_ledger call line present'
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      apexCall,
+      'up_townhouse_hs call line present'
+    ).toBeGreaterThanOrEqual(0);
+    expect(ledgerCall).toBeLessThan(apexCall);
+  });
+
+  // ── Dead-code removal: MINA_ADVANCE_COMMITMENT pre-advance gone ─────────────
+  it('the obsolete MINA_ADVANCE_COMMITMENT pre-advance path is fully removed', () => {
+    const harness = read(HARNESS);
+    // No env-var handling, no script reference anywhere in the harness.
+    expect(harness).not.toContain('MINA_ADVANCE_COMMITMENT');
+    expect(harness).not.toContain('MINA_ADVANCE_AMOUNT');
+    expect(harness).not.toContain('advance-mina-commitment');
+    // The deploy script no longer carries the advance logic.
+    const deployScript = read(
+      join(REPO_ROOT, 'scripts', 'deploy-mina-zkapp.ts')
+    );
+    expect(deployScript).not.toContain('ADVANCE_COMMITMENT');
+    expect(deployScript).not.toContain('MINA_ADVANCE');
+    expect(deployScript).not.toContain('deriveMinaSalt');
+    // And the standalone pre-advance script is deleted.
+    expect(
+      existsSync(join(REPO_ROOT, 'scripts', 'advance-mina-commitment.ts')),
+      'scripts/advance-mina-commitment.ts should be removed'
+    ).toBe(false);
+    // MINA_SKIP_INIT is KEPT (the client opens the channel) and threaded through.
+    expect(harness).toContain('MINA_SKIP_INIT');
+    expect(deployScript).toContain('MINA_SKIP_INIT');
+  });
 });
