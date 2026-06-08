@@ -132,11 +132,24 @@ async function fetchWithTimeout(
   }
 }
 
+/** Error carrying the HTTP status so callers can distinguish a permanent 404
+ * (stale townhouse-api image missing the /api/earnings route, #139) from a
+ * transient failure worth retrying. */
+class EarningsHttpError extends Error {
+  constructor(
+    public readonly status: number,
+    label: string
+  ) {
+    super(`[${label}] HTTP ${status}`);
+    this.name = 'EarningsHttpError';
+  }
+}
+
 async function fetchEarnings(
   label = 'GET /api/earnings'
 ): Promise<Record<string, unknown>> {
   const res = await fetchWithTimeout(EARNINGS_URL, { budgetMs: 10_000, label });
-  if (!res.ok) throw new Error(`[${label}] HTTP ${res.status}`);
+  if (!res.ok) throw new EarningsHttpError(res.status, label);
   const body = (await res.json()) as Record<string, unknown>;
   expectMatchesSchema(body, label);
   return body;
@@ -376,8 +389,16 @@ describe.skipIf(!shouldRun)('local-Docker HS paid-earnings smoke', () => {
           preEarnings = candidate;
           break;
         }
-      } catch {
-        /* keep polling */
+      } catch (err) {
+        // A 404 is a permanent failure: the pinned townhouse-api image predates
+        // the Epic 47 /api/earnings route (#139). Don't burn 30s polling — fail
+        // fast with a rebuild hint.
+        if (err instanceof EarningsHttpError && err.status === 404) {
+          throw new Error(
+            `${EARNINGS_URL} returned 404 — the townhouse-api image predates the Epic 47 earnings route (#139). Rebuild from HEAD: docker build -f docker/Dockerfile.townhouse-api -t ghcr.io/toon-protocol/townhouse-api:epic-47-local .`
+          );
+        }
+        /* otherwise transient — keep polling */
       }
       await sleep(3_000);
     }
