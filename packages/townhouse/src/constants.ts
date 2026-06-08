@@ -24,6 +24,16 @@ export const NODE_BTP_PORT = 3000;
  *   manifest.images.connector.tag
  */
 export const DEFAULT_CONNECTOR_IMAGE =
+  // v3.9.13 — #128 openChannel deploy/initialize split. The zkApp openChannel
+  // path was combining contract deploy + initialize into one tx; 3.9.13 splits
+  // them so the on-chain channel opens cleanly.
+  // v3.9.12 — #126 zkApp tx fee + balance conservation. The apex's
+  // `claimFromChannel` settlement tx was broadcast with NO fee (failed at
+  // `Insufficient fee`); 3.9.12 sets the zkApp tx fee AND guards balance
+  // conservation (rejects a claim whose transferred amount would violate
+  // deposit-total conservation). Together with 3.9.13 the on-chain Mina
+  // claimFromChannel tx broadcasts and LANDS (zkApp nonce/balanceCommitment
+  // advance) — completing the non-EVM pay-to-write settle loop.
   // v3.9.11 — #123 apex co-signs signatureB. `claimFromChannel` previously
   // reused the client's signatureA as signatureB, so the on-chain dual-party
   // verification reverted at `participant B signature verification failed`. With
@@ -69,10 +79,10 @@ export const DEFAULT_CONNECTOR_IMAGE =
   // validateSolanaClaim accepts { blockchain:'solana', programId, channelAccount
   // (base58), nonce, transferredAmount, signature, signerPublicKey (base58),
   // cluster? }. No breaking changes to the SDK/admin contract within 3.x (verified
-  // >=3.3.2 through 3.9.11 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
-  // resolved via `docker buildx imagetools inspect` for tag 3.9.11 (manifest-index
+  // >=3.3.2 through 3.9.13 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
+  // resolved via `docker buildx imagetools inspect` for tag 3.9.13 (manifest-index
   // digest). To bump: see CONNECTOR_RELEASE_CONTRACT.md.
-  'ghcr.io/toon-protocol/connector@sha256:8a75cd3f89cfac79a27b7624c4d65790913d0abd85f55c22d67515042d70feed';
+  'ghcr.io/toon-protocol/connector@sha256:e984e1fc5034daf2ea4e10097ce63948043bac3ad002e7e8fde2b91630d77c1e';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).
