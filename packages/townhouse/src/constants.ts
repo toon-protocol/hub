@@ -24,6 +24,14 @@ export const NODE_BTP_PORT = 3000;
  *   manifest.images.connector.tag
  */
 export const DEFAULT_CONNECTOR_IMAGE =
+  // v3.10.0 — Story 34.4 fund-custody zkApp bundle (#130/#131, closes #134). The
+  // connector now bundles the Story 34.4 `PaymentChannel` zkApp (FUND CUSTODY on
+  // deposit + FUND DISTRIBUTION on settle: the zkApp account escrows the deposit
+  // and `settle()` drains balanceB→participantB / balanceA→participantA). Its
+  // compiled verification key is byte-identical to the zkApp our harness deploys
+  // (VK hash 21482326729342759163995140331524541410906862862696135294081643945442581537217),
+  // so connector-driven `claimFromChannel`/`settle` proofs verify against the
+  // deployed contract. Minor bump; SDK/admin contract unchanged within 3.x.
   // v3.9.13 — #128 openChannel deploy/initialize split. The zkApp openChannel
   // path was combining contract deploy + initialize into one tx; 3.9.13 splits
   // them so the on-chain channel opens cleanly.
@@ -79,10 +87,10 @@ export const DEFAULT_CONNECTOR_IMAGE =
   // validateSolanaClaim accepts { blockchain:'solana', programId, channelAccount
   // (base58), nonce, transferredAmount, signature, signerPublicKey (base58),
   // cluster? }. No breaking changes to the SDK/admin contract within 3.x (verified
-  // >=3.3.2 through 3.9.13 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
-  // resolved via `docker buildx imagetools inspect` for tag 3.9.13 (manifest-index
+  // >=3.3.2 through 3.10.0 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
+  // resolved via `docker buildx imagetools inspect` for tag 3.10.0 (manifest-index
   // digest). To bump: see CONNECTOR_RELEASE_CONTRACT.md.
-  'ghcr.io/toon-protocol/connector@sha256:e984e1fc5034daf2ea4e10097ce63948043bac3ad002e7e8fde2b91630d77c1e';
+  'ghcr.io/toon-protocol/connector@sha256:539c03d8990e094f61c2975ff480ba93d3de4beb24ac099ea81041866424d49a';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).
