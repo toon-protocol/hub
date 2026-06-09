@@ -273,5 +273,14 @@ describe('local-HS reproducible-FULFILL harness guards', () => {
     // MINA_SKIP_INIT is KEPT (the client opens the channel) and threaded through.
     expect(harness).toContain('MINA_SKIP_INIT');
     expect(deployScript).toContain('MINA_SKIP_INIT');
+    // It MUST default to 1, not 0: defaulting to 0 makes deploy-mina-zkapp.ts
+    // SINGLE-PARTY initialize the deterministic channel as
+    // Poseidon([deployer.x, deployer.x, 0]); the client's idempotent open then
+    // skips re-init, so the on-chain channelHash never becomes the (client, apex)
+    // form the client signs its claim over — settle fails "Invalid balance proof
+    // signature". Defaulting to 1 leaves the zkApp bare so the client opens it
+    // two-party and on-chain Mina settle verifies.
+    expect(harness).toContain('MINA_SKIP_INIT="${MINA_SKIP_INIT:-1}"');
+    expect(harness).not.toContain('MINA_SKIP_INIT="${MINA_SKIP_INIT:-0}"');
   });
 });
