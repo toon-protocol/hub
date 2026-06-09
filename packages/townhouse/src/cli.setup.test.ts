@@ -284,13 +284,15 @@ logging:
 `
       );
 
+      // Phase 3: plain `up` is the direct-BTP apex path, which fails fast with
+      // a "Run `townhouse init` first" message when the wallet is absent.
       await main(['up', '-c', configPath]);
 
       const errorOutput = consoleErrorSpy.mock.calls
         .map((c) => String(c[0]))
         .join('\n');
       expect(errorOutput).toContain('Wallet not found');
-      expect(errorOutput).toContain('townhouse setup');
+      expect(errorOutput).toContain('townhouse init');
       expect(process.exitCode).toBe(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });

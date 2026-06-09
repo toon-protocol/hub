@@ -66,7 +66,11 @@ import { fileURLToPath } from 'node:url';
 import { generateSecretKey, finalizeEvent } from 'nostr-tools/pure';
 import type { NostrEvent } from 'nostr-tools/pure';
 
-import { isTruthyEnv } from './_test-helpers.js';
+import {
+  isTruthyEnv,
+  isDirectTransport,
+  resolveApexTarget,
+} from './_test-helpers.js';
 
 // ── Gate ─────────────────────────────────────────────────────────────────────
 
@@ -299,18 +303,25 @@ describe.skipIf(!shouldRunLiveLoop)(
     let bSecretKey: Uint8Array;
 
     beforeAll(async () => {
-      const hostJsonPath = join(TOWNHOUSE_HOME, 'host.json');
-      if (!existsSync(hostJsonPath)) {
-        throw new Error(
-          `${hostJsonPath} missing — orchestrator did not bring up apex.\n` +
-            `  Run: E2E_MINA=1 bash scripts/townhouse-e2e-local-hs.sh up --local`
-        );
+      // HS reads the published .anon from host.json; direct (TRANSPORT=direct /
+      // DIRECT_BTP=1) uses a placeholder the client ignores (env-driven routing).
+      const target = resolveApexTarget(() => {
+        const hostJsonPath = join(TOWNHOUSE_HOME, 'host.json');
+        if (!existsSync(hostJsonPath)) {
+          throw new Error(
+            `${hostJsonPath} missing — orchestrator did not bring up apex.\n` +
+              `  Run: E2E_MINA=1 bash scripts/townhouse-e2e-local-hs.sh up --local`
+          );
+        }
+        const hostJson = JSON.parse(readFileSync(hostJsonPath, 'utf-8')) as {
+          hostname: string;
+        };
+        return hostJson.hostname;
+      });
+      apexHostname = target.targetHostname;
+      if (target.mode === 'hs') {
+        expect(apexHostname).toMatch(/^[a-z2-7]{55,57}\.(anyone|anon)$/);
       }
-      const hostJson = JSON.parse(readFileSync(hostJsonPath, 'utf-8')) as {
-        hostname: string;
-      };
-      apexHostname = hostJson.hostname;
-      expect(apexHostname).toMatch(/^[a-z2-7]{55,57}\.(anyone|anon)$/);
 
       const res = await fetchWithTimeout(`${CLIENT_URL}/healthz`, {
         budgetMs: 5_000,
@@ -321,7 +332,9 @@ describe.skipIf(!shouldRunLiveLoop)(
         anyoneReady: boolean;
         minaAddr?: string;
       };
-      if (!healthz.anyoneReady) {
+      // anyoneReady gates the SOCKS/anon path only — direct mode has no anon
+      // daemon (the client dials APEX_BTP_URL directly).
+      if (!isDirectTransport() && !healthz.anyoneReady) {
         throw new Error(
           `Client anyoneReady=false. Inspect: docker logs ${CLIENT_CONTAINER} | tail -50`
         );

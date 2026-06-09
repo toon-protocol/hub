@@ -11,8 +11,12 @@ import { dirname, join, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 
-export type ComposeProfile = 'dev' | 'hs';
-const VALID_PROFILES: readonly ComposeProfile[] = ['dev', 'hs'] as const;
+export type ComposeProfile = 'dev' | 'hs' | 'direct';
+const VALID_PROFILES: readonly ComposeProfile[] = [
+  'dev',
+  'hs',
+  'direct',
+] as const;
 
 export interface ComposeLoaderOptions {
   /** Override default `~/.townhouse/` write target. Used by tests. */
@@ -155,12 +159,14 @@ export function materializeComposeTemplate(
   const manifestSrc = join(distDir, 'image-manifest.json');
 
   // Validate inputs BEFORE any writes so a failure leaves disk untouched.
-  // HS profile cannot succeed without a manifest — fail loudly up-front
-  // rather than after writing a stale/torn compose file.
-  if (profile === 'hs' && !existsSync(manifestSrc)) {
+  // HS and direct profiles cannot succeed without a manifest — both ship
+  // digest-pinned GHCR images — so fail loudly up-front rather than after
+  // writing a stale/torn compose file. (dev uses local toon:* tags and needs
+  // no manifest.)
+  if ((profile === 'hs' || profile === 'direct') && !existsSync(manifestSrc)) {
     throw new ComposeLoaderError(
       `image-manifest.json not found at ${manifestSrc}. ` +
-        `HS mode requires a digest-pinned image manifest. ` +
+        `${profile === 'hs' ? 'HS' : 'Direct'} mode requires a digest-pinned image manifest. ` +
         `Reinstall @toon-protocol/townhouse from npm to restore the manifest.`
     );
   }

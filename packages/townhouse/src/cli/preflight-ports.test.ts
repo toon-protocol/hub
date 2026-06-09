@@ -15,8 +15,10 @@ import { createServer, type Server } from 'node:net';
 import {
   isPortInUse,
   checkHsPortCollisions,
+  checkDirectPortCollisions,
   formatCollisionMessage,
   HS_CANONICAL_PORTS,
+  DIRECT_CANONICAL_PORTS,
   type PortCollision,
 } from './preflight-ports.js';
 
@@ -181,6 +183,31 @@ describe('checkHsPortCollisions', () => {
     expect(new Set(HS_CANONICAL_PORTS)).toEqual(
       new Set([9401, 28090, 7100, 3100, 3200, 3400])
     );
+  });
+});
+
+describe('direct-mode port set (Phase 2 direct-apex)', () => {
+  it('DIRECT_CANONICAL_PORTS = HS set PLUS the host-exposed BTP port 3000', () => {
+    expect(new Set(DIRECT_CANONICAL_PORTS)).toEqual(
+      new Set([3000, 9401, 28090, 7100, 3100, 3200, 3400])
+    );
+    // Specifically: every HS port is present, plus 3000.
+    for (const p of HS_CANONICAL_PORTS) {
+      expect(DIRECT_CANONICAL_PORTS).toContain(p);
+    }
+    expect(DIRECT_CANONICAL_PORTS).toContain(3000);
+  });
+
+  it('checkDirectPortCollisions reports a bound port (parametrized set)', async () => {
+    // allocateFreePort keeps a server bound on the returned port, so probing it
+    // is a guaranteed collision regardless of the host's canonical-port state.
+    const { port, close } = await allocateFreePort();
+    try {
+      const collisions = await checkDirectPortCollisions(undefined, [port]);
+      expect(collisions.map((c) => c.port)).toContain(port);
+    } finally {
+      await close();
+    }
   });
 });
 

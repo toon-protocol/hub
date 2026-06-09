@@ -188,6 +188,20 @@ describe('CLI', () => {
       expect(output).toContain('townhouse node list');
     });
 
+    it('help text reframes `up` as direct-BTP default and `hs up` as opt-in (Phase 3)', async () => {
+      await expect(main(['--help'])).rejects.toThrow(CliHelpRequested);
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      // `up` advertises the direct-BTP default + dial address.
+      expect(output).toContain('direct-BTP apex');
+      expect(output).toContain('ws://host:3000/btp');
+      // `hs up` is framed as the opt-in anonymous path.
+      expect(output).toContain('townhouse hs up');
+      expect(output).toContain('hidden-service');
+      // The new flags are documented.
+      expect(output).toContain('--transport');
+      expect(output).toContain('--dev');
+    });
+
     it('help text does NOT mention --units, --rate, or sats (Story 48.6 undocumented flag)', async () => {
       await expect(main(['--help'])).rejects.toThrow(CliHelpRequested);
       const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
@@ -298,15 +312,19 @@ describe('CLI', () => {
     });
   });
 
-  describe('up command', () => {
-    it('up with no nodes enabled shows informative message', async () => {
+  // Phase 3 — the contributor children-only dev stack moved behind `up --dev`.
+  // Plain `up` (no flags) now boots a direct-BTP apex (see the 'up — direct
+  // default' describe block below). These tests keep asserting the dev-stack
+  // (handleUp / profile:'dev') behavior via the explicit --dev flag.
+  describe('up --dev command (contributor dev stack)', () => {
+    it('up --dev with no nodes enabled shows informative message', async () => {
       const dir = makeTempDir();
       const configPath = join(dir, 'config.yaml');
 
       try {
         writeFileSync(configPath, makeConfig(), 'utf-8');
 
-        await main(['up', '-c', configPath]);
+        await main(['up', '--dev', '-c', configPath]);
         const output = consoleSpy.mock.calls
           .map((c) => String(c[0]))
           .join('\n');
@@ -316,7 +334,7 @@ describe('CLI', () => {
       }
     });
 
-    it('up with enabled nodes starts orchestration', async () => {
+    it('up --dev with enabled nodes starts orchestration', async () => {
       const dir = makeTempDir();
       const walletPath = join(dir, 'wallet.enc');
       const configPath = join(dir, 'config.yaml');
@@ -331,7 +349,7 @@ describe('CLI', () => {
           'utf-8'
         );
 
-        await main(['up', '-c', configPath]);
+        await main(['up', '--dev', '-c', configPath]);
         const output = consoleSpy.mock.calls
           .map((c) => String(c[0]))
           .join('\n');
@@ -344,7 +362,7 @@ describe('CLI', () => {
       }
     });
 
-    it('up fails fast when wallet is absent (AC-2)', async () => {
+    it('up --dev fails fast when wallet is absent (AC-2)', async () => {
       const dir = makeTempDir();
       const configPath = join(dir, 'config.yaml');
 
@@ -352,7 +370,7 @@ describe('CLI', () => {
         // Config exists but wallet doesn't — should fail fast
         writeFileSync(configPath, makeConfig({ town: true }), 'utf-8');
 
-        await main(['up', '-c', configPath]);
+        await main(['up', '--dev', '-c', configPath]);
 
         const errorOutput = consoleErrorSpy.mock.calls
           .map((c) => String(c[0]))
@@ -370,7 +388,7 @@ describe('CLI', () => {
     // starting containers or binding a listening socket. Asserts that the
     // API deps are constructed with the expected configPath, host/port, and
     // connector-admin base URL.
-    it('up --dry-run wires API factory without starting containers or listening', async () => {
+    it('up --dev --dry-run wires API factory without starting containers or listening', async () => {
       const { WalletManager, encryptWallet, saveWallet } =
         await import('./wallet/index.js');
       const dir = makeTempDir();
@@ -392,7 +410,7 @@ describe('CLI', () => {
           'utf-8'
         );
 
-        await main(['up', '--town', '--dry-run', '-c', configPath]);
+        await main(['up', '--dev', '--town', '--dry-run', '-c', configPath]);
 
         const output = consoleSpy.mock.calls
           .map((c) => String(c[0]))
@@ -1056,7 +1074,7 @@ logging:
           'utf-8'
         );
 
-        await main(['up', '--town', '-c', configPath]);
+        await main(['up', '--dev', '--town', '-c', configPath]);
 
         const output = consoleSpy.mock.calls
           .map((c) => String(c[0]))
@@ -1084,7 +1102,7 @@ logging:
           'utf-8'
         );
 
-        await main(['up', '--mill', '-c', configPath]);
+        await main(['up', '--dev', '--mill', '-c', configPath]);
 
         const output = consoleSpy.mock.calls
           .map((c) => String(c[0]))
@@ -1111,7 +1129,7 @@ logging:
           'utf-8'
         );
 
-        await main(['up', '--dvm', '-c', configPath]);
+        await main(['up', '--dev', '--dvm', '-c', configPath]);
 
         const output = consoleSpy.mock.calls
           .map((c) => String(c[0]))
@@ -1138,7 +1156,7 @@ logging:
           'utf-8'
         );
 
-        await main(['up', '--town', '--mill', '-c', configPath]);
+        await main(['up', '--dev', '--town', '--mill', '-c', configPath]);
 
         const output = consoleSpy.mock.calls
           .map((c) => String(c[0]))
@@ -1166,8 +1184,8 @@ logging:
           'utf-8'
         );
 
-        // No --town/--mill/--dvm flags: should start all enabled (town + mill)
-        await main(['up', '-c', configPath]);
+        // --dev with no --town/--mill/--dvm flags: starts all enabled (town + mill)
+        await main(['up', '--dev', '-c', configPath]);
 
         const output = consoleSpy.mock.calls
           .map((c) => String(c[0]))
@@ -1201,7 +1219,7 @@ logging:
           'utf-8'
         );
 
-        await main(['up', '--town', '-c', configPath]);
+        await main(['up', '--dev', '--town', '-c', configPath]);
 
         expect(processOnSpy).toHaveBeenCalledWith(
           'SIGINT',
@@ -1234,7 +1252,7 @@ logging:
           'utf-8'
         );
 
-        await main(['up', '--town', '-c', configPath]);
+        await main(['up', '--dev', '--town', '-c', configPath]);
 
         // Extract the registered SIGINT handler
         const sigintCall = processOnSpy.mock.calls.find(
@@ -1289,9 +1307,9 @@ logging:
           'utf-8'
         );
 
-        await expect(main(['up', '--town', '-c', configPath])).rejects.toThrow(
-          /docker.*not available/i
-        );
+        await expect(
+          main(['up', '--dev', '--town', '-c', configPath])
+        ).rejects.toThrow(/docker.*not available/i);
       } finally {
         DockerOrchestrator.prototype.up = originalUp;
         delete process.env['TOWNHOUSE_WALLET_PASSWORD'];

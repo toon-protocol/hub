@@ -2,15 +2,15 @@
 
 **The operator CLI for running a TOON Protocol node stack on your own machine.**
 
-TOON Protocol is a **pay-to-write, free-to-read** [Nostr](https://nostr.com) network over [Interledger](https://interledger.org): writers attach a tiny signed payment to publish an event, and anyone reads for free. `townhouse` is the command-line tool an **operator** uses to stand up and run that infrastructure — it generates your keys, boots the stack in Docker, and publishes a private hidden-service address so paying clients can reach you without exposing anything to the public internet.
+TOON Protocol is a **pay-to-write, free-to-read** [Nostr](https://nostr.com) network over [Interledger](https://interledger.org): writers attach a tiny signed payment to publish an event, and anyone reads for free. `townhouse` is the command-line tool an **operator** uses to stand up and run that infrastructure — it generates your keys and boots the stack in Docker so paying clients can reach you over BTP.
 
 ```bash
 npx @toon-protocol/townhouse init     # 1. create your config + wallet (one time)
-npx @toon-protocol/townhouse hs up    # 2. boot your apex (connector + hidden service)
+npx @toon-protocol/townhouse up       # 2. boot your apex (direct BTP, default) + children
 npx @toon-protocol/townhouse node add # 3. add a service node that earns fees (default: a town relay)
 ```
 
-`hs up` prints `Apex live at <your-address>.anon` once the stack is reachable. Share that address with clients; they pay you over it.
+`up` boots a **direct-BTP apex** by default and prints `Apex live (direct BTP) at ws://127.0.0.1:3000/btp` once reachable. Clients dial that BTP endpoint directly. Want anonymity instead? `npx @toon-protocol/townhouse hs up` is the privacy opt-in: it boots the same apex behind an `.anon` hidden service (no public host port) and prints `Apex live at <your-address>.anon`. Either way, share the address with clients; they pay you over it.
 
 > **Are you trying to _publish_ events, not run a node?** You want [`@toon-protocol/client`](https://www.npmjs.com/package/@toon-protocol/client) instead — the client library that pays a townhouse apex and publishes to it. `townhouse` (this package) is the **operator** side; `@toon-protocol/client` is the **client** side.
 
@@ -24,7 +24,7 @@ This package uses a few terms precisely. Getting them straight up front prevents
 | --- | --- |
 | **TOON Protocol** | The pay-to-write Nostr-over-ILP network. Writes cost a signed off-chain payment claim; reads are free. |
 | **townhouse** | This CLI — the **operator product**. It runs one **apex** plus the service nodes you attach to it. |
-| **apex** | What `hs up` boots: the **ILP connector** (node id `g.townhouse`, the *parent*) **+ an `.anon` hidden service**. The apex is the front door — it validates incoming client payments, takes its fee, and forwards traffic to your service nodes. It earns routing fees but is **not** itself a relay/swap/compute node. |
+| **apex** | What `up` boots: the **ILP connector** (node id `g.townhouse`, the *parent*) + your service nodes. By default it exposes its BTP port (`ws://host:3000/btp`) directly to clients (**direct transport**); `hs up` instead fronts it with an **`.anon` hidden service** (**HS transport**, the privacy opt-in). The apex is the front door — it validates incoming client payments, takes its fee, and forwards traffic to your service nodes. It earns routing fees but is **not** itself a relay/swap/compute node. |
 | **service node** (a **child** of the apex) | What `node add` provisions. Three types **earn fees**: **town** = a Nostr relay (pay-per-event publish); **mill** = a multi-chain token-swap node; **dvm** = a [NIP-90](https://github.com/nostr-protocol/nips/blob/master/90.md) compute node (e.g. Arweave blob storage — the job request *is* the payment). Clients pay at the apex edge; the apex then forwards to the child **for free** (parent→child packets carry no per-packet claim, settled in aggregate). |
 | **operator** (you) | Runs `townhouse`, owns the wallet, earns the fees. |
 | **client** | An end-user or app using [`@toon-protocol/client`](https://www.npmjs.com/package/@toon-protocol/client) to pay your apex and publish. Not this package. |
@@ -77,7 +77,7 @@ Derived Node Addresses:
   dvm    Nostr: 1b52a745...   EVM: 0x18Ac7427...
 
 Next — start your node:
-  npx @toon-protocol/townhouse hs up
+  npx @toon-protocol/townhouse up
 ```
 
 **Write the seed phrase down.** It is shown only once and is the only way to recover your keys.
@@ -89,25 +89,37 @@ npx @toon-protocol/townhouse init --password "<your-password>"
 # or: export TOWNHOUSE_WALLET_PASSWORD=...  then run init
 ```
 
-### 2. Boot your apex — `hs up`
+### 2. Boot your apex — `up` (direct BTP, default)
 
 ```bash
-npx @toon-protocol/townhouse hs up
+npx @toon-protocol/townhouse up
 ```
 
-This starts the **apex** (the ILP connector plus its `.anon` hidden service) — the front door that clients pay. The first run pulls images and bootstraps the hidden service, narrating each stage:
+This starts the **apex** (the ILP connector + the townhouse API) — the front door that clients pay — with the connector's BTP port exposed directly to the host. The first run pulls images and narrates each stage:
 
 ```text
 Pulling 2 apex images...
   [1/2] ghcr.io/toon-protocol/connector@sha256:...
   [2/2] ghcr.io/toon-protocol/townhouse-api@sha256:...
+Apex live (direct BTP) at ws://127.0.0.1:3000/btp
+```
+
+The final line is **your apex's BTP dial address** — share it with clients, who pay you over BTP at `ws://<host>:3000/btp`. By default the port binds to `127.0.0.1` only; to accept clients from other machines, **bind it explicitly** with `TOWNHOUSE_BTP_BIND=0.0.0.0 townhouse up` (only do this if you mean to expose the port publicly). On a cold image cache the first boot can take a few minutes; later boots are faster.
+
+#### Privacy opt-in: `hs up` (hidden-service apex)
+
+Prefer to stay off the public internet entirely? `hs up` boots the same apex behind an **`.anon` v3 hidden service** (no host port exposed) and bootstraps the hidden service, narrating each stage:
+
+```bash
+npx @toon-protocol/townhouse hs up
+```
+
+```text
 Bootstrapping hidden service (this takes 30–90s)…
 Apex live at uagxuabpuvm6mf4l4zptgth2442sbct5lvtur2nffpqnouesgawyv2ad.anon
 ```
 
-The address on the final line is **your apex's `.anon` hidden-service address** — share it with clients, who pay you over BTP at `wss://<your-address>.anon/btp` (through a SOCKS5h proxy). It's also saved to `~/.townhouse/host.json`. On a cold image cache the first boot can take a few minutes; later boots are faster.
-
-If you run it in an interactive terminal, a live dashboard opens once the apex is up. Press `Ctrl-C` to exit the dashboard — your apex keeps running.
+Clients pay you over BTP at `wss://<your-address>.anon/btp` (through a SOCKS5h proxy); the address is saved to `~/.townhouse/host.json`. Direct and HS apexes are **mutually exclusive** (they contend for the same canonical ports / data) — running `up` on a machine that already has an HS apex is refused; tear the HS apex down (`hs down --rotate-keys`) first, or use `hs enable` to switch a running direct apex to HS. If you run `up`/`hs up` in an interactive terminal, a live dashboard opens once the apex is up. Press `Ctrl-C` to exit the dashboard — your apex keeps running.
 
 ### 3. Add a service node — `node add`
 
@@ -140,7 +152,9 @@ Your hidden-service address stays the same across stop/start. To deliberately ro
 | Command                                            | What it does                                                 |
 | -------------------------------------------------- | ------------------------------------------------------------ |
 | `townhouse init`                                   | Create config + wallet (one time)                            |
-| `townhouse hs up`                                  | Boot the apex (connector + `.anon` hidden service)           |
+| `townhouse up`                                     | Boot a **direct-BTP** apex + children (default; clients dial `ws://host:3000/btp`). `--dev` = contributor children-only dev stack |
+| `townhouse hs up`                                  | Boot a **hidden-service** apex (opt-in; anonymous `.anon`)   |
+| `townhouse hs enable`                              | Switch a running direct apex to hidden-service mode          |
 | `townhouse hs down`                                | Stop the apex (address preserved)                            |
 | `townhouse node add [town\|mill\|dvm]`             | Provision a service node (child of the apex; default `town`) |
 | `townhouse node list` / `node remove <id>`         | List / deprovision service nodes                             |
@@ -166,7 +180,8 @@ Your hidden-service address stays the same across stop/start. To deliberately ro
 | Boot fails pulling images                                | Check your network and that you can reach `ghcr.io`, then retry.                                                                                                                                          |
 | `Docker daemon unreachable`                              | Start Docker and re-run.                                                                                                                                                                                  |
 | `Wallet password required, but no interactive terminal…` | In CI/SSH there's no prompt — pass `--password` or set `TOWNHOUSE_WALLET_PASSWORD`.                                                                                                                       |
-| `Wallet not found … Run \`townhouse init\` first.`       | Run `init` before `hs up`.                                                                                                                                                                                |
+| `Wallet not found … Run \`townhouse init\` first.`       | Run `init` before `up` / `hs up`.                                                                                                                                                                         |
+| `Existing hidden-service apex detected…`                 | `townhouse up` (direct) won't downgrade a running HS apex. Use `hs up` to keep HS, or `hs down --rotate-keys && up` (or `hs enable`'s inverse) to switch to direct.                                       |
 | Forgot your password                                     | The wallet is encrypted and can't be recovered without it. Re-run `init --force` to regenerate (this **replaces** your keys — only do this if you've backed up the seed elsewhere or are starting fresh). |
 
 For verbose logs on any failure, re-run with `DEBUG=townhouse:*`.

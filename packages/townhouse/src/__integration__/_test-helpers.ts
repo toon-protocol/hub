@@ -44,6 +44,50 @@ export function isTruthyEnv(value: string | undefined): boolean {
   return ['1', 'true', 'yes'].includes(value.trim().toLowerCase());
 }
 
+// ── apex target resolution (Phase 5: HS vs direct) ──────────────────────────
+
+/**
+ * Whether the live loop is running against a DIRECT-BTP apex (Phase 5) rather
+ * than the hidden-service apex. The orchestrator
+ * (`scripts/townhouse-e2e-local-hs.sh up` with `TRANSPORT_MODE=direct`) does not
+ * publish a `.anon`/`host.json`; the client routes by env (`APEX_BTP_URL`), so
+ * the smoke's publish body just needs a placeholder `targetHostname` the
+ * entrypoint ignores. Selected via `TRANSPORT=direct` or `DIRECT_BTP=1`.
+ */
+export function isDirectTransport(): boolean {
+  const t = process.env['TRANSPORT']?.trim().toLowerCase();
+  return t === 'direct' || isTruthyEnv(process.env['DIRECT_BTP']);
+}
+
+export interface ApexTarget {
+  /** 'direct' (no .anon) or 'hs' (hidden-service). */
+  mode: 'direct' | 'hs';
+  /**
+   * The `targetHostname` to send in POST /publish. In HS mode this is the real
+   * `.anon` hostname (read from host.json by the caller); in direct mode it is a
+   * placeholder the entrypoint ignores (routing is env-driven via APEX_BTP_URL).
+   */
+  targetHostname: string;
+}
+
+/**
+ * Resolve the publish `targetHostname` for the active transport.
+ *
+ * - HS mode: requires `host.json` (the orchestrator wrote the published .anon
+ *   hostname there); the supplied `readHostJson` callback returns it.
+ * - direct mode: returns a static placeholder — there is no `.anon`/host.json,
+ *   and the client's direct-BTP routing ignores `targetHostname`.
+ *
+ * Keeping the HS branch behind a callback lets each smoke keep its existing
+ * host.json read + regex assertion verbatim while sharing the direct branch.
+ */
+export function resolveApexTarget(readHostJson: () => string): ApexTarget {
+  if (isDirectTransport()) {
+    return { mode: 'direct', targetHostname: 'direct.local' };
+  }
+  return { mode: 'hs', targetHostname: readHostJson() };
+}
+
 // ── runCli ────────────────────────────────────────────────────────────────────
 
 export interface RunCliOptions {

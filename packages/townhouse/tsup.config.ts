@@ -72,7 +72,12 @@ export default defineConfig({
     // real bugs and rely on CI's tarball-content gate as the only safety net.
     const manifestPath = 'dist/image-manifest.json';
     const hsTemplateRaw = await readFile('compose/townhouse-hs.yml', 'utf-8');
+    const directTemplateRaw = await readFile(
+      'compose/townhouse-direct.yml',
+      'utf-8'
+    );
     let hsRendered = hsTemplateRaw;
+    let directRendered = directTemplateRaw;
 
     let manifestPresent = false;
     try {
@@ -81,7 +86,7 @@ export default defineConfig({
     } catch {
       console.warn(
         '[tsup] dist/image-manifest.json not found — shipping unsubstituted ' +
-          'townhouse-hs.yml. This is fine for local dev but invalid for npm publish.'
+          'townhouse-{hs,direct}.yml. This is fine for local dev but invalid for npm publish.'
       );
     }
 
@@ -105,11 +110,17 @@ export default defineConfig({
 
       for (const [placeholder, replacement] of subs) {
         hsRendered = hsRendered.replaceAll(placeholder, replacement);
+        directRendered = directRendered.replaceAll(placeholder, replacement);
       }
     }
 
+    // NFR8 — operator-secret file mode (R2-MINOR fix) on both rendered outputs.
     const hsOutPath = join(composeDistDir, 'townhouse-hs.yml');
     await writeFile(hsOutPath, hsRendered, 'utf-8');
-    await chmod(hsOutPath, 0o600); // NFR8 — operator-secret file mode (R2-MINOR fix)
+    await chmod(hsOutPath, 0o600);
+
+    const directOutPath = join(composeDistDir, 'townhouse-direct.yml');
+    await writeFile(directOutPath, directRendered, 'utf-8');
+    await chmod(directOutPath, 0o600);
   },
 });

@@ -21,7 +21,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Fixture dir: src/__tests__/fixtures/compose-loader/
-// Contains: image-manifest.json + compose/townhouse-{hs,dev}.yml (pre-rendered).
+// Contains: image-manifest.json + compose/townhouse-{hs,direct,dev}.yml (pre-rendered).
 const FIXTURE_DIR = join(__dirname, '__tests__', 'fixtures', 'compose-loader');
 
 describe('loadComposeTemplate', () => {
@@ -180,5 +180,73 @@ describe('materializeComposeTemplate', () => {
     });
     const mode = statSync(composePath).mode & 0o777;
     expect(mode).toBe(0o600);
+  });
+});
+
+describe("'direct' compose profile (Phase 2 direct-apex)", () => {
+  let tmpHome: string;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), 'compose-loader-direct-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('loadComposeTemplate accepts the direct profile and returns its YAML', () => {
+    const yaml = loadComposeTemplate('direct', { distDir: FIXTURE_DIR });
+    expect(yaml).toContain('townhouse-direct-net');
+    expect(yaml).toContain('townhouse-direct-connector');
+    // KEY difference vs HS: the connector BTP port :3000 is host-exposed.
+    expect(yaml).toContain('3000:3000');
+    // No HS / anon namespacing leaks into the direct template.
+    expect(yaml).not.toContain('townhouse-hs-anon');
+  });
+
+  it('direct template carries five @sha256: substitutions like HS', () => {
+    const yaml = loadComposeTemplate('direct', { distDir: FIXTURE_DIR });
+    const sha256Matches = yaml.match(/@sha256:[a-f0-9]{64}/g);
+    expect(sha256Matches).toBeTruthy();
+    expect(sha256Matches!.length).toBe(5);
+    expect(yaml).not.toMatch(/\$\{TOON_[A-Z_]+_DIGEST\}/);
+  });
+
+  it('materializeComposeTemplate writes compose/townhouse-direct.yml', () => {
+    const { composePath, manifestPath } = materializeComposeTemplate('direct', {
+      distDir: FIXTURE_DIR,
+      townhouseHome: tmpHome,
+    });
+    expect(composePath).toBe(join(tmpHome, 'compose', 'townhouse-direct.yml'));
+    expect(() => statSync(composePath)).not.toThrow();
+    expect(() => statSync(manifestPath)).not.toThrow();
+    const mode = statSync(composePath).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
+  it('requires a manifest just like HS (throws when absent)', () => {
+    const noManifestDir = mkdtempSync(join(tmpdir(), 'no-manifest-direct-'));
+    try {
+      mkdirSync(join(noManifestDir, 'compose'), { recursive: true });
+      copyFileSync(
+        join(FIXTURE_DIR, 'compose', 'townhouse-direct.yml'),
+        join(noManifestDir, 'compose', 'townhouse-direct.yml')
+      );
+      expect(() =>
+        materializeComposeTemplate('direct', {
+          distDir: noManifestDir,
+          townhouseHome: tmpHome,
+        })
+      ).toThrowError(ComposeLoaderError);
+    } finally {
+      rmSync(noManifestDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an unknown profile', () => {
+    expect(() =>
+      // @ts-expect-error — intentionally invalid profile
+      loadComposeTemplate('bogus', { distDir: FIXTURE_DIR })
+    ).toThrowError(ComposeLoaderError);
   });
 });

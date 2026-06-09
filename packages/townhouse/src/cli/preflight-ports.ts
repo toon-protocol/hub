@@ -44,6 +44,25 @@ export const HS_CANONICAL_PORTS: readonly number[] = [
   9401, 28090, 7100, 3100, 3200, 3400,
 ];
 
+/**
+ * Canonical direct-mode host ports — sourced from the compose template at
+ * `packages/townhouse/compose/townhouse-direct.yml`. Identical to the HS set
+ * PLUS the connector BTP port 3000, which direct-mode EXPOSES to the host for
+ * external `ws://host:3000/btp` clients (the KEY difference from HS, where the
+ * BTP port is reached over a hidden service instead of a host bind).
+ *
+ *   3000  : connector BTP (external direct client dial) — direct-only
+ *   9401  : connector admin
+ *   28090 : townhouse-api Fastify
+ *   7100  : town relay WebSocket (profile: town, lazy-provisioned)
+ *   3100  : town BLS health      (profile: town, lazy-provisioned)
+ *   3200  : mill BLS health      (profile: mill, lazy-provisioned)
+ *   3400  : dvm BLS health       (profile: dvm, lazy-provisioned)
+ */
+export const DIRECT_CANONICAL_PORTS: readonly number[] = [
+  3000, 9401, 28090, 7100, 3100, 3200, 3400,
+];
+
 export interface PortCollision {
   /** The host port that is already bound. */
   port: number;
@@ -191,6 +210,18 @@ export async function checkHsPortCollisions(
       ...(culprit ?? {}),
     };
   });
+}
+
+/**
+ * Preflight check for the direct-apex bring-up path. Identical logic to
+ * {@link checkHsPortCollisions} but probes {@link DIRECT_CANONICAL_PORTS}
+ * (which adds the host-exposed BTP port 3000).
+ */
+export async function checkDirectPortCollisions(
+  docker?: Pick<Docker, 'listContainers'>,
+  ports: readonly number[] = DIRECT_CANONICAL_PORTS
+): Promise<PortCollision[]> {
+  return checkHsPortCollisions(docker, ports);
 }
 
 /**

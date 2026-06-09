@@ -296,11 +296,17 @@ export class DockerOrchestrator extends EventEmitter {
       options.adminClientFactory ??
       ((url, t) => new ConnectorAdminClient(url, t));
 
-    if (this.profile === 'hs' && !this.composePath) {
+    // Both compose-driven profiles ('hs' and 'direct') require a composePath
+    // pointing at the rendered template; 'dev' uses the dockerode path and
+    // ignores composePath.
+    if (
+      (this.profile === 'hs' || this.profile === 'direct') &&
+      !this.composePath
+    ) {
       throw new OrchestratorError(
-        `profile: 'hs' requires a non-empty composePath. Pass options.composePath ` +
-          `pointing at the rendered HS template (typically the composePath ` +
-          `returned by materializeComposeTemplate('hs')).`
+        `profile: '${this.profile}' requires a non-empty composePath. Pass ` +
+          `options.composePath pointing at the rendered template (typically the ` +
+          `composePath returned by materializeComposeTemplate('${this.profile}')).`
       );
     }
   }
@@ -309,12 +315,16 @@ export class DockerOrchestrator extends EventEmitter {
    * Orchestrate full startup sequence. Branches on profile:
    * - 'dev' (default): dockerode-based, preserves existing dev-stack behavior
    * - 'hs': docker compose subprocess + HS hostname readiness gate
+   * - 'direct': docker compose subprocess + connector /health readiness gate
    */
   async up(profiles: NodeType[]): Promise<void> {
     if (this.profile === 'hs') {
       await this.upHs(profiles);
       // defer activeNodes mutation until after upHs succeeds so a
       // failed/timed-out upHs does not leave phantom state.
+      this.activeNodes = [...profiles];
+    } else if (this.profile === 'direct') {
+      await this.upDirect(profiles);
       this.activeNodes = [...profiles];
     } else {
       this.activeNodes = [...profiles];
@@ -372,8 +382,14 @@ export class DockerOrchestrator extends EventEmitter {
     }
   }
 
-  /** HS-mode startup: shell out to `docker compose up -d`, wait for HS hostname. */
-  private async upHs(profiles: NodeType[]): Promise<void> {
+  /**
+   * Shared compose `up -d` for the compose-driven profiles ('hs', 'direct').
+   * Validates the composePath, builds the profile-gated args, and runs
+   * `docker compose up -d`, surfacing failures the same way for both profiles.
+   * Does NOT apply any readiness gate — the caller layers that on (HS hostname
+   * for 'hs'; connector /health for 'direct').
+   */
+  private async composeUp(profiles: NodeType[]): Promise<void> {
     const composePath = this.requireComposePath();
     this.validateComposePath(composePath);
     // Profile flags MUST come BEFORE the subcommand per Docker Compose CLI grammar.
@@ -428,6 +444,11 @@ export class DockerOrchestrator extends EventEmitter {
         cause: err instanceof Error ? err : undefined,
       });
     }
+  }
+
+  /** HS-mode startup: shell out to `docker compose up -d`, wait for HS hostname. */
+  private async upHs(profiles: NodeType[]): Promise<void> {
+    await this.composeUp(profiles);
 
     // roll back containers when waitForHsHostname times out or throws,
     // so the operator can retry without a manual `townhouse hs down`.
@@ -440,6 +461,66 @@ export class DockerOrchestrator extends EventEmitter {
       });
       throw err;
     }
+  }
+
+  /**
+   * Direct-mode startup: shell out to `docker compose up -d`, then gate on the
+   * connector's admin `/health` being reachable (no HS hostname to wait for).
+   *
+   * Readiness probe choice: a plain `:3000` BTP WebSocket-upgrade probe is
+   * awkward to do portably (it needs a ws client + the BTP auth handshake), so
+   * — as the plan permits — readiness here is the connector admin `/health`
+   * returning 200 (via `ConnectorAdminClient.pingAdminLive`, the same admin
+   * client the HS path uses). The compose healthcheck already gates the BTP
+   * port: docker only reports the connector `healthy` once its admin `/health`
+   * (port 9401) responds, and the connector binds its BTP server (:3000) and
+   * admin server together at boot, so a healthy admin endpoint implies the BTP
+   * listener is up. We poll the admin endpoint from the host (the host-mapped
+   * 127.0.0.1:9401) rather than inspecting container health so the gate works
+   * even when invoked against a remote daemon.
+   */
+  private async upDirect(profiles: NodeType[]): Promise<void> {
+    await this.composeUp(profiles);
+
+    // roll back containers when the readiness gate times out or throws, so the
+    // operator can retry without a manual teardown (mirrors upHs).
+    try {
+      await this.waitForConnectorHealth();
+    } catch (err: unknown) {
+      await this.downHs().catch(() => {
+        // Best-effort rollback — ignore teardown errors.
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * Poll the connector admin `/health` (host-mapped 127.0.0.1:<adminPort>) until
+   * it returns 200 or the deadline elapses. Used as the direct-mode readiness
+   * gate. Uses a monotonic clock so suspend/resume cannot stretch the timeout.
+   */
+  private async waitForConnectorHealth(): Promise<void> {
+    const adminUrl = `http://127.0.0.1:${this.config.connector.adminPort}`;
+    const client = this.adminClientFactory(adminUrl, 5_000);
+    const deadlineNs = process.hrtime.bigint() + 120_000_000_000n;
+    const pollInterval = 2_000;
+    let lastError: Error | undefined;
+    while (process.hrtime.bigint() < deadlineNs) {
+      try {
+        await client.pingAdminLive();
+        return;
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        // ECONNREFUSED / timeout / non-2xx while the connector warms up —
+        // retry within budget.
+      }
+      await new Promise((r) => setTimeout(r, pollInterval));
+    }
+    const tail = lastError ? ` (last error: ${lastError.message})` : '';
+    throw new OrchestratorError(
+      `connector health did not become ready within 120000ms` + tail,
+      lastError ? { cause: lastError } : {}
+    );
   }
 
   /**
@@ -627,7 +708,10 @@ export class DockerOrchestrator extends EventEmitter {
    * - 'hs': docker compose subprocess
    */
   async down(): Promise<void> {
-    if (this.profile === 'hs') {
+    if (this.profile === 'hs' || this.profile === 'direct') {
+      // Compose-driven teardown is profile-agnostic — it operates on the
+      // composePath, so the same `docker compose down` works for both 'hs'
+      // and 'direct' stacks.
       await this.downHs();
     } else {
       await this.downDev();

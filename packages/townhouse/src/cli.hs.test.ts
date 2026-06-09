@@ -271,7 +271,7 @@ describe('CLI hs subcommand', () => {
       );
       expect(process.exitCode).toBe(1);
       expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Usage: townhouse hs <up|down>')
+        expect.stringContaining('Usage: townhouse hs <up|enable|down>')
       );
     } finally {
       rmSync(configDir, { recursive: true, force: true });
@@ -1513,6 +1513,271 @@ describe('CLI hs subcommand', () => {
       expect(downFn).toHaveBeenCalledTimes(2);
       expect(process.exitCode).toBe(1);
       stderrSpy.mockRestore();
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── Phase 3: `townhouse up` defaults to a direct-BTP apex; HS stays opt-in ──
+describe('CLI up — direct-BTP default (Phase 3)', () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let stdinIsTTY: boolean | undefined;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    process.exitCode = undefined;
+    stdinIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', {
+      value: false,
+      writable: true,
+      configurable: true,
+    });
+    process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_PASSWORD;
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    stdoutSpy.mockRestore();
+    process.exitCode = undefined;
+    Object.defineProperty(process.stdin, 'isTTY', {
+      value: stdinIsTTY,
+      writable: true,
+      configurable: true,
+    });
+    delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
+  });
+
+  it('plain `up` (no flags) boots a direct apex and prints the BTP dial address', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const overrides = makeHsOverrides({});
+      await main(['up', '-c', configPath], undefined, undefined, overrides);
+
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(output).toContain('Apex live (direct BTP)');
+      expect(output).toContain('ws://127.0.0.1:3000/btp');
+      // Direct path materializes the 'direct' compose profile.
+      expect(overrides.materializeComposeTemplate).toHaveBeenCalledWith(
+        'direct',
+        expect.anything()
+      );
+      // The orchestrator was constructed with the 'direct' profile (widened type).
+      expect(overrides.createOrchestrator).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ profile: 'direct' })
+      );
+      // A direct connector.yaml (no anon) was written.
+      const written = readFileSync(join(configDir, 'connector.yaml'), 'utf-8');
+      expect(written).not.toContain('anon');
+      expect(process.exitCode).toBeUndefined();
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('`up --transport direct` is a synonym for the default direct path', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const overrides = makeHsOverrides({});
+      await main(
+        ['up', '--transport', 'direct', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(output).toContain('Apex live (direct BTP)');
+      expect(overrides.materializeComposeTemplate).toHaveBeenCalledWith(
+        'direct',
+        expect.anything()
+      );
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('back-compat guard: refuses direct `up` when an HS apex config exists', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      // Simulate an operator already running an HS apex.
+      writeFileSync(
+        join(configDir, 'connector.yaml'),
+        'anon:\n  enabled: true\ntransport:\n  type: hs\n',
+        'utf-8'
+      );
+      const overrides = makeHsOverrides({});
+      await main(['up', '-c', configPath], undefined, undefined, overrides);
+
+      const errOut = consoleErrorSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
+      expect(errOut).toContain('hidden-service apex detected');
+      expect(errOut).toContain('townhouse hs up');
+      expect(process.exitCode).toBe(1);
+      // Guard fires BEFORE any orchestration — no direct stack was brought up.
+      expect(overrides.createOrchestrator).not.toHaveBeenCalled();
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('`up --transport hs` routes to the hidden-service path', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const overrides = makeHsOverrides({ hostname: 'route.anyone' });
+      await main(
+        ['up', '--transport', 'hs', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+      // HS path prints "Apex live at <hostname>" via process.stdout.write,
+      // not the direct BTP address.
+      const stdoutOut = stdoutSpy.mock.calls.map((c) => String(c[0])).join('');
+      const logOut = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(stdoutOut).toContain('route.anyone');
+      expect(logOut).not.toContain('Apex live (direct BTP)');
+      expect(overrides.materializeComposeTemplate).toHaveBeenCalledWith(
+        'hs',
+        expect.anything()
+      );
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('`up --transport bogus` errors with the supported values', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const overrides = makeHsOverrides({});
+      await main(
+        ['up', '--transport', 'bogus', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+      const errOut = consoleErrorSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
+      expect(errOut).toContain('Unknown --transport value');
+      expect(process.exitCode).toBe(1);
+      expect(overrides.createOrchestrator).not.toHaveBeenCalled();
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── Phase 3: `hs enable` switches a running direct deployment to HS ──
+describe('CLI hs enable (Phase 3)', () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let stdinIsTTY: boolean | undefined;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    process.exitCode = undefined;
+    stdinIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', {
+      value: false,
+      writable: true,
+      configurable: true,
+    });
+    process.env['TOWNHOUSE_WALLET_PASSWORD'] = WALLET_PASSWORD;
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+    stdoutSpy.mockRestore();
+    process.exitCode = undefined;
+    Object.defineProperty(process.stdin, 'isTTY', {
+      value: stdinIsTTY,
+      writable: true,
+      configurable: true,
+    });
+    delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
+  });
+
+  it('downs the direct stack then brings up HS (writes anon config)', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      // Pre-seed a direct connector.yaml (no anon) — the starting state.
+      writeFileSync(
+        join(configDir, 'connector.yaml'),
+        'transport:\n  type: direct\n',
+        'utf-8'
+      );
+      const downFn = vi.fn(async () => undefined);
+      const overrides = makeHsOverrides({
+        hostname: 'enabled.anyone',
+        down: downFn,
+      });
+      await main(
+        ['hs', 'enable', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(output).toContain('Switching direct apex');
+      // Direct stack was torn down before HS came up.
+      expect(downFn).toHaveBeenCalled();
+      // The HS profile was materialized (force overwrite of the direct config).
+      expect(overrides.materializeComposeTemplate).toHaveBeenCalledWith(
+        'hs',
+        expect.anything()
+      );
+      // The HS orchestrator was constructed (transitioned to the HS stack).
+      expect(overrides.createOrchestrator).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ profile: 'hs' })
+      );
+      // connector.yaml is now an HS config (force-overwrote the direct one).
+      const written = readFileSync(join(configDir, 'connector.yaml'), 'utf-8');
+      expect(written).toContain('anon');
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('is a no-op when an HS apex is already configured', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      writeFileSync(
+        join(configDir, 'connector.yaml'),
+        'anon:\n  enabled: true\ntransport:\n  type: hs\n',
+        'utf-8'
+      );
+      const overrides = makeHsOverrides({});
+      await main(
+        ['hs', 'enable', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(output).toContain('already configured');
+      // No teardown / no HS bring-up.
+      expect(overrides.createOrchestrator).not.toHaveBeenCalled();
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }

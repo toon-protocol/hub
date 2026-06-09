@@ -47,7 +47,11 @@ import {
 import type { NostrEvent } from 'nostr-tools/pure';
 import { balanceProofHashSolana, base58Encode } from '@toon-protocol/core';
 
-import { isTruthyEnv } from './_test-helpers.js';
+import {
+  isTruthyEnv,
+  isDirectTransport,
+  resolveApexTarget,
+} from './_test-helpers.js';
 
 // ── Gate ─────────────────────────────────────────────────────────────────────
 
@@ -241,18 +245,26 @@ describe.skipIf(!shouldRunLiveLoop)(
     let publishBody: Record<string, unknown> = {};
 
     beforeAll(async () => {
-      const hostJsonPath = join(TOWNHOUSE_HOME, 'host.json');
-      if (!existsSync(hostJsonPath)) {
-        throw new Error(
-          `${hostJsonPath} missing — orchestrator did not bring up apex.\n` +
-            `  Run: E2E_SOLANA=1 bash scripts/townhouse-e2e-local-hs.sh up --local`
-        );
+      // Resolve the publish target for the active transport. HS mode reads the
+      // published .anon from host.json; direct mode (TRANSPORT=direct /
+      // DIRECT_BTP=1) uses a placeholder the client ignores (env-driven routing).
+      const target = resolveApexTarget(() => {
+        const hostJsonPath = join(TOWNHOUSE_HOME, 'host.json');
+        if (!existsSync(hostJsonPath)) {
+          throw new Error(
+            `${hostJsonPath} missing — orchestrator did not bring up apex.\n` +
+              `  Run: E2E_SOLANA=1 bash scripts/townhouse-e2e-local-hs.sh up --local`
+          );
+        }
+        const hostJson = JSON.parse(readFileSync(hostJsonPath, 'utf-8')) as {
+          hostname: string;
+        };
+        return hostJson.hostname;
+      });
+      apexHostname = target.targetHostname;
+      if (target.mode === 'hs') {
+        expect(apexHostname).toMatch(/^[a-z2-7]{55,57}\.(anyone|anon)$/);
       }
-      const hostJson = JSON.parse(readFileSync(hostJsonPath, 'utf-8')) as {
-        hostname: string;
-      };
-      apexHostname = hostJson.hostname;
-      expect(apexHostname).toMatch(/^[a-z2-7]{55,57}\.(anyone|anon)$/);
 
       // Verify client up + Solana-funded.
       const res = await fetchWithTimeout(`${CLIENT_URL}/healthz`, {
@@ -265,7 +277,11 @@ describe.skipIf(!shouldRunLiveLoop)(
         solAddr: string;
         balances: { sol: number };
       };
-      if (!healthz.anyoneReady) {
+      // anyoneReady gates the SOCKS/anon path. In direct mode there is no anon
+      // daemon (the client dials APEX_BTP_URL directly), so anyoneReady can be
+      // false while the client is otherwise ready (faucet-funded). Only enforce
+      // it for HS.
+      if (!isDirectTransport() && !healthz.anyoneReady) {
         throw new Error(
           `Client anyoneReady=false. Inspect: docker logs ${CLIENT_CONTAINER} | tail -50`
         );
@@ -273,7 +289,9 @@ describe.skipIf(!shouldRunLiveLoop)(
       podSolAddr = healthz.solAddr;
       expect(podSolAddr.length).toBeGreaterThan(0);
       expect(healthz.balances.sol).toBeGreaterThan(0);
-      console.log(`[local-hs-solana] client SOL=${podSolAddr}`);
+      console.log(
+        `[local-hs-solana] transport=${target.mode} client SOL=${podSolAddr}`
+      );
 
       bSecretKey = generateSecretKey();
       getPublicKey(bSecretKey); // touch — keeps parity with the EVM smoke

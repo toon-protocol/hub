@@ -192,22 +192,29 @@ TOWNHOUSE_E2E_REAL_STACK=1 pnpm --filter @toon-protocol/townhouse-web e2e:real
 
 ## Compose Templates (npm tarball, Story 45.2)
 
-The published `@toon-protocol/townhouse` package ships two Docker Compose templates:
+The published `@toon-protocol/townhouse` package ships three Docker Compose templates:
 
-| Profile | File in tarball                  | Purpose                                               |
-| ------- | -------------------------------- | ----------------------------------------------------- |
-| `hs`    | `dist/compose/townhouse-hs.yml`  | Operator-facing apex boot — digest-pinned GHCR images |
-| `dev`   | `dist/compose/townhouse-dev.yml` | Contributor dev stack — local `toon:*` build images   |
+| Profile  | File in tarball                      | Purpose                                                                          |
+| -------- | ------------------------------------ | -------------------------------------------------------------------------------- |
+| `direct` | `dist/compose/townhouse-direct.yml`  | **Default** operator apex boot (`townhouse up`) — no HS, exposes BTP `:3000`      |
+| `hs`     | `dist/compose/townhouse-hs.yml`      | Hidden-service apex boot (`townhouse hs up`, opt-in) — digest-pinned GHCR images  |
+| `dev`    | `dist/compose/townhouse-dev.yml`     | Contributor dev stack (`townhouse up --dev`) — local `toon:*` build images        |
 
-> **Port collision warning.** The HS template binds canonical ports
-> (`127.0.0.1:9401`, `:28090`, `:7100`, `:3100`, `:3200`, `:3400`); the
-> contributor dev stack binds 28xxx-namespaced equivalents (28080:9401,
-> 28100:3100, 28110:3100, 28200:3200, 28210:3200, 28400:3400, 28700:7100,
-> 28710:7100). HS-mode and the dev stack (`scripts/townhouse-dev-infra.sh`)
-> **must not run concurrently on the same machine** — host:9401, host:3100,
-> host:3200, host:3400, host:7100 will conflict. The HS template's
-> single-tenant defaults are intentional for the apex operator path
-> (Story 45.4 `townhouse hs up`); open an enhancement issue if multi-tenant
+**`townhouse up` defaults to the `direct` profile** (Phase-3 default flip): same apex
+as `hs` minus the `.anon` hidden service, plus a `${TOWNHOUSE_BTP_BIND:-127.0.0.1}:3000:3000`
+host bind so external clients dial `ws://host:3000/btp`. `hs up` remains the privacy
+opt-in. The direct stack is namespaced (`townhouse-direct-*` containers/networks/volumes)
+so it can't be confused with an HS stack, but it shares the canonical host ports.
+
+> **Mutual exclusivity (direct / HS / dev).** All three apex profiles contend for the
+> same canonical host ports — the dev stack binds 28xxx-namespaced equivalents (28080:9401,
+> 28100/28110:3100, 28200/28210:3200, 28400:3400, 28700/28710:7100), while **`direct` and
+> `hs` both bind the canonical `127.0.0.1:9401`, `:28090`, `:7100`, `:3100`, `:3200`, `:3400`
+> (and `direct` additionally binds `:3000`)**. So a direct apex, an HS apex, and the dev
+> stack **must not run concurrently on the same machine**. The CLI enforces the direct↔HS
+> case at the config layer: `townhouse up` refuses if `connector.yaml` already has
+> `anon.enabled:true` (back-compat guard); switch with `townhouse hs enable` (direct→HS) or
+> `hs down --rotate-keys && up` (HS→direct). Open an enhancement issue if multi-tenant
 > bindings become a real need.
 
 ### API
