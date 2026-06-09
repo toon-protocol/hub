@@ -704,7 +704,7 @@ connector:
   image: ghcr.io/toon-protocol/connector:3.4.1
   adminPort: 9401
 transport:
-  mode: ator
+  mode: hs
   socksProxy: socks5h://ator-sidecar:9050
   externalUrl: wss://abc.anyone/btp
   hiddenService:

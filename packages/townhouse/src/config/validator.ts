@@ -52,7 +52,7 @@ function assertPort(value: number, path: string): void {
 }
 
 const VALID_LOG_LEVELS = new Set(['debug', 'info', 'warn', 'error']);
-const VALID_TRANSPORT_MODES = new Set(['ator', 'direct']);
+const VALID_TRANSPORT_MODES = new Set(['hs', 'direct']);
 
 function validateNodeConfig(
   raw: unknown,
@@ -144,7 +144,7 @@ export function validateConfig(raw: unknown): TownhouseConfig {
   if (transport['externalUrl'] !== undefined) {
     assertString(transport['externalUrl'], 'config.transport.externalUrl');
   }
-  // hiddenService is optional and only meaningful when mode='ator'. We
+  // hiddenService is optional and only meaningful when mode='hs'. We
   // validate the inner shape unconditionally if present (a hiddenService
   // block under mode='direct' is operator confusion, not silent acceptance).
   if (transport['hiddenService'] !== undefined) {
@@ -171,9 +171,9 @@ export function validateConfig(raw: unknown): TownhouseConfig {
         'config.transport.hiddenService.stopTimeoutMs'
       );
     }
-    if (transport['mode'] !== 'ator') {
+    if (transport['mode'] !== 'hs') {
       throw new ConfigValidationError(
-        'config.transport.hiddenService is only valid when config.transport.mode is "ator"'
+        'config.transport.hiddenService is only valid when config.transport.mode is "hs"'
       );
     }
   }
@@ -213,17 +213,17 @@ export function validateConfig(raw: unknown): TownhouseConfig {
     }
   }
 
-  // mode='ator' requires SOMETHING to advertise: either explicit externalUrl
+  // mode='hs' requires SOMETHING to advertise: either explicit externalUrl
   // OR hiddenService (which makes externalUrl='auto' implicit). Without one
   // of these, the connector's socks5 transport rejects with "missing
   // required field: transport.externalUrl" and the connector fails to boot.
   if (
-    transport['mode'] === 'ator' &&
+    transport['mode'] === 'hs' &&
     transport['externalUrl'] === undefined &&
     transport['hiddenService'] === undefined
   ) {
     throw new ConfigValidationError(
-      'config.transport.mode="ator" requires either config.transport.externalUrl ' +
+      'config.transport.mode="hs" requires either config.transport.externalUrl ' +
         '(operator-managed anon binary) or config.transport.hiddenService ' +
         '(connector-managed anon binary). Without one of these, the underlying ' +
         'connector will reject the manifest at boot.'
@@ -455,7 +455,7 @@ export function validateConfig(raw: unknown): TownhouseConfig {
       adminPort: connector['adminPort'] as number,
     },
     transport: {
-      mode: transport['mode'] as 'ator' | 'direct',
+      mode: transport['mode'] as 'hs' | 'direct',
       ...(transport['socksProxy'] !== undefined
         ? { socksProxy: transport['socksProxy'] as string }
         : {}),

@@ -103,10 +103,10 @@ describe('loadConfig', () => {
   it('TOWNHOUSE_TRANSPORT_MODE env var overrides YAML value', () => {
     const dir = makeTempDir();
     const configPath = join(dir, 'config.yaml');
-    // Add externalUrl to the YAML so the validator accepts mode='ator'
+    // Add externalUrl to the YAML so the validator accepts mode='hs'
     // without requiring hiddenService. The base VALID_YAML has mode='direct'
-    // and no externalUrl, which is fine for direct but not for ator (the
-    // validator rejects mode='ator' that has neither externalUrl nor
+    // and no externalUrl, which is fine for direct but not for hs (the
+    // validator rejects mode='hs' that has neither externalUrl nor
     // hiddenService — see config/validator.ts).
     const yamlWithExternalUrl = VALID_YAML.replace(
       'transport:\n  mode: direct',
@@ -114,9 +114,9 @@ describe('loadConfig', () => {
     );
     writeFileSync(configPath, yamlWithExternalUrl, 'utf-8');
 
-    setEnv('TOWNHOUSE_TRANSPORT_MODE', 'ator');
+    setEnv('TOWNHOUSE_TRANSPORT_MODE', 'hs');
     const config = loadConfig(configPath);
-    expect(config.transport.mode).toBe('ator');
+    expect(config.transport.mode).toBe('hs');
     expect(config.transport.externalUrl).toBe('wss://test.anyone/btp');
 
     rmSync(dir, { recursive: true, force: true });
@@ -212,7 +212,7 @@ nodes:
 
     setEnv('TOWNHOUSE_TRANSPORT_MODE', 'tor');
     expect(() => loadConfig(configPath)).toThrow(
-      'TOWNHOUSE_TRANSPORT_MODE must be "ator" or "direct"'
+      'TOWNHOUSE_TRANSPORT_MODE must be "hs" or "direct"'
     );
 
     rmSync(dir, { recursive: true, force: true });

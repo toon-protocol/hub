@@ -1025,9 +1025,9 @@ describe('DockerOrchestrator', () => {
       );
     });
 
-    it('includes SOCKS_PROXY env when transport mode is ator', async () => {
+    it('includes SOCKS_PROXY env when transport mode is hs', async () => {
       const config = configWithNodes(['town']);
-      config.transport.mode = 'ator';
+      config.transport.mode = 'hs';
       config.transport.socksProxy = 'socks5h://proxy.ator.io:9050';
 
       const orchestrator = new DockerOrchestrator(

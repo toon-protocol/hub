@@ -624,10 +624,10 @@ describe('ConnectorConfigGenerator env-var contract', () => {
     expect(envVars['TRANSPORT_MODE']).toBe('direct');
   });
 
-  it('additionally emits SOCKS_PROXY when transport.mode is ator with proxy set', () => {
+  it('additionally emits SOCKS_PROXY when transport.mode is hs with proxy set', () => {
     const config = getDefaultConfig();
     config.transport = {
-      mode: 'ator',
+      mode: 'hs',
       socksProxy: 'socks5h://proxy.ator.io:9050',
     };
     const gen = new ConnectorConfigGenerator(config);

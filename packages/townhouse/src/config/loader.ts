@@ -74,8 +74,8 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
 
   if (env['TOWNHOUSE_TRANSPORT_MODE']) {
     const mode = env['TOWNHOUSE_TRANSPORT_MODE'];
-    if (mode !== 'ator' && mode !== 'direct') {
-      throw new Error('TOWNHOUSE_TRANSPORT_MODE must be "ator" or "direct"');
+    if (mode !== 'hs' && mode !== 'direct') {
+      throw new Error('TOWNHOUSE_TRANSPORT_MODE must be "hs" or "direct"');
     }
     const transport = config['transport'] as
       | Record<string, unknown>

@@ -206,12 +206,12 @@ export interface HiddenServiceConfig {
 }
 
 export interface TransportConfig {
-  /** Transport mode: 'ator' for Tor-based, 'direct' for clearnet */
-  mode: 'ator' | 'direct';
-  /** SOCKS5 proxy address when using ator transport */
+  /** Transport mode: 'hs' for hidden-service (SOCKS5/Tor-based), 'direct' for clearnet */
+  mode: 'hs' | 'direct';
+  /** SOCKS5 proxy address when using hs transport */
   socksProxy?: string;
   /**
-   * Externally reachable BTP URL. Required when mode='ator' AND
+   * Externally reachable BTP URL. Required when mode='hs' AND
    * hiddenService is unset (operator runs their own anon binary external
    * to the connector and is responsible for the URL). Ignored for
    * mode='direct'. When hiddenService is set and externalUrl is unset,

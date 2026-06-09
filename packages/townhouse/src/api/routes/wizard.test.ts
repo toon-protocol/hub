@@ -499,10 +499,10 @@ describe('buildConfigFromRequest', () => {
 
   it('applies transport mode', () => {
     const config = buildConfigFromRequest(
-      makeValidPayload({ transport: { mode: 'ator' } }),
+      makeValidPayload({ transport: { mode: 'hs' } }),
       '/tmp/test/config.yaml'
     );
-    expect(config.transport.mode).toBe('ator');
+    expect(config.transport.mode).toBe('hs');
   });
 
   it('applies chainProviders when provided', () => {

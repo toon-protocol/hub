@@ -138,10 +138,10 @@ describe('GET /api/transport', () => {
     expect(typeof body.ts).toBe('number');
   });
 
-  it('returns ator mode with reachable=true and latencies when probe is healthy', async () => {
+  it('returns hs mode with reachable=true and latencies when probe is healthy', async () => {
     const { app, deps, probe } = buildDeps();
     deps.config.transport = {
-      mode: 'ator',
+      mode: 'hs',
       socksProxy: 'socks5h://proxy.ator.io:9050',
     };
     probe.setMockStatus({
@@ -156,17 +156,17 @@ describe('GET /api/transport', () => {
     const res = await app.inject({ method: 'GET', url: '/api/transport' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.mode).toBe('ator');
+    expect(body.mode).toBe('hs');
     expect(body.reachable).toBe(true);
     expect(body.socksProxy).toBe('socks5h://proxy.ator.io:9050');
     expect(body.latencyProxyMs).toBe(120);
     expect(body.latencyDirectMs).toBe(10);
   });
 
-  it('returns ator mode with reachable=false and probeError when proxy is down', async () => {
+  it('returns hs mode with reachable=false and probeError when proxy is down', async () => {
     const { app, deps, probe } = buildDeps();
     deps.config.transport = {
-      mode: 'ator',
+      mode: 'hs',
       socksProxy: 'socks5h://proxy.ator.io:9050',
     };
     probe.setMockStatus({
@@ -181,7 +181,7 @@ describe('GET /api/transport', () => {
     const res = await app.inject({ method: 'GET', url: '/api/transport' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.mode).toBe('ator');
+    expect(body.mode).toBe('hs');
     expect(body.reachable).toBe(false);
     expect(body.probeError).toBe('ECONNREFUSED');
   });
@@ -201,7 +201,7 @@ describe('PATCH /api/transport', () => {
   it('happy-path Direct→ATOR: regenerate called once, probe started', async () => {
     const { app, deps, orchestrator, probe } = buildDeps();
     // The validator (config/validator.ts:216-227) requires either
-    // externalUrl or hiddenService when mode='ator', so the operator's
+    // externalUrl or hiddenService when mode='hs', so the operator's
     // YAML must have set one of them up before flipping. We mirror the
     // post-`townhouse-hs-init.sh` operator state: hiddenService present in
     // direct mode and carried forward by the route on flip.
@@ -215,11 +215,11 @@ describe('PATCH /api/transport', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/api/transport',
-      payload: { mode: 'ator' },
+      payload: { mode: 'hs' },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.mode).toBe('ator');
+    expect(body.mode).toBe('hs');
     expect(body.restartTriggered).toBe(true);
     expect(body.restartedAt).toBeTypeOf('number');
 
@@ -238,7 +238,7 @@ describe('PATCH /api/transport', () => {
   it('happy-path ATOR→Direct: probe stopped, regenerate called', async () => {
     const { app, deps, orchestrator, probe } = buildDeps();
     deps.config.transport = {
-      mode: 'ator',
+      mode: 'hs',
       socksProxy: 'socks5h://proxy.ator.io:9050',
     };
     registerTransportRoutes(app, deps);
@@ -288,7 +288,7 @@ describe('PATCH /api/transport', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/api/transport',
-      payload: { mode: 'ator' },
+      payload: { mode: 'hs' },
     });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe('config_mutation_in_flight');
@@ -307,7 +307,7 @@ describe('PATCH /api/transport', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/api/transport',
-      payload: { mode: 'ator' },
+      payload: { mode: 'hs' },
     });
     expect(res.statusCode).toBe(500);
     expect(res.json().error).toBe('connector_restart_failed');
@@ -327,7 +327,7 @@ describe('PATCH /api/transport', () => {
     // keys produce a 400 validation error rather than being silently stripped.
     const { app, deps } = buildDeps();
     deps.config.transport = {
-      mode: 'ator',
+      mode: 'hs',
       socksProxy: 'socks5h://proxy.ator.io:9050',
     };
     registerTransportRoutes(app, deps);
@@ -349,7 +349,7 @@ describe('PATCH /api/transport', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/api/transport',
-      payload: { mode: 'ator', socksProxy: 'not-a-url' },
+      payload: { mode: 'hs', socksProxy: 'not-a-url' },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toContain('invalid_socksProxy');
@@ -363,7 +363,7 @@ describe('PATCH /api/transport', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/api/transport',
-      payload: { mode: 'ator', socksProxy: 'http://proxy.example.com:8080' },
+      payload: { mode: 'hs', socksProxy: 'http://proxy.example.com:8080' },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('invalid_socksProxy');

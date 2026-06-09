@@ -112,7 +112,7 @@ export class ConnectorConfigGenerator {
    * at `/config/connector.yaml` in the container.
    */
   toYaml(runtimeConfig: ConnectorRuntimeConfig): string {
-    // Translate operator-facing `mode: 'ator' | 'direct'` into the
+    // Translate operator-facing `mode: 'hs' | 'direct'` into the
     // connector's internal discriminated union (Epic 35 / Story 35.3):
     //   { type: 'direct' }
     //     → unchanged direct TCP
@@ -120,10 +120,10 @@ export class ConnectorConfigGenerator {
     //     → SOCKS5 outbound + (optionally) managed inbound hidden service
     //
     // Historical bug we're fixing here: the previous shape was
-    // `{ mode: 'ator', socksProxy }`, which the connector at 3.3.x
+    // `{ mode: 'hs', socksProxy }`, which the connector at 3.3.x
     // does NOT recognize. The connector's validateTransport() saw an
     // unknown `mode` field, defaulted `type` to 'direct', and silently
-    // discarded socksProxy. Operators toggling mode='ator' got direct
+    // discarded socksProxy. Operators toggling mode='hs' got direct
     // traffic anyway. The new shape is what the connector actually reads.
     const transportBlock = this.buildConnectorTransportBlock(
       runtimeConfig.transport
@@ -267,15 +267,15 @@ export class ConnectorConfigGenerator {
 
   /**
    * Generate transport config from Townhouse config.
-   * When mode is 'ator', includes SOCKS proxy (uses default if not configured).
+   * When mode is 'hs', includes SOCKS proxy (uses default if not configured).
    * Carries forward externalUrl + hiddenService when set; downstream
    * buildConnectorTransportBlock handles translation to the connector's
    * wire shape.
    */
   private generateTransportConfig(): ConnectorRuntimeConfig['transport'] {
-    if (this.config.transport.mode === 'ator') {
+    if (this.config.transport.mode === 'hs') {
       const transport: ConnectorRuntimeConfig['transport'] = {
-        mode: 'ator',
+        mode: 'hs',
         socksProxy: this.config.transport.socksProxy ?? DEFAULT_ATOR_PROXY,
       };
       if (this.config.transport.externalUrl !== undefined) {

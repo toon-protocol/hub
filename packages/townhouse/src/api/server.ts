@@ -30,7 +30,7 @@ import { registerLogsRoutes } from './routes/logs.js';
 
 /**
  * Create the Fastify API server. Caller MUST supply a `transportProbe` in
- * `deps` (constructed from the config and started if mode === 'ator').
+ * `deps` (constructed from the config and started if mode === 'hs').
  */
 export async function createApiServer(deps: ApiDeps): Promise<ApiServer> {
   const { config, logger } = deps;

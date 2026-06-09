@@ -130,25 +130,25 @@ describe('ConnectorConfigGenerator', () => {
   // ── T-019: ATOR toggle ──
 
   describe('generate() — ATOR transport config (T-019)', () => {
-    it('includes SOCKS proxy when transport mode is ator', () => {
+    it('includes SOCKS proxy when transport mode is hs', () => {
       const config = configWithNodes(['town']);
-      config.transport.mode = 'ator';
+      config.transport.mode = 'hs';
       config.transport.socksProxy = 'socks5h://proxy.ator.io:9050';
       const generator = new ConnectorConfigGenerator(config);
       const result = generator.generate(['town']);
 
-      expect(result.transport.mode).toBe('ator');
+      expect(result.transport.mode).toBe('hs');
       expect(result.transport.socksProxy).toBe('socks5h://proxy.ator.io:9050');
     });
 
-    it('uses default ATOR proxy when mode is ator but socksProxy not set', () => {
+    it('uses default ATOR proxy when mode is hs but socksProxy not set', () => {
       const config = configWithNodes(['town']);
-      config.transport.mode = 'ator';
+      config.transport.mode = 'hs';
       // No socksProxy set
       const generator = new ConnectorConfigGenerator(config);
       const result = generator.generate(['town']);
 
-      expect(result.transport.mode).toBe('ator');
+      expect(result.transport.mode).toBe('hs');
       expect(result.transport.socksProxy).toBe('socks5h://proxy.ator.io:9050');
     });
 
@@ -207,9 +207,9 @@ describe('ConnectorConfigGenerator', () => {
       expect(envVars['TRANSPORT_MODE']).toBe('direct');
     });
 
-    it('includes SOCKS_PROXY env var when transport mode is ator', () => {
+    it('includes SOCKS_PROXY env var when transport mode is hs', () => {
       const config = configWithNodes(['town']);
-      config.transport.mode = 'ator';
+      config.transport.mode = 'hs';
       config.transport.socksProxy = 'socks5h://proxy.ator.io:9050';
       const generator = new ConnectorConfigGenerator(config);
       const runtimeConfig = generator.generate(['town']);
@@ -262,9 +262,9 @@ describe('ConnectorConfigGenerator', () => {
   // ── Hidden-service config (Story 35.5 connector contract) ──
 
   describe('generate() — hidden service surface', () => {
-    it('passes through hiddenService when transport.mode is ator', () => {
+    it('passes through hiddenService when transport.mode is hs', () => {
       const config = configWithNodes(['town']);
-      config.transport.mode = 'ator';
+      config.transport.mode = 'hs';
       config.transport.hiddenService = {
         dir: '/var/lib/anon/hs',
         port: 3000,
@@ -280,7 +280,7 @@ describe('ConnectorConfigGenerator', () => {
 
     it('passes through externalUrl when set explicitly', () => {
       const config = configWithNodes(['town']);
-      config.transport.mode = 'ator';
+      config.transport.mode = 'hs';
       config.transport.externalUrl = 'wss://known.anyone/btp';
       const generator = new ConnectorConfigGenerator(config);
       const result = generator.generate(['town']);
@@ -292,7 +292,7 @@ describe('ConnectorConfigGenerator', () => {
   describe('toEnvVars() — hidden service env vars', () => {
     it('emits TRANSPORT_HIDDEN_SERVICE_DIR + PORT when hiddenService is set', () => {
       const config = configWithNodes(['town']);
-      config.transport.mode = 'ator';
+      config.transport.mode = 'hs';
       config.transport.hiddenService = {
         dir: '/var/lib/anon/hs',
         port: 3000,
@@ -320,7 +320,7 @@ describe('ConnectorConfigGenerator', () => {
   describe('toYaml() — connector wire-format translation', () => {
     // Important: the connector's YAML schema uses transport.type (not .mode)
     // and expects a discriminated union with 'direct' | 'socks5'. The
-    // previous shape (mode: 'ator') was silently ignored by the connector,
+    // previous shape (mode: 'hs') was silently ignored by the connector,
     // which defaulted to direct. These tests pin the post-fix wire format.
 
     it('emits transport.type=direct for mode=direct', () => {
@@ -334,9 +334,9 @@ describe('ConnectorConfigGenerator', () => {
       expect(yaml).not.toMatch(/socksProxy/);
     });
 
-    it('emits type=socks5 + externalUrl + managed=false for ator + externalUrl', () => {
+    it('emits type=socks5 + externalUrl + managed=false for hs + externalUrl', () => {
       const config = configWithNodes(['town']);
-      config.transport.mode = 'ator';
+      config.transport.mode = 'hs';
       config.transport.socksProxy = 'socks5h://proxy.ator.io:9050';
       config.transport.externalUrl = 'wss://operator.example/btp';
       const generator = new ConnectorConfigGenerator(config);
@@ -350,9 +350,9 @@ describe('ConnectorConfigGenerator', () => {
       expect(yaml).not.toMatch(/managedOptions/);
     });
 
-    it('emits managed=true + managedOptions + externalUrl=auto for ator + hiddenService', () => {
+    it('emits managed=true + managedOptions + externalUrl=auto for hs + hiddenService', () => {
       const config = configWithNodes(['town']);
-      config.transport.mode = 'ator';
+      config.transport.mode = 'hs';
       config.transport.socksProxy = 'socks5h://127.0.0.1:9050';
       config.transport.hiddenService = {
         dir: '/var/lib/anon/hs',
@@ -372,7 +372,7 @@ describe('ConnectorConfigGenerator', () => {
 
     it('forwards hiddenService timeouts into managedOptions when set', () => {
       const config = configWithNodes(['town']);
-      config.transport.mode = 'ator';
+      config.transport.mode = 'hs';
       config.transport.hiddenService = {
         dir: '/var/lib/anon/hs',
         port: 3000,
@@ -389,7 +389,7 @@ describe('ConnectorConfigGenerator', () => {
 
     it('honors explicit hiddenService.externalUrl (operator override of "auto")', () => {
       const config = configWithNodes(['town']);
-      config.transport.mode = 'ator';
+      config.transport.mode = 'hs';
       config.transport.externalUrl = 'wss://forced.anyone/btp';
       config.transport.hiddenService = {
         dir: '/var/lib/anon/hs',

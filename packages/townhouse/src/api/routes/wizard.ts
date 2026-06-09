@@ -254,11 +254,11 @@ export function registerWizardRoutes(
       const transport = body.transport;
       if (
         !transport ||
-        (transport.mode !== 'direct' && transport.mode !== 'ator')
+        (transport.mode !== 'direct' && transport.mode !== 'hs')
       ) {
         return reply.status(400).send({
           code: 'transport_invalid',
-          message: 'transport.mode must be "direct" or "ator".',
+          message: 'transport.mode must be "direct" or "hs".',
         });
       }
 

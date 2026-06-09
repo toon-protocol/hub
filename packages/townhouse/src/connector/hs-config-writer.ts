@@ -156,7 +156,7 @@ export function writeHsConnectorConfig(
   const hsRuntimeConfig: ConnectorRuntimeConfig = {
     ...baseConfig,
     transport: {
-      mode: 'ator',
+      mode: 'hs',
       socksProxy: HS_LOCAL_SOCKS_PROXY,
       externalUrl: 'auto',
       hiddenService: {

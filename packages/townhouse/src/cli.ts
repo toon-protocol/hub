@@ -1246,7 +1246,7 @@ async function handleStatus(
   const connectorHs = config.transport.hiddenService;
   const relayHs = config.transport.relayHiddenService;
   if (
-    config.transport.mode === 'ator' ||
+    config.transport.mode === 'hs' ||
     connectorHs?.externalUrl ||
     relayHs?.externalUrl ||
     config.transport.externalUrl
@@ -1263,7 +1263,7 @@ async function handleStatus(
       console.log(`  Relay (Nostr):    ${relayHs.externalUrl}`);
     }
     if (!connectorUrl && !relayHs?.externalUrl) {
-      console.log('  (ator mode set but no externalUrl configured)');
+      console.log('  (hs mode set but no externalUrl configured)');
     }
   }
 
@@ -1496,11 +1496,11 @@ async function handleUp(
 
       const transportProbe = new TransportProbe({
         proxyUrl:
-          config.transport.mode === 'ator'
+          config.transport.mode === 'hs'
             ? (config.transport.socksProxy ?? DEFAULT_ATOR_PROXY)
             : '',
       });
-      if (config.transport.mode === 'ator') {
+      if (config.transport.mode === 'hs') {
         transportProbe.start();
       }
 

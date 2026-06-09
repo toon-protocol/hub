@@ -183,11 +183,11 @@ export async function createWizardApiServer(
     // Build probe for normal mode (after wizard completes)
     const normalProbe = new TransportProbe({
       proxyUrl:
-        config.transport.mode === 'ator'
+        config.transport.mode === 'hs'
           ? (config.transport.socksProxy ?? DEFAULT_ATOR_PROXY)
           : '',
     });
-    if (config.transport.mode === 'ator') {
+    if (config.transport.mode === 'hs') {
       normalProbe.start();
     }
     // Swap the GET-route's view to the normal probe + real config. The GET
@@ -259,7 +259,7 @@ export async function createWizardApiServer(
   // Wizard transport deps. The route closure reads `transportProbe` and `config`
   // per request, so swapping these on transition is observed by subsequent GETs.
   const wizardTransportConfig = {
-    transport: { mode: 'ator' as const, socksProxy: DEFAULT_ATOR_PROXY },
+    transport: { mode: 'hs' as const, socksProxy: DEFAULT_ATOR_PROXY },
   };
   const wizardTransportDeps = {
     config: wizardTransportConfig,

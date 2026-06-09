@@ -85,14 +85,14 @@ export interface ConnectorRuntimeConfig {
   transport: {
     /**
      * Operator-facing transport selection. Maps to the connector's
-     * discriminated union internally (mode='ator' → type='socks5').
+     * discriminated union internally (mode='hs' → type='socks5').
      */
-    mode: 'ator' | 'direct';
-    /** SOCKS5 proxy URL (must be socks5h://) — required when mode='ator'. */
+    mode: 'hs' | 'direct';
+    /** SOCKS5 proxy URL (must be socks5h://) — required when mode='hs'. */
     socksProxy?: string;
     /**
      * Externally reachable BTP URL the connector advertises to peers.
-     * Required when mode='ator' AND hiddenService is unset (operator runs
+     * Required when mode='hs' AND hiddenService is unset (operator runs
      * their own anon binary externally). Ignored for mode='direct'.
      * When hiddenService IS set and externalUrl is unset, the generator
      * emits the literal "auto" so the connector resolves the .anyone

@@ -152,7 +152,7 @@ export function defaultLeasesPath(): string {
  * AC-D2-5 invariants enforced here:
  * - 1 town, 1 mill, 1 dvm (all enabled)
  * - feePerEvent = 0, feeBasisPoints = 0, feePerJob = 0
- * - transport.mode = 'ator'
+ * - transport.mode = 'direct'
  * - mill.chains contains exactly one EVM<->SOL pair
  */
 export function buildDemoConfig(
@@ -209,9 +209,9 @@ export function buildDemoConfig(
     },
     transport: {
       // 'direct' for the demo because `townhouse up` doesn't bring up a
-      // SOCKS5 sidecar — ATOR mode would require one at `socks5://127.0.0.1:28050`
+      // SOCKS5 sidecar — hs mode would require one at `socks5://127.0.0.1:28050`
       // (provided by the dev-infra stack but not the operator CLI). Switch
-      // to 'ator' once the sidecar story lands in townhouse `up`.
+      // to 'hs' once the sidecar story lands in townhouse `up`.
       mode: 'direct',
     },
     api: {

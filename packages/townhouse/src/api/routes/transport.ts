@@ -45,7 +45,7 @@ const patchBodySchema: FastifySchema = {
     additionalProperties: false,
     required: ['mode'],
     properties: {
-      mode: { type: 'string', enum: ['direct', 'ator'] },
+      mode: { type: 'string', enum: ['direct', 'hs'] },
       socksProxy: { type: 'string', minLength: 1, maxLength: 2048 },
     },
   },
@@ -86,7 +86,7 @@ export function registerTransportRoutes(
         ts: Date.now(),
       };
 
-      if (configTransport.mode === 'ator') {
+      if (configTransport.mode === 'hs') {
         payload.socksProxy = configTransport.socksProxy ?? DEFAULT_ATOR_PROXY;
       }
 
@@ -172,11 +172,11 @@ export function registerTransportRoutes(
       const prevSocksProxy = deps.config.transport.socksProxy;
       const newMode = body.mode;
       const newSocksProxy =
-        newMode === 'ator'
+        newMode === 'hs'
           ? (body.socksProxy ?? prevSocksProxy ?? DEFAULT_ATOR_PROXY)
           : undefined;
 
-      // No-op detection: same mode and (for ATOR) URL-normalized same proxy
+      // No-op detection: same mode and (for hs) URL-normalized same proxy
       const noOp =
         prevMode === newMode &&
         (newMode === 'direct' ||
@@ -186,7 +186,7 @@ export function registerTransportRoutes(
       if (noOp) {
         const noOpResponse: TransportPatchResponse = {
           mode: newMode,
-          ...(newMode === 'ator' ? { socksProxy: newSocksProxy } : {}),
+          ...(newMode === 'hs' ? { socksProxy: newSocksProxy } : {}),
           restartTriggered: false,
         };
         return reply.status(200).send(noOpResponse);
@@ -199,7 +199,7 @@ export function registerTransportRoutes(
 
       // Snapshot the prior probe URL so a failed flip can restore it.
       const priorProbeUrl =
-        prevMode === 'ator' ? (prevSocksProxy ?? DEFAULT_ATOR_PROXY) : '';
+        prevMode === 'hs' ? (prevSocksProxy ?? DEFAULT_ATOR_PROXY) : '';
 
       // Snapshot the full prior transport block so a failed flip can restore
       // exactly what the operator had — not just mode + socksProxy.
@@ -220,7 +220,7 @@ export function registerTransportRoutes(
         deps.config.transport = {
           ...carryOver,
           mode: newMode,
-          ...(newMode === 'ator' ? { socksProxy: newSocksProxy } : {}),
+          ...(newMode === 'hs' ? { socksProxy: newSocksProxy } : {}),
         };
 
         // Defensive round-trip validation
@@ -274,7 +274,7 @@ export function registerTransportRoutes(
           // doesn't keep reporting reachability for the failed-flip URL.
           try {
             probe.setProxyUrl(priorProbeUrl);
-            if (prevMode === 'ator') {
+            if (prevMode === 'hs') {
               probe.start();
             } else {
               probe.stop();
@@ -291,13 +291,13 @@ export function registerTransportRoutes(
           });
         }
 
-        // Update probe. ATOR→ATOR with a different proxy must restart the
+        // Update probe. hs→hs with a different proxy must restart the
         // probe loop so the new URL is adopted immediately rather than at
         // the next 30 s tick.
         try {
-          if (newMode === 'ator') {
+          if (newMode === 'hs') {
             const newProbeUrl = newSocksProxy ?? DEFAULT_ATOR_PROXY;
-            if (prevMode === 'ator') {
+            if (prevMode === 'hs') {
               probe.stop();
             }
             probe.setProxyUrl(newProbeUrl);
@@ -317,7 +317,7 @@ export function registerTransportRoutes(
         const restartedAt = Date.now();
         const successResponse: TransportPatchResponse = {
           mode: newMode,
-          ...(newMode === 'ator' ? { socksProxy: newSocksProxy } : {}),
+          ...(newMode === 'hs' ? { socksProxy: newSocksProxy } : {}),
           restartTriggered: true,
           restartedAt,
         };

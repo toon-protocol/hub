@@ -376,7 +376,7 @@ export interface WizardInitRequest {
     mill: { enabled: boolean; feeBasisPoints?: number };
     dvm: { enabled: boolean; feePerJob?: number };
   };
-  transport: { mode: 'direct' | 'ator' };
+  transport: { mode: 'direct' | 'hs' };
   /**
    * Optional settlement chains (connector chainProviders) to configure during
    * first-run setup. Omitted/empty → the connector uses the dev-Anvil default.
@@ -404,8 +404,8 @@ export type WizardProgressMessage =
 
 /** Response shape for GET /api/transport */
 export interface TransportStatusPayload {
-  mode: 'direct' | 'ator';
-  /** Present only when mode === 'ator' */
+  mode: 'direct' | 'hs';
+  /** Present only when mode === 'hs' */
   socksProxy?: string;
   reachable: boolean;
   latencyProxyMs: number | null;
@@ -419,13 +419,13 @@ export interface TransportStatusPayload {
 
 /** Request body for PATCH /api/transport */
 export interface TransportPatchRequest {
-  mode: 'direct' | 'ator';
+  mode: 'direct' | 'hs';
   socksProxy?: string;
 }
 
 /** Response body for PATCH /api/transport */
 export interface TransportPatchResponse {
-  mode: 'direct' | 'ator';
+  mode: 'direct' | 'hs';
   socksProxy?: string;
   restartTriggered: boolean;
   /** ms epoch of connector restart; present when restartTriggered === true */

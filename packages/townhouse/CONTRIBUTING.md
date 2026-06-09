@@ -511,8 +511,8 @@ how peers reach the connector (inbound).
 
 ```yaml
 transport:
-  mode: direct # 'direct' | 'ator'
-  socksProxy: socks5h://proxy.ator.io:9050 # required when mode='ator'
+  mode: direct # 'direct' | 'hs'
+  socksProxy: socks5h://proxy.ator.io:9050 # required when mode='hs'
   externalUrl: wss://my-connector.example/btp # see below
   hiddenService: # optional — connector publishes its own .anyone HS
     dir: /var/lib/anon/hs
@@ -524,8 +524,8 @@ transport:
 
 **`mode: 'direct'`** — clearnet TCP, no overlay. Default for development.
 
-**`mode: 'ator'`** — outbound BTP through the Anyone Protocol (ATOR) overlay
-via SOCKS5. Requires either `externalUrl` (operator-managed anon binary
+**`mode: 'hs'`** — hidden-service transport: outbound BTP through the Anyone
+Protocol (ATOR) overlay via SOCKS5. Requires either `externalUrl` (operator-managed anon binary
 external to the connector) OR `hiddenService` (connector manages its own
 anon binary in-process and publishes a `.anyone` hidden service). Without
 one of these the connector rejects the manifest at boot — the validator
@@ -540,10 +540,10 @@ stable across redeploys, or delete it to rotate. The connector reads
 to peers (you can override with an explicit `externalUrl` if needed).
 
 **Wire-format note (silent-bug fix in this story):** the previous shape
-emitted `transport: { mode: 'ator', socksProxy }` to the connector image,
+emitted `transport: { mode: 'hs', socksProxy }` to the connector image,
 but the connector at 3.3.x reads a discriminated union keyed on `type`
 (`'direct' | 'socks5'`). The unknown `mode` field was silently discarded,
-defaulting to direct — operators toggling ATOR got direct traffic anyway.
+defaulting to direct — operators toggling hs mode got direct traffic anyway.
 The current generator emits the correct `type: 'socks5'` shape with
 `externalUrl`, `managed`, and `managedOptions` per the connector contract.
 

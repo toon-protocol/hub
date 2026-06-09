@@ -31,7 +31,7 @@ describe('buildDemoConfig', () => {
   it('AC-D2-2: transport defaults to direct (ATOR sidecar not yet wired into `townhouse up`)', () => {
     // The demo intentionally ships transport.mode='direct' until the SOCKS5
     // sidecar story lands in `townhouse up` — see demo.ts:210 for the inline
-    // rationale. Flip back to 'ator' once the sidecar is wired.
+    // rationale. Flip back to 'hs' once the sidecar is wired.
     const cfg = buildDemoConfig({ walletPath: '/tmp/x.enc', leasesPath: null });
     expect(cfg.transport.mode).toBe('direct');
   });
