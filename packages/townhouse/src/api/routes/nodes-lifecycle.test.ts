@@ -482,6 +482,20 @@ describe('POST /api/nodes success path', () => {
     // group/other-readable (0o644). A 0o600 file → mill EACCES crash-loop.
     const mode = (await fs.stat(millConfigPath)).mode & 0o777;
     expect(mode & 0o044).not.toBe(0);
+
+    // Regression (#145): a group/other-readable FILE is not enough — to open()
+    // the direct file bind-mount the mill (uid 1001) must also be able to
+    // TRAVERSE every parent dir. A 0o700 TOWNHOUSE_HOME denies search (+x) to
+    // uid 1001 → EACCES → 60s healthcheck timeout → full rollback. The parent
+    // dir must carry the others-search bit (0o711), without granting read
+    // (others must NOT be able to list the dir and see wallet/config.yaml).
+    // homeDir === dirname(millConfigPath) === TOWNHOUSE_HOME
+    const parentMode = (await fs.stat(homeDir)).mode & 0o777;
+    // others-execute (traverse) must be set
+    expect(parentMode & 0o001).not.toBe(0);
+    // others-read (listing) must NOT be set — directory contents stay private
+    expect(parentMode & 0o004).toBe(0);
+    expect(parentMode).toBe(0o711);
   });
 
   it('provisions mill node — swapPairs reads fromChain from chainProviders[0].chainId', async () => {

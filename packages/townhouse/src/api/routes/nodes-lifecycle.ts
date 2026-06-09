@@ -525,11 +525,24 @@ export function registerNodeLifecycleRoutes(
             );
             await fs.mkdir(dirname(millConfigPath), {
               recursive: true,
-              mode: 0o700,
+              mode: 0o711,
             });
+            // 0o711 (NOT 0o700): mill.config.json is a *direct file* bind-mount
+            // (`${TOWNHOUSE_HOME}/mill.config.json:/config/mill.config.json:ro`)
+            // into the mill container, which runs as uid 1001 (`toon`) — a
+            // DIFFERENT uid than the host writer / the api+connector (uid 1000).
+            // To open() that bind-mounted file the kernel needs search (+x) on
+            // every parent dir; a 0o700 TOWNHOUSE_HOME denies +x to uid 1001, so
+            // the mill crash-loops on `EACCES /config/mill.config.json`, fails
+            // its 60s healthcheck, and the whole `node add mill` rolls back
+            // (issue #145). 0o711 grants traverse-only (+x, NOT +r) to group/
+            // others: uid 1001 can open the known file path but CANNOT list the
+            // directory, so the operator's wallet/config.yaml/nodes.yaml stay
+            // private. (town is unaffected — it uses a named volume `/data`, not
+            // a bind-mount through TOWNHOUSE_HOME.)
             // mkdir mode is a no-op on existing dirs — chmod explicitly so the
-            // parent is 0o700 even if it pre-existed (P3).
-            await fs.chmod(dirname(millConfigPath), 0o700);
+            // parent is traversable even if it pre-existed at 0o700.
+            await fs.chmod(dirname(millConfigPath), 0o711);
             // 0o644 (NOT 0o600): this file is bind-mounted read-only into the
             // mill container, which runs as a DIFFERENT uid (the image's `toon`
             // user, uid 1001) than the api that writes it (the operator's host
