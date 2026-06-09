@@ -90,3 +90,61 @@ describe('PeerTypeResolver', () => {
     expect(resolver.resolvePeerType('peer-other')).toBe('external');
   });
 });
+
+describe('PeerTypeResolver.fromConnectorPeers', () => {
+  it('infers the type from a bare node-type peer id (compose-render path)', () => {
+    // The `townhouse hs up` / local-HS harness registers child peers with a
+    // bare node-type id via POST /admin/peers (e.g. {id:'town'}) — #144.
+    const resolver = PeerTypeResolver.fromConnectorPeers([
+      { id: 'town', ilpAddresses: ['g.townhouse.town'] },
+    ]);
+    expect(resolver.resolvePeerType('town')).toBe('town');
+  });
+
+  it('infers the type from a g.townhouse.<type> ILP route prefix', () => {
+    const resolver = PeerTypeResolver.fromConnectorPeers([
+      // id doesn't match a node-type, but the route prefix does.
+      { id: 'peer-abc123', ilpAddresses: ['g.townhouse.mill.sub'] },
+    ]);
+    expect(resolver.resolvePeerType('peer-abc123')).toBe('mill');
+  });
+
+  it('infers the type from a <type>-NN / <type>_NN id (node add naming)', () => {
+    const resolver = PeerTypeResolver.fromConnectorPeers([
+      { id: 'town-01' },
+      { id: 'mill_02' },
+      { id: 'dvm-99', ilpAddresses: [] },
+    ]);
+    expect(resolver.resolvePeerType('town-01')).toBe('town');
+    expect(resolver.resolvePeerType('mill_02')).toBe('mill');
+    expect(resolver.resolvePeerType('dvm-99')).toBe('dvm');
+  });
+
+  it('treats peers with no inferable type as external', () => {
+    const resolver = PeerTypeResolver.fromConnectorPeers([
+      { id: '0xabc', ilpAddresses: ['g.external.client'] },
+      { id: 'town', ilpAddresses: ['g.townhouse.town'] },
+    ]);
+    // Known child resolves; unrecognised peer (and any other id) → external.
+    expect(resolver.resolvePeerType('town')).toBe('town');
+    expect(resolver.resolvePeerType('0xabc')).toBe('external');
+    expect(resolver.resolvePeerType('anything-else')).toBe('external');
+  });
+
+  it('resolves a full local-HS-style roster distinctly (town child + external client)', () => {
+    const resolver = PeerTypeResolver.fromConnectorPeers([
+      { id: 'town', ilpAddresses: ['g.townhouse.town'] },
+      { id: '0x90f79bf6eb2c4f870365e785982e1f101e93b906', ilpAddresses: [] },
+    ]);
+    expect(resolver.resolvePeerType('town')).toBe('town');
+    expect(
+      resolver.resolvePeerType('0x90f79bf6eb2c4f870365e785982e1f101e93b906')
+    ).toBe('external');
+  });
+
+  it('returns an all-external resolver for an empty roster', () => {
+    const resolver = PeerTypeResolver.fromConnectorPeers([]);
+    expect(resolver.resolvePeerType('town')).toBe('external');
+    expect(resolver.resolvePeerType('')).toBe('external');
+  });
+});
