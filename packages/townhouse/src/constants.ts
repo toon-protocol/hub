@@ -24,6 +24,16 @@ export const NODE_BTP_PORT = 3000;
  *   manifest.images.connector.tag
  */
 export const DEFAULT_CONNECTOR_IMAGE =
+  // v3.10.1 — connector#132 settlement claim-chain routing fix. The
+  // settlement-executor was routing Solana/Mina settle by a stale EVM channel
+  // instead of by the claim's own chain, so non-EVM publish-settle mis-routed
+  // to the EVM path. 3.10.1 selects the settlement chain from the inbound
+  // claim's `blockchain` (claim-driven) with guards. This is the connector half
+  // of #159 (Solana publish-settle proven on-chain; unblocks the Mina #158 /
+  // mill #157 town-side fixes for end-to-end validation). Patch bump — no
+  // SDK/admin contract change vs 3.10.0; bumped because townhouse needs the
+  // fixed (non-EVM-misrouting) settlement behavior per
+  // CONNECTOR_RELEASE_CONTRACT.md's patch-bump exception.
   // v3.10.0 — Story 34.4 fund-custody zkApp bundle (#130/#131, closes #134). The
   // connector now bundles the Story 34.4 `PaymentChannel` zkApp (FUND CUSTODY on
   // deposit + FUND DISTRIBUTION on settle: the zkApp account escrows the deposit
@@ -87,10 +97,10 @@ export const DEFAULT_CONNECTOR_IMAGE =
   // validateSolanaClaim accepts { blockchain:'solana', programId, channelAccount
   // (base58), nonce, transferredAmount, signature, signerPublicKey (base58),
   // cluster? }. No breaking changes to the SDK/admin contract within 3.x (verified
-  // >=3.3.2 through 3.10.0 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
-  // resolved via `docker buildx imagetools inspect` for tag 3.10.0 (manifest-index
+  // >=3.3.2 through 3.10.1 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
+  // resolved via `docker buildx imagetools inspect` for tag 3.10.1 (manifest-index
   // digest). To bump: see CONNECTOR_RELEASE_CONTRACT.md.
-  'ghcr.io/toon-protocol/connector@sha256:539c03d8990e094f61c2975ff480ba93d3de4beb24ac099ea81041866424d49a';
+  'ghcr.io/toon-protocol/connector@sha256:314b7a5a912a81029df2ba3e4ec96f7620db1f4cf82507c8b4e7297dde498d93';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).
