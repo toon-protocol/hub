@@ -46,6 +46,17 @@ describe('townhouse-hs.yml parent-peer-id (finding #4)', () => {
     expect(env['TOON_PARENT_PEER_ID']).toBe(APEX_NODE_ID);
   });
 
+  // Issue #157 — the mill service MUST advertise the same ILP self-route the
+  // apex forwards swaps to (`g.townhouse.mill`). entrypoint-mill maps
+  // ILP_ADDRESS → TOON_ILP_ADDRESS → the embedded connector's self-route.
+  // Without it the mill self-routes on `g.toon.mill.<pubkey>`, the forwarded
+  // swap PREPARE misses the self-route, falls through to the up-to-parent route,
+  // and the per-packet-claim-service T00-rejects on the unresolvable parent.
+  it('mill service sets ILP_ADDRESS to g.townhouse.mill (issue #157)', () => {
+    const env = compose.services['mill']?.environment ?? {};
+    expect(env['ILP_ADDRESS']).toBe(`${APEX_NODE_ID}.mill`);
+  });
+
   it('no service still ships the broken literal parent id "apex"', () => {
     for (const [name, svc] of Object.entries(compose.services)) {
       const env = svc.environment ?? {};

@@ -344,6 +344,16 @@ services:
     environment:
       # nosemgrep: detect-insecure-websocket -- Docker-internal
       CONNECTOR_URL: ws://connector:3000
+      # MUST match the route the apex registers for the mill peer
+      # (`g.townhouse.<type>` — see nodes-lifecycle.ts). entrypoint-mill maps
+      # ILP_ADDRESS → TOON_ILP_ADDRESS → the embedded connector's self-route.
+      # WITHOUT this the mill defaults its self-route to `g.toon.mill.<pubkey>`,
+      # the apex-forwarded swap PREPARE (`g.townhouse.mill`) misses it, falls
+      # through to the up-to-parent route, and the per-packet-claim-service
+      # T00-rejects trying to open an outbound channel back to g.townhouse
+      # (issue #157). town sets the equivalent ILP_ADDRESS=g.townhouse.town.
+      ILP_ADDRESS: g.townhouse.mill
+      NODE_ID: mill
       # MUST equal the apex connector's nodeId (g.townhouse) so the mill's
       # embedded connector applies the 'parent' relation to the apex session and
       # treats forwarded swap PREPAREs as free parent traffic. entrypoint-mill
