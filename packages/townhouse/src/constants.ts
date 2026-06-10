@@ -24,6 +24,20 @@ export const NODE_BTP_PORT = 3000;
  *   manifest.images.connector.tag
  */
 export const DEFAULT_CONNECTOR_IMAGE =
+  // v3.10.3 — connector#133 Mina claimFromChannel balance-conservation fix
+  // (#134 + #135 test follow-up). For an inbound unidirectional Mina claim the
+  // provider built the co-signed claim with balanceB=0, but the on-chain
+  // PaymentChannel.claimFromChannel circuit asserts balanceA + balanceB ==
+  // depositTotal and verifies both signatures over Poseidon([balanceA,balanceB,
+  // salt]); balanceB=0 violated conservation → PROOF_GENERATION_FAILED before any
+  // tx. 3.10.2 derives balanceB = depositTotal − balanceA from the public
+  // on-chain depositTotal (3.10.3 hardens the integration tests). This is the
+  // connector half of the LAST Mina publish-settle blocker (#158): with it +
+  // the client conserved-balanceB signing fix, a Mina-settled publish drives
+  // claimFromChannel to an on-chain landing (nonceField 0→1, proven live).
+  // Patch bump — no SDK/admin contract change vs 3.10.1; bumped because townhouse
+  // needs the conservation-correct settle behavior (CONNECTOR_RELEASE_CONTRACT.md
+  // patch-bump exception).
   // v3.10.1 — connector#132 settlement claim-chain routing fix. The
   // settlement-executor was routing Solana/Mina settle by a stale EVM channel
   // instead of by the claim's own chain, so non-EVM publish-settle mis-routed
@@ -97,10 +111,10 @@ export const DEFAULT_CONNECTOR_IMAGE =
   // validateSolanaClaim accepts { blockchain:'solana', programId, channelAccount
   // (base58), nonce, transferredAmount, signature, signerPublicKey (base58),
   // cluster? }. No breaking changes to the SDK/admin contract within 3.x (verified
-  // >=3.3.2 through 3.10.1 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
-  // resolved via `docker buildx imagetools inspect` for tag 3.10.1 (manifest-index
+  // >=3.3.2 through 3.10.3 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
+  // resolved via `docker buildx imagetools inspect` for tag 3.10.3 (manifest-index
   // digest). To bump: see CONNECTOR_RELEASE_CONTRACT.md.
-  'ghcr.io/toon-protocol/connector@sha256:314b7a5a912a81029df2ba3e4ec96f7620db1f4cf82507c8b4e7297dde498d93';
+  'ghcr.io/toon-protocol/connector@sha256:517040412010b2e0a835ca8a425b753c4a0b9d998bc9e5893f72f54576ca80e1';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).
