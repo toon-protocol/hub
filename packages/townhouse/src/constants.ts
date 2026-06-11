@@ -117,6 +117,27 @@ export const DEFAULT_CONNECTOR_IMAGE =
   'ghcr.io/toon-protocol/connector@sha256:517040412010b2e0a835ca8a425b753c4a0b9d998bc9e5893f72f54576ca80e1';
 
 /**
+ * Human-readable connector tag for the digest pinned in DEFAULT_CONNECTOR_IMAGE.
+ *
+ * This is the machine-readable counterpart to the `@sha256:` digest above. It
+ * MUST stay in lockstep with BOTH:
+ *   1. the `@sha256:<digest>` in DEFAULT_CONNECTOR_IMAGE (above), and
+ *   2. `env.CONNECTOR_VERSION_DEFAULT` in
+ *      `.github/workflows/publish-townhouse-images.yml`.
+ *
+ * The `connector-version-alignment.test.ts` source-level guard asserts (1) the
+ * workflow env equals this tag and (2) DEFAULT_CONNECTOR_IMAGE is well-formed,
+ * so a human bumping one but not the other fails CI at PR time — BEFORE a
+ * release. (PR #165 drifted constants.ts to 3.10.3 while leaving the workflow
+ * env at 3.10.0, hard-failing preflight and silently breaking the v0.17.4 and
+ * v0.17.5 publishes.) The live tag↔digest resolution stays in the workflow's
+ * preflight job (`docker buildx imagetools inspect`); this constant only guards
+ * the SOURCE-level human drift. When bumping the connector: update the digest
+ * above, this tag, AND the workflow env together.
+ */
+export const DEFAULT_CONNECTOR_TAG = '3.10.3';
+
+/**
  * HD wallet account indices per node type (Story 21.4, D21-008).
  * BIP-44 paths: m/44'/{coin}'/ACCOUNT'/0/0
  */
