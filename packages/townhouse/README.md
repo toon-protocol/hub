@@ -186,6 +186,8 @@ Your hidden-service address stays the same across stop/start. To deliberately ro
 
 For verbose logs on any failure, re-run with `DEBUG=townhouse:*`.
 
+For multi-chain settlement operational issues (Solana + Mina on-chain settle — connector-restart route loss, nonce-watermark persistence, a wedged settlement monitor, the town inbound-session race, and Mina zkApp resets), see [`RUNBOOK.md`](./RUNBOOK.md).
+
 ---
 
 ## Using it as a library
