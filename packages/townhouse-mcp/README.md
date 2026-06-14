@@ -89,6 +89,8 @@ Code-complete; pending end-to-end live validation against a real apex (see issue
 
 This package pins `@toon-protocol/townhouse` as an optional `peerDependency`; `townhouse_version` surfaces any skew at runtime.
 
+The companion **`townhouse-operator` skill** (mirroring client-mcp's `toon-client`) ships in `townhouse-plugin/` (and `.claude/skills/townhouse-operator/`), bundling this MCP server with an operator skill + evals. Remaining: end-to-end live validation against a real apex (issue #232).
+
 See `docs/townhouse-mcp-design.md` and `docs/townhouse-mcp-skeleton.md`.
 
 ## Develop

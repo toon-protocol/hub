@@ -1,0 +1,22 @@
+{
+  "name": "townhouse",
+  "description": "TOON Protocol Townhouse operator for Claude — run the apex + town/mill/dvm nodes. Bundles the townhouse-operator skill and the townhouse-mcp MCP server (lifecycle, node provisioning, fee tuning, chains, earnings, withdraw, telemetry).",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jonathan Green",
+    "email": "dev.jonathan.green@gmail.com"
+  },
+  "homepage": "https://github.com/toon-protocol/town/tree/main/townhouse-plugin",
+  "repository": "https://github.com/toon-protocol/town",
+  "license": "MIT",
+  "keywords": [
+    "toon",
+    "townhouse",
+    "nostr",
+    "interledger",
+    "ilp",
+    "mcp",
+    "operator",
+    "pay-to-write"
+  ]
+}
