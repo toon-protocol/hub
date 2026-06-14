@@ -2037,7 +2037,8 @@ async function handleHsUp(
     try {
       const existing = await probe.getHsHostname();
       if (existing.hostname !== null) {
-        // hostname from the connector already includes the .anyone suffix.
+        // getHsHostname() normalizes the connector's `.anon` scheme to the
+        // routable `.anyone` TLD, so this hostname is already `.anyone`.
         console.log(`Apex live at ${existing.hostname}`);
         emitUpStep(json, 'done', {
           transport: 'hs',
@@ -2443,7 +2444,8 @@ async function handleHsUp(
     });
 
     // Step 8: ribbon phase 3 + final stdout line (AC #5).
-    // hostname from the connector already includes the .anyone suffix.
+    // getHsHostname() normalizes the connector's `.anon` scheme to the routable
+    // `.anyone` TLD, so this hostname is already `.anyone`.
     // ribbon.start('live', hostname) prints: "Apex live at <hostname>" as the FINAL stdout line.
     ribbon.start('live', hostname);
     emitUpStep(json, 'done', { transport: 'hs', hostname });

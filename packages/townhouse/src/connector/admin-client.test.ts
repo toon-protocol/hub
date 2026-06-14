@@ -206,7 +206,10 @@ describe('ConnectorAdminClient', () => {
   });
 
   describe('getHsHostname() (Story 45.3 / AC #7)', () => {
-    it('returns hostname + publishedAt when bootstrap is complete (200 with non-null fields)', async () => {
+    it('normalizes a `.anon` hostname to `.anyone` (issue #210) and returns publishedAt', async () => {
+      // The connector publishes its in-process HS under the legacy `.anon`
+      // scheme, but the anon daemon only routes `.anyone`. getHsHostname() must
+      // rewrite the TLD so the operator handoff address is reachable.
       const body = {
         hostname: 'abc123.anon',
         publishedAt: '2026-05-09T00:00:00Z',
@@ -220,8 +223,43 @@ describe('ConnectorAdminClient', () => {
       const client = new ConnectorAdminClient('http://localhost:9401');
       const result = await client.getHsHostname();
 
-      expect(result.hostname).toBe('abc123.anon');
+      expect(result.hostname).toBe('abc123.anyone');
       expect(result.publishedAt).toBe('2026-05-09T00:00:00Z');
+    });
+
+    it('returns a `.anyone` hostname unchanged (already normalized)', async () => {
+      const body = {
+        hostname: 'abc123.anyone',
+        publishedAt: '2026-05-09T00:00:00Z',
+      };
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => body,
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+      const result = await client.getHsHostname();
+
+      expect(result.hostname).toBe('abc123.anyone');
+      expect(result.publishedAt).toBe('2026-05-09T00:00:00Z');
+    });
+
+    it('throws on a hostname ending in neither `.anon` nor `.anyone` (misconfiguration)', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          hostname: 'abc123.example.com',
+          publishedAt: '2026-05-09T00:00:00Z',
+        }),
+      });
+
+      const client = new ConnectorAdminClient('http://localhost:9401');
+
+      await expect(client.getHsHostname()).rejects.toThrow(
+        /invalid hs-hostname response shape/
+      );
     });
 
     it('returns nulls when bootstrap is still in progress (200 with null fields)', async () => {

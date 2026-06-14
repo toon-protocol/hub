@@ -206,14 +206,30 @@ export class ConnectorAdminClient {
         'Connector admin API: invalid hs-hostname response shape'
       );
     }
-    // Enforce the `.anon` suffix at the trust boundary: the ATOR network uses
-    // `.anon` as the hidden-service TLD (analogous to Tor's `.onion`). A
-    // non-`.anon` value indicates connector-side misconfiguration and would
-    // propagate as an unusable address through Story 45.4's CLI.
-    if (typeof hostname === 'string' && !hostname.endsWith('.anon')) {
+    // Normalize the HS TLD at the trust boundary. The connector publishes its
+    // in-process hidden service under the legacy `.anon` scheme, but the anon
+    // daemon only ROUTES the `.anyone` TLD — a `.anon` address is treated as a
+    // clearnet name and fails (HostUnreachable), making every operator handoff
+    // address unreachable until hand-edited (issue #210). The pubkey label is
+    // TLD-independent, so accept either `.anon` or `.anyone` and rewrite the
+    // suffix to the routable `.anyone` form. A value ending in neither still
+    // indicates connector-side misconfiguration and is rejected. Mirrors the
+    // client-side `.anon`→`.anyone` handling landed in #206 (kept inline here
+    // because that helper rejects `.anon` whereas the connector emits it).
+    if (
+      typeof hostname === 'string' &&
+      !hostname.endsWith('.anon') &&
+      !hostname.endsWith('.anyone')
+    ) {
       throw new Error(
         'Connector admin API: invalid hs-hostname response shape'
       );
+    }
+    if (typeof hostname === 'string' && hostname.endsWith('.anon')) {
+      return {
+        ...(body as HsHostnameResponse),
+        hostname: hostname.replace(/\.anon$/, '.anyone'),
+      };
     }
     return body as HsHostnameResponse;
   }
