@@ -178,6 +178,114 @@ describe('townhouse chains', () => {
     }
   });
 
+  it('chains add --json emits a parseable JSON object (not human text)', async () => {
+    const dir = makeTmp();
+    try {
+      const cfg = await initConfig(dir);
+      await main([
+        'chains',
+        'add',
+        '--chain-type',
+        'evm',
+        '--chain-id',
+        'evm:base:84532',
+        '--rpc-url',
+        'https://sepolia.base.org',
+        '--registry',
+        '0xabc',
+        '--token-address',
+        '0xdef',
+        '--json',
+        '-c',
+        cfg,
+      ]);
+      const lines = logSpy.mock.calls.map((c) => String(c[0]));
+      // No human "Added ..." / "Apply with:" lines under --json.
+      expect(lines.some((l) => l.startsWith('Added '))).toBe(false);
+      expect(lines.some((l) => l.startsWith('Apply with:'))).toBe(false);
+      // Exactly one machine-readable JSON object on stdout.
+      const jsonLine = lines.find((l) => l.trim().startsWith('{'));
+      expect(jsonLine).toBeDefined();
+      const parsed = JSON.parse(jsonLine as string);
+      expect(parsed).toMatchObject({
+        added: true,
+        chainType: 'evm',
+        chainId: 'evm:base:84532',
+      });
+      // Side effect still happened.
+      const config = loadConfig(cfg);
+      expect(config.chainProviders).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('chains add without --json still prints the human line', async () => {
+    const dir = makeTmp();
+    try {
+      const cfg = await initConfig(dir);
+      await main([
+        'chains',
+        'add',
+        '--chain-type',
+        'evm',
+        '--chain-id',
+        'evm:base:8453',
+        '--rpc-url',
+        'https://mainnet.base.org',
+        '--registry',
+        '0xabc',
+        '--token-address',
+        '0xdef',
+        '-c',
+        cfg,
+      ]);
+      const lines = logSpy.mock.calls.map((c) => String(c[0]));
+      expect(lines.some((l) => l.startsWith('Added evm'))).toBe(true);
+      // And no stray JSON object on stdout in human mode.
+      expect(lines.some((l) => l.trim().startsWith('{'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('chains remove --json emits a parseable JSON object', async () => {
+    const dir = makeTmp();
+    try {
+      const cfg = await initConfig(dir);
+      await main([
+        'chains',
+        'add',
+        '--chain-type',
+        'solana',
+        '--chain-id',
+        'solana:devnet',
+        '--rpc-url',
+        'https://s',
+        '--program-id',
+        'P',
+        '--key-id',
+        'k',
+        '-c',
+        cfg,
+      ]);
+      logSpy.mockClear();
+      await main(['chains', 'remove', 'solana:devnet', '--json', '-c', cfg]);
+      const lines = logSpy.mock.calls.map((c) => String(c[0]));
+      expect(lines.some((l) => l.startsWith('Removed '))).toBe(false);
+      const jsonLine = lines.find((l) => l.trim().startsWith('{'));
+      expect(jsonLine).toBeDefined();
+      expect(JSON.parse(jsonLine as string)).toMatchObject({
+        removed: true,
+        chainId: 'solana:devnet',
+      });
+      const config = loadConfig(cfg);
+      expect(config.chainProviders ?? []).toHaveLength(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('removes a chain by chainId', async () => {
     const dir = makeTmp();
     try {

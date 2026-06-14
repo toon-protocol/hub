@@ -3263,6 +3263,16 @@ async function handleChains(
         process.exitCode = 1;
         return;
       }
+      if (jsonMode) {
+        console.log(
+          JSON.stringify({
+            added: true,
+            chainType: entry.chainType,
+            chainId: entry.chainId,
+          })
+        );
+        return;
+      }
       console.log(
         `Added ${entry.chainType} settlement chain '${entry.chainId}'.`
       );
@@ -3287,6 +3297,10 @@ async function handleChains(
         ...config,
         chainProviders: next.length > 0 ? next : undefined,
       });
+      if (jsonMode) {
+        console.log(JSON.stringify({ removed: true, chainId: chainIdArg }));
+        return;
+      }
       console.log(`Removed settlement chain '${chainIdArg}'.`);
       console.log('Apply with:  townhouse hs down && townhouse hs up');
       return;
