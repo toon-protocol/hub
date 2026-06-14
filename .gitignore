@@ -103,3 +103,6 @@ wallet-*.yaml
 # Local e2e public-testnet dev wallet (never commit the seed phrase)
 .env.e2e.local
 *.e2e-wallet
+
+# Plugin MCP declaration must be committed (no secrets — just an npx command)
+!toon-plugin/.mcp.json
