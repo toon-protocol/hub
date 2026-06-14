@@ -24,6 +24,12 @@ export const NODE_BTP_PORT = 3000;
  *   manifest.images.connector.tag
  */
 export const DEFAULT_CONNECTOR_IMAGE =
+  // v3.10.4 — connector#137 (non-EVM inbound claim validator: Solana Ed25519 /
+  // Mina verification wired to the BTP server) + connector#136 (dynamic-HS-peer
+  // settlement: peerIdToChainMap populated via registerPeerChain), closing
+  // toon#213 and unblocking Solana + Mina pay-to-write for dynamic HS apexes.
+  // Validated live: bumping a running apex 3.10.3→3.10.4 made dynamic-HS Solana
+  // and Mina on-chain settlement work end-to-end. Builds on:
   // v3.10.3 — connector#133 Mina claimFromChannel balance-conservation fix
   // (#134 + #135 test follow-up). For an inbound unidirectional Mina claim the
   // provider built the co-signed claim with balanceB=0, but the on-chain
@@ -114,7 +120,7 @@ export const DEFAULT_CONNECTOR_IMAGE =
   // >=3.3.2 through 3.10.3 — see packages/sdk/CONNECTOR_MIGRATION.md). Digest
   // resolved via `docker buildx imagetools inspect` for tag 3.10.3 (manifest-index
   // digest). To bump: see CONNECTOR_RELEASE_CONTRACT.md.
-  'ghcr.io/toon-protocol/connector@sha256:517040412010b2e0a835ca8a425b753c4a0b9d998bc9e5893f72f54576ca80e1';
+  'ghcr.io/toon-protocol/connector@sha256:48d2160e4479aae068ebd8b735a0a063995f1f2f17308c847f3a9b6cc57b1de4';
 
 /**
  * Human-readable connector tag for the digest pinned in DEFAULT_CONNECTOR_IMAGE.
@@ -135,7 +141,7 @@ export const DEFAULT_CONNECTOR_IMAGE =
  * the SOURCE-level human drift. When bumping the connector: update the digest
  * above, this tag, AND the workflow env together.
  */
-export const DEFAULT_CONNECTOR_TAG = '3.10.3';
+export const DEFAULT_CONNECTOR_TAG = '3.10.4';
 
 /**
  * HD wallet account indices per node type (Story 21.4, D21-008).
