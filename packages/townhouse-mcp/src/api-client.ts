@@ -143,16 +143,32 @@ export class ApiClient {
     const text = await res.text();
     const json = text ? safeJson(text) : undefined;
     if (!res.ok) {
+      // The control API surfaces two error shapes: the generic
+      // `{ error, retryable, detail }` and the node-lifecycle
+      // `{ step, err }` (e.g. `{"step":"preflight","err":"MILL_RELAYS is
+      // not set..."}`). Read both so the operator agent sees WHY a
+      // lifecycle call failed instead of a bare `HTTP 400`.
       const e = (json ?? {}) as {
         error?: string;
         retryable?: boolean;
         detail?: string;
+        step?: string;
+        err?: string;
       };
+      // Lifecycle `err` takes precedence, then the generic `error`.
+      const reason = e.err ?? e.error;
+      const stepPrefix = e.step ? `[${e.step}] ` : '';
+      const message = reason
+        ? `${stepPrefix}${reason}`
+        : `${stepPrefix}HTTP ${res.status}`.trim();
+      // Keep `detail` populated: prefer the explicit detail, else fall back
+      // to the lifecycle `err`/`step` so it is never silently dropped.
+      const detail = e.detail ?? (e.err ? e.err : undefined);
       throw new ApiError(
-        e.error ?? `HTTP ${res.status}`,
+        message,
         res.status,
         e.retryable ?? res.status === 503,
-        e.detail
+        detail
       );
     }
     return json as T;

@@ -101,6 +101,20 @@ describe('TOOL_DEFINITIONS', () => {
       expect(typeof t.description).toBe('string');
     }
   });
+
+  it('documents townhouse_withdraw amount as base units (not decimal tokens)', () => {
+    const withdraw = TOOL_DEFINITIONS.find(
+      (t) => t.name === 'townhouse_withdraw'
+    );
+    const props = withdraw?.inputSchema['properties'] as
+      | Record<string, { description?: string }>
+      | undefined;
+    const desc = (props?.['amount']?.description ?? '').toLowerCase();
+    expect(desc).toContain('base unit');
+    expect(desc).toContain('wei');
+    // Explicitly warns it is NOT decimal tokens.
+    expect(desc).toMatch(/not.*decimal token/);
+  });
 });
 
 describe('dispatchTool — API-backed tools', () => {
@@ -311,6 +325,50 @@ describe('dispatchTool — error encoding', () => {
       earnings: vi.fn().mockRejectedValue(new ApiError('busy', 503, true)),
     };
     const res = await dispatchTool(ctx({ api }), 'townhouse_earnings', {});
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toMatch(/retry shortly/i);
+  });
+
+  it('classifies a 400 config error (usdc_address_not_configured) as NON-retryable', async () => {
+    const api = {
+      earnings: vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError('usdc_address_not_configured', 400, false)
+        ),
+    };
+    const res = await dispatchTool(ctx({ api }), 'townhouse_earnings', {});
+    expect(res.isError).toBe(true);
+    // Must NOT be surfaced as the "retry shortly" hint…
+    expect(res.content[0]!.text).not.toMatch(/retry shortly/i);
+    // …and must include the failing code so the operator can fix config.
+    expect(res.content[0]!.text).toContain('usdc_address_not_configured');
+  });
+
+  it('treats a *_not_configured code as terminal even if flagged retryable', async () => {
+    const api = {
+      earnings: vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError('arweave_wallet_not_configured', 503, true)
+        ),
+    };
+    const res = await dispatchTool(ctx({ api }), 'townhouse_earnings', {});
+    expect(res.content[0]!.text).not.toMatch(/retry shortly/i);
+    expect(res.content[0]!.text).toContain('arweave_wallet_not_configured');
+  });
+
+  it('treats the node_lifecycle_in_flight 409 as retryable', async () => {
+    const api = {
+      addNode: vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError('node_lifecycle_in_flight', 409, false)
+        ),
+    };
+    const res = await dispatchTool(ctx({ api }), 'townhouse_add_node', {
+      type: 'town',
+    });
     expect(res.isError).toBe(true);
     expect(res.content[0]!.text).toMatch(/retry shortly/i);
   });

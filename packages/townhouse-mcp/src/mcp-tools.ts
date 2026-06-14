@@ -201,7 +201,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         chainFamily: { type: 'string', enum: ['evm', 'solana', 'mina'] },
         token: { type: 'string' },
         recipient: { type: 'string' },
-        amount: { type: 'string' },
+        amount: {
+          type: 'string',
+          description:
+            'Amount in BASE units (raw integer, e.g. wei / 1e18 for an ' +
+            '18-decimal USDC), NOT decimal tokens — "10" transfers 10 base ' +
+            'units, not 10 tokens. For 1 token of an 18-decimal asset pass ' +
+            '"1000000000000000000".',
+        },
         dryRun: { type: 'boolean' },
       },
       required: ['nodeType', 'chainFamily', 'token', 'recipient', 'amount'],
@@ -515,6 +522,29 @@ async function versionInfo(ctx: ToolCtx): Promise<unknown> {
   });
 }
 
+/**
+ * Classify an `ApiError` as genuinely-retryable vs terminal. Retryable means
+ * the same call may succeed shortly without operator intervention: a 503
+ * (apex busy / still booting), an explicit `retryable:true`, or the
+ * lifecycle-in-flight 409 (`node_lifecycle_in_flight`). A non-null-asserted
+ * config/validation 4xx (e.g. a 400, or a `*_not_configured` / `*_not_set`
+ * code) is terminal — retrying without fixing config just fails again.
+ */
+function isRetryableApiError(e: ApiError): boolean {
+  const code = `${e.message}${e.detail ? ` ${e.detail}` : ''}`.toLowerCase();
+  // Config/validation codes are terminal even if a stale `retryable` flag or
+  // 503 sneaks through.
+  if (/_not_configured\b|_not_set\b/.test(code)) return false;
+  if (e.status === 503) return true;
+  // The lifecycle-in-flight 409 clears on its own once the prior call lands.
+  if (e.status === 409 && code.includes('node_lifecycle_in_flight'))
+    return true;
+  // A 4xx (other than the in-flight 409 above) is an operator-fixable
+  // validation/config error — terminal.
+  if (e.status >= 400 && e.status < 500) return false;
+  return e.retryable;
+}
+
 function toErrorResult(e: unknown, cfg: ResolvedConfig): ToolResult {
   if (e instanceof ApexUnreachableError) {
     return err(
@@ -523,11 +553,18 @@ function toErrorResult(e: unknown, cfg: ResolvedConfig): ToolResult {
         `townhouse_up_status and retry. Boot log: ${cfg.configDir}/up.log.`
     );
   }
-  if (e instanceof ApiError && e.retryable) {
-    return err(`Apex busy or still booting — retry shortly. (${e.message})`);
-  }
   if (e instanceof ApiError) {
-    return err(`${e.message}${e.detail ? `: ${e.detail}` : ''}`);
+    const text = `${e.message}${e.detail ? `: ${e.detail}` : ''}`;
+    // Only genuinely-retryable conditions get the "retry shortly" hint:
+    // a 503, an explicit `retryable:true`, or the lifecycle-in-flight 409.
+    // A 4xx config/validation error (e.g. a 400, or a `*_not_configured` /
+    // `*_not_set` code like `usdc_address_not_configured`) is NOT retryable
+    // — retrying without fixing config just fails again, so surface the
+    // failing code/detail as a clear, terminal error instead.
+    if (isRetryableApiError(e)) {
+      return err(`Apex busy or still booting — retry shortly. (${text})`);
+    }
+    return err(text);
   }
   if (e instanceof CliError) {
     return err(

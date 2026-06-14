@@ -71,6 +71,40 @@ describe('ApiClient error mapping', () => {
     });
   });
 
+  it('surfaces the node-lifecycle {step, err} body in message + detail', async () => {
+    const fetchImpl = jsonFetch(
+      { step: 'preflight', err: 'MILL_RELAYS is not set...' },
+      400
+    );
+    const e = await client(fetchImpl)
+      .addNode({ type: 'mill' })
+      .catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(ApiError);
+    const apiErr = e as ApiError;
+    expect(apiErr.status).toBe(400);
+    expect(apiErr.retryable).toBe(false);
+    // The agent must see the step + the reason, not a bare "HTTP 400".
+    expect(apiErr.message).toBe('[preflight] MILL_RELAYS is not set...');
+    expect(apiErr.detail).toBe('MILL_RELAYS is not set...');
+  });
+
+  it('still honours the generic {error, detail, retryable} body', async () => {
+    const fetchImpl = jsonFetch(
+      {
+        error: 'usdc_address_not_configured',
+        detail: 'set USDC',
+        retryable: false,
+      },
+      400
+    );
+    await expect(client(fetchImpl).earnings()).rejects.toMatchObject({
+      message: 'usdc_address_not_configured',
+      detail: 'set USDC',
+      status: 400,
+      retryable: false,
+    });
+  });
+
   it('marks 503 retryable by default', async () => {
     const fetchImpl = jsonFetch({ error: 'busy' }, 503);
     const e = await client(fetchImpl)
