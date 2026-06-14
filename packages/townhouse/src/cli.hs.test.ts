@@ -408,6 +408,34 @@ describe('CLI hs subcommand', () => {
     }
   });
 
+  it('hs up --json emits a terminal {step:"done"} NDJSON marker (P2b)', async () => {
+    const hostname = 'apex123.anyone';
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const overrides = makeHsOverrides({ hostname });
+      await main(
+        ['hs', 'up', '-c', configPath, '--json'],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      // emitUpStep writes NDJSON via console.log; townhouse_up_status keys on
+      // a terminal done/error step.
+      const steps = consoleSpy.mock.calls
+        .map((c) => String(c[0]))
+        .filter((l) => l.trim().startsWith('{'))
+        .map((l) => JSON.parse(l) as { step?: string; transport?: string });
+      expect(steps.some((s) => s.step === 'starting')).toBe(true);
+      const done = steps.find((s) => s.step === 'done');
+      expect(done).toBeDefined();
+      expect(done?.transport).toBe('hs');
+      expect(steps.some((s) => s.step === 'error')).toBe(false);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   it('hs up with --password flag does NOT prompt interactively', async () => {
     const { configDir, configPath } = await makeHsTestDir();
     // Remove env var so only --password is available
@@ -1777,6 +1805,74 @@ describe('CLI hs enable (Phase 3)', () => {
       const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
       expect(output).toContain('already configured');
       // No teardown / no HS bring-up.
+      expect(overrides.createOrchestrator).not.toHaveBeenCalled();
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  const ndjsonSteps = (
+    spy: ReturnType<typeof vi.spyOn>
+  ): { step?: string; alreadyHs?: boolean; transport?: string }[] =>
+    spy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((l) => l.trim().startsWith('{'))
+      .map((l) => JSON.parse(l));
+
+  it('hs enable --json emits NDJSON boot steps (no human prose)', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      writeFileSync(
+        join(configDir, 'connector.yaml'),
+        'transport:\n  type: direct\n',
+        'utf-8'
+      );
+      const overrides = makeHsOverrides({
+        hostname: 'enabled.anyone',
+        down: vi.fn(async () => undefined),
+      });
+      await main(
+        ['hs', 'enable', '-c', configPath, '--json'],
+        undefined,
+        undefined,
+        overrides
+      );
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      // Human prose is suppressed under --json.
+      expect(output).not.toContain('Switching direct apex');
+      // `starting` is emitted before delegating to handleHsUp (which owns the
+      // terminal done/error step — exercised by the hs up --json test). The
+      // direct stack is still torn down first.
+      const steps = ndjsonSteps(consoleSpy);
+      expect(steps.some((s) => s.step === 'starting')).toBe(true);
+      expect(overrides.materializeComposeTemplate).toHaveBeenCalledWith(
+        'hs',
+        expect.anything()
+      );
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs enable --json on an already-HS apex emits a terminal alreadyHs step', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      writeFileSync(
+        join(configDir, 'connector.yaml'),
+        'anon:\n  enabled: true\ntransport:\n  type: hs\n',
+        'utf-8'
+      );
+      const overrides = makeHsOverrides({});
+      await main(
+        ['hs', 'enable', '-c', configPath, '--json'],
+        undefined,
+        undefined,
+        overrides
+      );
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(output).not.toContain('already configured');
+      const done = ndjsonSteps(consoleSpy).find((s) => s.step === 'done');
+      expect(done?.alreadyHs).toBe(true);
       expect(overrides.createOrchestrator).not.toHaveBeenCalled();
     } finally {
       rmSync(configDir, { recursive: true, force: true });

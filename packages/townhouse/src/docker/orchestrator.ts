@@ -218,6 +218,7 @@ function redactSecretsInComposeStderr(stderr: string): string {
     'DVM_SETTLEMENT_PRIVATE_KEY',
     'MILL_MNEMONIC',
     'TOWNHOUSE_WALLET_PASSWORD',
+    'TOWNHOUSE_MNEMONIC',
   ];
   const pattern = new RegExp(`(${SECRET_KEYS.join('|')})=[^\\s"'\\n\\r]+`, 'g');
   return stderr.replace(pattern, '$1=[REDACTED]');

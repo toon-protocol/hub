@@ -172,6 +172,10 @@ services:
       # enforces the requirement at startup; the YAML uses `:-` (lenient default)
       # so `docker compose down` does not error when the var is unset.
       TOWNHOUSE_WALLET_PASSWORD: '${TOWNHOUSE_WALLET_PASSWORD:-}'
+      # P1b — operator/agent wallet mode. When set, the entrypoint loads the
+      # operator wallet DIRECTLY from this mnemonic (no encrypted file, no
+      # password). Lenient `:-` default keeps `down` working when unset.
+      TOWNHOUSE_MNEMONIC: '${TOWNHOUSE_MNEMONIC:-}'
       # Pass the host-side compose-interpolation values through so that when the
       # townhouse-api shells out to `docker compose -f
       # /.townhouse/compose/townhouse-direct.yml up -d <type>` for lazy peer

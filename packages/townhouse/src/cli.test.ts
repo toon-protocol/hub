@@ -211,6 +211,39 @@ describe('CLI', () => {
     });
   });
 
+  describe('--version', () => {
+    const semver = /^\d+\.\d+\.\d+/;
+
+    it('prints the bare version and exits cleanly (--version)', async () => {
+      await expect(main(['--version'])).rejects.toThrow(CliHelpRequested);
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(output).toMatch(semver);
+    });
+
+    it('prints { version } as JSON with --json', async () => {
+      await expect(main(['--version', '--json'])).rejects.toThrow(
+        CliHelpRequested
+      );
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      const parsed = JSON.parse(output.trim()) as { version: string };
+      expect(parsed.version).toMatch(semver);
+    });
+
+    it('supports the `version` subcommand too', async () => {
+      await expect(main(['version', '--json'])).rejects.toThrow(
+        CliHelpRequested
+      );
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(JSON.parse(output.trim())).toHaveProperty('version');
+    });
+
+    it('help text documents --version', async () => {
+      await expect(main(['--help'])).rejects.toThrow(CliHelpRequested);
+      const output = consoleSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(output).toContain('--version');
+    });
+  });
+
   describe('init (T-001, T-004)', () => {
     it('init --force creates config in specified directory', async () => {
       const dir = makeTempDir();
@@ -225,6 +258,91 @@ describe('CLI', () => {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    });
+
+    describe('mnemonic mode (config-only, no encrypted wallet)', () => {
+      const TEST_MNEMONIC =
+        'test test test test test test test test test test test junk';
+      let origMnemonic: string | undefined;
+      let origPassword: string | undefined;
+
+      beforeEach(() => {
+        origMnemonic = process.env['TOWNHOUSE_MNEMONIC'];
+        origPassword = process.env['TOWNHOUSE_WALLET_PASSWORD'];
+        process.env['TOWNHOUSE_MNEMONIC'] = TEST_MNEMONIC;
+        delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
+      });
+      afterEach(() => {
+        if (origMnemonic === undefined)
+          delete process.env['TOWNHOUSE_MNEMONIC'];
+        else process.env['TOWNHOUSE_MNEMONIC'] = origMnemonic;
+        if (origPassword === undefined)
+          delete process.env['TOWNHOUSE_WALLET_PASSWORD'];
+        else process.env['TOWNHOUSE_WALLET_PASSWORD'] = origPassword;
+      });
+
+      it('scaffolds config but writes NO encrypted wallet', async () => {
+        const dir = makeTempDir();
+        try {
+          await main(['init', '--force', '--config-dir', dir]);
+          expect(existsSync(join(dir, 'config.yaml'))).toBe(true);
+          // The whole point: no wallet.enc, no password prompt.
+          expect(existsSync(join(dir, 'wallet.enc'))).toBe(false);
+          expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+            expect.stringContaining('password required')
+          );
+          const output = consoleSpy.mock.calls
+            .map((c) => String(c[0]))
+            .join('\n');
+          expect(output).toContain('Mnemonic mode');
+          expect(output).toContain('Derived Node Addresses');
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
+
+      it('--json reports walletMode:"mnemonic" with addresses and no walletPath', async () => {
+        const dir = makeTempDir();
+        try {
+          await main(['init', '--force', '--config-dir', dir, '--json']);
+          const line = consoleSpy.mock.calls
+            .map((c) => String(c[0]))
+            .find((l) => l.trim().startsWith('{'));
+          const parsed = JSON.parse(line ?? '{}') as {
+            created: boolean;
+            walletMode: string;
+            walletPath?: string;
+            mnemonic?: string;
+            addresses: unknown[];
+          };
+          expect(parsed.created).toBe(true);
+          expect(parsed.walletMode).toBe('mnemonic');
+          expect(parsed.walletPath).toBeUndefined();
+          // The seed is NOT echoed back — the agent already supplied it via env.
+          expect(parsed.mnemonic).toBeUndefined();
+          expect(parsed.addresses.length).toBeGreaterThan(0);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
+
+      it('an explicit --password takes precedence (encrypted wallet path)', async () => {
+        const dir = makeTempDir();
+        try {
+          await main([
+            'init',
+            '--force',
+            '--config-dir',
+            dir,
+            '--password',
+            'testpass1234',
+          ]);
+          // Password supplied → encrypted wallet IS written (not mnemonic mode).
+          expect(existsSync(join(dir, 'wallet.enc'))).toBe(true);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
     });
 
     it('init without --force refuses to overwrite existing config', async () => {

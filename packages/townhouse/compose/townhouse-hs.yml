@@ -213,6 +213,10 @@ services:
       # which broke the teardown flow. Discovered by Story 46.4 live gate
       # run (Finding J, 2026-05-11).
       TOWNHOUSE_WALLET_PASSWORD: '${TOWNHOUSE_WALLET_PASSWORD:-}'
+      # P1b — operator/agent wallet mode. When set, the entrypoint loads the
+      # operator wallet DIRECTLY from this mnemonic (no encrypted file, no
+      # password). Lenient `:-` default keeps `down` working when unset.
+      TOWNHOUSE_MNEMONIC: '${TOWNHOUSE_MNEMONIC:-}'
       # Pass the host-side compose-interpolation values through to the
       # townhouse-api container, because the API itself shells out to
       # `docker compose -f /.townhouse/compose/townhouse-hs.yml up -d <type>`

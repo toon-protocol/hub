@@ -16,6 +16,7 @@ import { parseArgs } from 'node:util';
 import {
   mkdirSync,
   writeFileSync,
+  readFileSync,
   existsSync,
   renameSync,
   rmSync,
@@ -114,23 +115,41 @@ export class CliHelpRequested extends Error {
   }
 }
 
+/**
+ * This package's version, read from its own package.json at runtime. Used by
+ * `townhouse --version` so tooling that shells out (e.g. @toon-protocol/
+ * townhouse-mcp's version-skew probe) has a real version to compare against.
+ * Resolves `../package.json` relative to the module — package root from
+ * `dist/cli.js`, and `packages/townhouse/package.json` under vitest/src.
+ */
+export function readCliVersion(): string {
+  try {
+    const pkgUrl = new URL('../package.json', import.meta.url);
+    const pkg = JSON.parse(readFileSync(pkgUrl, 'utf8')) as { version: string };
+    return pkg.version;
+  } catch {
+    return '0.0.0';
+  }
+}
+
 const HELP_TEXT = `townhouse — TOON node orchestrator
 
 Usage:
+  townhouse --version [--json]                    Print the package version (--json: { "version" })
   townhouse setup [--no-browser] [--port <n>] [--config-dir <dir>]  Run the first-run setup wizard
-  townhouse init [--force] [--config-dir <dir>] [--password <pw>] [--preset <name>] [--network <mode>] [--yes]   Initialize config + wallet
+  townhouse init [--force] [--config-dir <dir>] [--password <pw>] [--preset <name>] [--network <mode>] [--yes] [--json]   Initialize config + wallet (set TOWNHOUSE_MNEMONIC + no password = config-only, no encrypted wallet)
   townhouse up [--transport direct|hs] [--dev] [--town] [--mill] [--dvm] [-c <path>] [--password <pw>]
                                                  Boot a direct-BTP apex + children (default; clients dial ws://host:3000/btp). --transport hs = HS path; --dev = contributor children-only dev stack
-  townhouse down [-c <path>]                     Stop all nodes
-  townhouse status [-c <path>]                   Show node status
+  townhouse down [-c <path>] [--json]            Stop all nodes
+  townhouse status [-c <path>] [--json]          Show node status
   townhouse metrics [-c <path>]                  Show connector metrics
   townhouse wallet show [--json] [--hex] [--paths] [-c <path>] [--password <pw>]  Show derived addresses
-  townhouse wallet seed --confirm [-c <path>] [--password <pw>]    Print the BIP-39 seed phrase (password-gated, requires --confirm)
+  townhouse wallet seed --confirm [-c <path>] [--password <pw>] [--json]    Print the BIP-39 seed phrase (password-gated, requires --confirm)
   townhouse credits buy --token <id> --amount <decimal> [--fee-multiplier <n>] [--quote-only] [--yes] [-c <path>] [--password <pw>]
                                                  Buy Arweave upload credits (token: eth|sol|pol|base-eth|base-usdc|usdc-eth|usdc-pol)
   townhouse credits balance --token <id> [-c <path>] [--password <pw>]  Show Turbo credit balance for the funding address
   townhouse hs up [--password <pw>] [--skip-preflight] [-c <path>]  Boot/enable hidden-service mode (opt-in, anonymous .anon apex) (launches dashboard TUI in TTY mode)
-  townhouse hs enable [--password <pw>] [-c <path>]          Switch a running direct apex to hidden-service mode (down direct → up HS)
+  townhouse hs enable [--password <pw>] [-c <path>] [--json]   Switch a running direct apex to hidden-service mode (down direct → up HS; --json emits NDJSON boot steps)
   townhouse hs down [--rotate-keys] [-c <path>]               Stop apex (--rotate-keys deletes .anyone keypair)
   townhouse node add [<type>] [--json] [-c <path>]    Provision a child node (default: town)
   townhouse node remove <id> [--yes] [--json] [-c <path>]   Deprovision a child node
@@ -265,7 +284,8 @@ async function handleInit(
   preset?: 'demo',
   yes?: boolean,
   network?: NetworkMode,
-  endpoints?: { evmUrl?: string; solUrl?: string }
+  endpoints?: { evmUrl?: string; solUrl?: string },
+  json = false
 ): Promise<void> {
   const dir = resolve(configDir ?? DEFAULT_CONFIG_DIR);
   const configPath = join(dir, 'config.yaml');
@@ -292,9 +312,11 @@ async function handleInit(
     // deterministic demo password. Documented as DEMO ONLY.
     if (yes && !password) {
       password = DEMO_DETERMINISTIC_PASSWORD;
-      console.log(
-        '[demo preset] Using deterministic demo password (insecure — demo only).'
-      );
+      if (!json) {
+        console.log(
+          '[demo preset] Using deterministic demo password (insecure — demo only).'
+        );
+      }
     }
   } else {
     configToWrite = getDefaultConfig();
@@ -319,11 +341,62 @@ async function handleInit(
     mode: 0o600,
   });
 
-  console.log(`Config created at ${configPath}`);
+  if (!json) console.log(`Config created at ${configPath}`);
 
   // Generate wallet — use config dir for wallet path (overrides default home dir path)
   const walletPath = join(dir, 'wallet.enc');
+
+  // Mnemonic mode (design §3): when TOWNHOUSE_MNEMONIC is set and no wallet
+  // password is supplied, scaffold config ONLY — derive + report addresses from
+  // the env seed without writing an encrypted wallet. The stack loads the seed
+  // directly at `up` time (P1: tryEnvMnemonicWallet), so no wallet.enc /
+  // password is needed. Lets an agent operator init non-interactively.
+  const envMnemonic = process.env['TOWNHOUSE_MNEMONIC']?.trim();
+  const suppliedPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
+  if (envMnemonic && !suppliedPassword) {
+    const walletManager = new WalletManager({ encryptedPath: walletPath });
+    await walletManager.fromMnemonic(envMnemonic);
+    const addresses = walletManager.getAllKeys().map((info) => ({
+      nodeType: info.nodeType,
+      nostrPubkey: info.nostrPubkey,
+      evmAddress: info.evmAddress,
+    }));
+    walletManager.lock();
+
+    if (json) {
+      // No `mnemonic` (the agent already holds it via the env) and no
+      // `walletPath` (none written) — a distinct shape from the encrypted path.
+      console.log(
+        JSON.stringify({
+          created: true,
+          configPath,
+          walletMode: 'mnemonic',
+          addresses,
+        })
+      );
+      return;
+    }
+
+    console.log('');
+    console.log(
+      'Mnemonic mode — using TOWNHOUSE_MNEMONIC (no encrypted wallet written).'
+    );
+    console.log('');
+    console.log('Derived Node Addresses:');
+    console.log('-----------------------');
+    for (const info of addresses) {
+      console.log(`  ${info.nodeType.padEnd(6)} Nostr: ${info.nostrPubkey}`);
+      console.log(`  ${''.padEnd(6)} EVM:   ${info.evmAddress}`);
+    }
+    printInitNextStep(dir);
+    return;
+  }
+
   if (existsSync(walletPath) && !force) {
+    if (json) {
+      console.log(JSON.stringify({ created: false, configPath, walletPath }));
+      return;
+    }
     console.log('');
     console.log(
       `Wallet already exists at ${walletPath} — keeping your existing keys.`
@@ -350,28 +423,52 @@ async function handleInit(
   const walletManager = new WalletManager({ encryptedPath: walletPath });
   const { mnemonic } = await walletManager.generate();
 
-  // Display mnemonic ONCE for backup — this is the only place it ever appears
-  console.log('');
-  console.log('=== IMPORTANT: Back up your seed phrase ===');
-  console.log('');
-  console.log(`  ${mnemonic}`);
-  console.log('');
-  console.log('This is the ONLY time your seed phrase will be shown.');
-  console.log('Store it safely. You will need it to recover your node keys.');
-  console.log('============================================');
-  console.log('');
+  if (!json) {
+    // Display mnemonic ONCE for backup — this is the only place it ever appears
+    console.log('');
+    console.log('=== IMPORTANT: Back up your seed phrase ===');
+    console.log('');
+    console.log(`  ${mnemonic}`);
+    console.log('');
+    console.log('This is the ONLY time your seed phrase will be shown.');
+    console.log('Store it safely. You will need it to recover your node keys.');
+    console.log('============================================');
+    console.log('');
+  }
 
   // Encrypt and save — mnemonic reference is not stored beyond this block
   const encrypted = encryptWallet(mnemonic, walletPassword);
   await saveWallet(walletPath, encrypted);
-  console.log(`Wallet saved to ${walletPath}`);
+  if (!json) console.log(`Wallet saved to ${walletPath}`);
+
+  const allKeys = walletManager.getAllKeys();
+  const addresses = allKeys.map((info) => ({
+    nodeType: info.nodeType,
+    nostrPubkey: info.nostrPubkey,
+    evmAddress: info.evmAddress,
+  }));
+
+  if (json) {
+    // The agent is the custodian — return the mnemonic for cold-start backup
+    // (docs/townhouse-mcp-design.md §3). Zero key material afterwards.
+    console.log(
+      JSON.stringify({
+        created: true,
+        configPath,
+        walletPath,
+        mnemonic,
+        addresses,
+      })
+    );
+    walletManager.lock();
+    return;
+  }
 
   // Display derived addresses
   console.log('');
   console.log('Derived Node Addresses:');
   console.log('-----------------------');
-  const allKeys = walletManager.getAllKeys();
-  for (const info of allKeys) {
+  for (const info of addresses) {
     console.log(`  ${info.nodeType.padEnd(6)} Nostr: ${info.nostrPubkey}`);
     console.log(`  ${''.padEnd(6)} EVM:   ${info.evmAddress}`);
   }
@@ -676,39 +773,44 @@ async function handleWalletShow(
   options: { json?: boolean; hex?: boolean; paths?: boolean } = {}
 ): Promise<void> {
   const walletPath = config.wallet.encrypted_path;
-  const result = await loadWallet(walletPath);
-
-  if (!result) {
-    console.error('No wallet found. Run `townhouse init` first.');
-    process.exitCode = 1;
-    return;
-  }
-
-  if (result.permissionsWarning) {
-    console.error(result.permissionsWarning);
-  }
-
-  const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
-  if (!walletPassword) {
-    console.error(
-      'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
-    );
-    process.exitCode = 1;
-    return;
-  }
-
-  const walletManager = new WalletManager({ encryptedPath: walletPath });
-  try {
-    // Decrypt mnemonic in minimal scope — fromMnemonic derives keys then
-    // the mnemonic string becomes unreachable (eligible for GC)
-    await walletManager.fromMnemonic(
-      decryptWallet(result.wallet, walletPassword)
-    );
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to decrypt wallet: ${msg}`);
-    process.exitCode = 1;
-    return;
+  // TOWNHOUSE_MNEMONIC (direct, no password) OR encrypted wallet + password.
+  // P1 / docs/townhouse-mcp-design.md §3.
+  let walletManager: WalletManager | undefined =
+    (await tryEnvMnemonicWallet(walletPath)) ?? undefined;
+  let walletPassword: string | undefined;
+  if (!walletManager) {
+    const result = await loadWallet(walletPath);
+    if (!result) {
+      console.error(
+        'No wallet found. Run `townhouse init` first (or set TOWNHOUSE_MNEMONIC).'
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (result.permissionsWarning) {
+      console.error(result.permissionsWarning);
+    }
+    walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
+    if (!walletPassword) {
+      console.error(
+        'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var (or set TOWNHOUSE_MNEMONIC).'
+      );
+      process.exitCode = 1;
+      return;
+    }
+    walletManager = new WalletManager({ encryptedPath: walletPath });
+    try {
+      // Decrypt mnemonic in minimal scope — fromMnemonic derives keys then
+      // the mnemonic string becomes unreachable (eligible for GC)
+      await walletManager.fromMnemonic(
+        decryptWallet(result.wallet, walletPassword)
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to decrypt wallet: ${msg}`);
+      process.exitCode = 1;
+      return;
+    }
   }
 
   try {
@@ -782,7 +884,8 @@ async function handleWalletShow(
 async function handleWalletSeed(
   config: TownhouseConfig,
   password: string | undefined,
-  confirm: boolean
+  confirm: boolean,
+  json = false
 ): Promise<void> {
   if (!confirm) {
     console.error(
@@ -793,35 +896,43 @@ async function handleWalletSeed(
   }
 
   const walletPath = config.wallet.encrypted_path;
-  const result = await loadWallet(walletPath);
-  if (!result) {
-    console.error('No wallet found. Run `townhouse init` first.');
-    process.exitCode = 1;
-    return;
-  }
-  if (result.permissionsWarning) {
-    console.error(result.permissionsWarning);
-  }
+  // TOWNHOUSE_MNEMONIC (direct, no password) OR encrypted wallet + password. In
+  // mnemonic mode `getMnemonic()` returns the env seed — P1 / §3.
+  let walletManager: WalletManager | undefined =
+    (await tryEnvMnemonicWallet(walletPath)) ?? undefined;
+  if (!walletManager) {
+    const result = await loadWallet(walletPath);
+    if (!result) {
+      console.error(
+        'No wallet found. Run `townhouse init` first (or set TOWNHOUSE_MNEMONIC).'
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (result.permissionsWarning) {
+      console.error(result.permissionsWarning);
+    }
 
-  const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
-  if (!walletPassword) {
-    console.error(
-      'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
-    );
-    process.exitCode = 1;
-    return;
-  }
+    const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
+    if (!walletPassword) {
+      console.error(
+        'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var (or set TOWNHOUSE_MNEMONIC).'
+      );
+      process.exitCode = 1;
+      return;
+    }
 
-  const walletManager = new WalletManager({ encryptedPath: walletPath });
-  try {
-    await walletManager.fromMnemonic(
-      decryptWallet(result.wallet, walletPassword)
-    );
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to decrypt wallet: ${msg}`);
-    process.exitCode = 1;
-    return;
+    walletManager = new WalletManager({ encryptedPath: walletPath });
+    try {
+      await walletManager.fromMnemonic(
+        decryptWallet(result.wallet, walletPassword)
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to decrypt wallet: ${msg}`);
+      process.exitCode = 1;
+      return;
+    }
   }
 
   try {
@@ -831,6 +942,11 @@ async function handleWalletSeed(
       // races with concurrent lock() calls in long-running test processes.
       console.error('Internal error: mnemonic unavailable after unlock.');
       process.exitCode = 1;
+      return;
+    }
+
+    if (json) {
+      console.log(JSON.stringify({ mnemonic }));
       return;
     }
 
@@ -895,6 +1011,28 @@ async function resolveWalletPassword(
     return await promptPassword('Wallet password: ');
   }
   return null;
+}
+
+/**
+ * P1 — operator/agent wallet mode. When `TOWNHOUSE_MNEMONIC` is set, load the
+ * operator wallet DIRECTLY from that mnemonic: no encrypted wallet file and no
+ * password. Returns an unlocked {@link WalletManager}, or `null` when the env
+ * var is unset (callers then fall back to the encrypted-wallet + password
+ * flow). The agent owns the funds, so a single env-var secret replaces the
+ * password indirection — see docs/townhouse-mcp-design.md §3.
+ *
+ * In this mode the encrypted wallet file is irrelevant — the on-disk AR cache
+ * (keyed by the operator password) is simply skipped; `ensureArweaveKey` then
+ * pays the full RSA cost without a password.
+ */
+async function tryEnvMnemonicWallet(
+  walletPath: string
+): Promise<WalletManager | null> {
+  const mnemonic = process.env['TOWNHOUSE_MNEMONIC']?.trim();
+  if (!mnemonic) return null;
+  const walletManager = new WalletManager({ encryptedPath: walletPath });
+  await walletManager.fromMnemonic(mnemonic);
+  return walletManager;
 }
 
 /**
@@ -969,38 +1107,52 @@ async function handleCreditsBuy(
   const destinationOverride = values['credit-destination'] as
     | string
     | undefined;
+  const json = values['json'] === true;
+  // --json is non-interactive: a submit must be pre-confirmed with --yes (the
+  // y/N prompt would otherwise stall a machine consumer like the MCP server).
+  if (json && !quoteOnly && !skipConfirm) {
+    console.error('credits buy --json requires --yes (non-interactive).');
+    process.exitCode = 1;
+    return;
+  }
 
   // ── 2. Wallet unlock ──
+  // TOWNHOUSE_MNEMONIC (direct, no password) OR encrypted wallet + password. P1.
   const walletPath = config.wallet.encrypted_path;
-  const loaded = await loadWallet(walletPath);
-  if (!loaded) {
-    console.error(
-      `No wallet found at ${walletPath}. Run \`townhouse init\` first.`
-    );
-    process.exitCode = 1;
-    return;
-  }
-  if (loaded.permissionsWarning) console.error(loaded.permissionsWarning);
+  let wallet: WalletManager | undefined =
+    (await tryEnvMnemonicWallet(walletPath)) ?? undefined;
+  let resolvedPassword: string | undefined;
+  if (!wallet) {
+    const loaded = await loadWallet(walletPath);
+    if (!loaded) {
+      console.error(
+        `No wallet found at ${walletPath}. Run \`townhouse init\` first (or set TOWNHOUSE_MNEMONIC).`
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (loaded.permissionsWarning) console.error(loaded.permissionsWarning);
 
-  const resolvedPassword = await resolveWalletPassword(
-    values['password'] as string | undefined
-  );
-  if (!resolvedPassword) {
-    console.error(
-      'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
-    );
-    process.exitCode = 1;
-    return;
-  }
+    resolvedPassword =
+      (await resolveWalletPassword(values['password'] as string | undefined)) ??
+      undefined;
+    if (!resolvedPassword) {
+      console.error(
+        'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var (or set TOWNHOUSE_MNEMONIC).'
+      );
+      process.exitCode = 1;
+      return;
+    }
 
-  const wallet = new WalletManager({ encryptedPath: walletPath });
-  try {
-    await wallet.fromMnemonic(decryptWallet(loaded.wallet, resolvedPassword));
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to decrypt wallet: ${msg}`);
-    process.exitCode = 1;
-    return;
+    wallet = new WalletManager({ encryptedPath: walletPath });
+    try {
+      await wallet.fromMnemonic(decryptWallet(loaded.wallet, resolvedPassword));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to decrypt wallet: ${msg}`);
+      process.exitCode = 1;
+      return;
+    }
   }
 
   try {
@@ -1013,9 +1165,11 @@ async function handleCreditsBuy(
     if (destinationOverride) {
       destinationAddress = destinationOverride;
     } else if (token !== 'ar' && nodeType === 'dvm') {
-      process.stdout.write(
-        `Resolving DVM Arweave credit address (first run, ~10s)...\n`
-      );
+      if (!json) {
+        process.stdout.write(
+          `Resolving DVM Arweave credit address (first run, ~10s)...\n`
+        );
+      }
       await wallet.ensureArweaveKey('dvm', resolvedPassword);
       const dvmKeys = wallet.getNodeKeys('dvm');
       if (!dvmKeys.arweaveAddress) {
@@ -1027,9 +1181,11 @@ async function handleCreditsBuy(
     }
 
     // ── 4. Quote step ──
-    process.stdout.write(
-      `Quoting ${amountRaw} ${token} for ${nodeType}'s credit address...\n`
-    );
+    if (!json) {
+      process.stdout.write(
+        `Quoting ${amountRaw} ${token} for ${nodeType}'s credit address...\n`
+      );
+    }
     const quote = await buyCredits({
       wallet,
       nodeType,
@@ -1041,19 +1197,37 @@ async function handleCreditsBuy(
     if (quote.kind !== 'quote') {
       throw new Error('Internal error: quoteOnly returned non-quote result');
     }
-    const quotedDisplay = `${quote.winc.toString()} winc (${formatWincAsBytes(quote.winc)})`;
-    process.stdout.write(
-      `Quote: ${formatTokenAmount(token, quote.baseAmount)} → ${quotedDisplay}\n`
-    );
-    process.stdout.write(`Source address (${token}): ${quote.fromAddress}\n`);
-    process.stdout.write(`Credit recipient: ${quote.creditAddress}\n`);
+    if (!json) {
+      const quotedDisplay = `${quote.winc.toString()} winc (${formatWincAsBytes(quote.winc)})`;
+      process.stdout.write(
+        `Quote: ${formatTokenAmount(token, quote.baseAmount)} → ${quotedDisplay}\n`
+      );
+      process.stdout.write(`Source address (${token}): ${quote.fromAddress}\n`);
+      process.stdout.write(`Credit recipient: ${quote.creditAddress}\n`);
+    }
 
     if (quoteOnly) {
-      process.stdout.write('Quote-only; no on-chain transaction submitted.\n');
+      if (json) {
+        console.log(
+          JSON.stringify({
+            kind: 'quote',
+            token,
+            baseAmount: quote.baseAmount.toString(),
+            winc: quote.winc.toString(),
+            bytes: formatWincAsBytes(quote.winc),
+            fromAddress: quote.fromAddress,
+            creditAddress: quote.creditAddress,
+          })
+        );
+      } else {
+        process.stdout.write(
+          'Quote-only; no on-chain transaction submitted.\n'
+        );
+      }
       return;
     }
 
-    // ── 5. Confirmation ──
+    // ── 5. Confirmation ── (json mode is pre-gated on --yes above)
     if (!skipConfirm) {
       const ok = await promptYesNo('Proceed? [y/N] ');
       if (!ok) {
@@ -1064,7 +1238,7 @@ async function handleCreditsBuy(
     }
 
     // ── 6. Submit ──
-    process.stdout.write('Submitting on-chain transaction...\n');
+    if (!json) process.stdout.write('Submitting on-chain transaction...\n');
     const result = await buyCredits({
       wallet,
       nodeType,
@@ -1076,15 +1250,29 @@ async function handleCreditsBuy(
     if (result.kind !== 'submit') {
       throw new Error('Internal error: submit path returned non-submit result');
     }
-    process.stdout.write(`Transaction submitted: ${result.id}\n`);
-    process.stdout.write(`Status: ${result.status}\n`);
-    process.stdout.write(
-      `Credited: ${result.winc.toString()} winc (${formatWincAsBytes(result.winc)})\n`
-    );
-    if (result.block !== undefined) {
-      process.stdout.write(`Block: ${result.block}\n`);
+    if (json) {
+      console.log(
+        JSON.stringify({
+          kind: 'submit',
+          token,
+          id: result.id,
+          status: result.status,
+          winc: result.winc.toString(),
+          bytes: formatWincAsBytes(result.winc),
+          ...(result.block !== undefined ? { block: result.block } : {}),
+        })
+      );
+    } else {
+      process.stdout.write(`Transaction submitted: ${result.id}\n`);
+      process.stdout.write(`Status: ${result.status}\n`);
+      process.stdout.write(
+        `Credited: ${result.winc.toString()} winc (${formatWincAsBytes(result.winc)})\n`
+      );
+      if (result.block !== undefined) {
+        process.stdout.write(`Block: ${result.block}\n`);
+      }
+      process.stdout.write('Done.\n');
     }
-    process.stdout.write('Done.\n');
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`credits buy failed: ${msg}`);
@@ -1122,48 +1310,66 @@ async function handleCreditsBalance(
   }
   const token: TurboTokenId = tokenRaw;
 
+  // TOWNHOUSE_MNEMONIC (direct, no password) OR encrypted wallet + password. P1.
   const walletPath = config.wallet.encrypted_path;
-  const loaded = await loadWallet(walletPath);
-  if (!loaded) {
-    console.error(
-      `No wallet found at ${walletPath}. Run \`townhouse init\` first.`
+  let wallet: WalletManager | undefined =
+    (await tryEnvMnemonicWallet(walletPath)) ?? undefined;
+  if (!wallet) {
+    const loaded = await loadWallet(walletPath);
+    if (!loaded) {
+      console.error(
+        `No wallet found at ${walletPath}. Run \`townhouse init\` first (or set TOWNHOUSE_MNEMONIC).`
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (loaded.permissionsWarning) console.error(loaded.permissionsWarning);
+
+    const resolvedPassword = await resolveWalletPassword(
+      values['password'] as string | undefined
     );
-    process.exitCode = 1;
-    return;
-  }
-  if (loaded.permissionsWarning) console.error(loaded.permissionsWarning);
+    if (!resolvedPassword) {
+      console.error(
+        'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var (or set TOWNHOUSE_MNEMONIC).'
+      );
+      process.exitCode = 1;
+      return;
+    }
 
-  const resolvedPassword = await resolveWalletPassword(
-    values['password'] as string | undefined
-  );
-  if (!resolvedPassword) {
-    console.error(
-      'Wallet password required. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
-    );
-    process.exitCode = 1;
-    return;
-  }
-
-  const wallet = new WalletManager({ encryptedPath: walletPath });
-  try {
-    await wallet.fromMnemonic(decryptWallet(loaded.wallet, resolvedPassword));
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to decrypt wallet: ${msg}`);
-    process.exitCode = 1;
-    return;
+    wallet = new WalletManager({ encryptedPath: walletPath });
+    try {
+      await wallet.fromMnemonic(decryptWallet(loaded.wallet, resolvedPassword));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to decrypt wallet: ${msg}`);
+      process.exitCode = 1;
+      return;
+    }
   }
 
+  const json = values['json'] === true;
   try {
     const balance = await getCreditBalance({ wallet, nodeType, token });
-    process.stdout.write(`Address (${token}): ${balance.address}\n`);
-    process.stdout.write(
-      `Balance: ${balance.winc.toString()} winc (${formatWincAsBytes(balance.winc)})\n`
-    );
-    if (balance.effectiveBalance !== balance.winc) {
-      process.stdout.write(
-        `Effective (incl. received approvals): ${balance.effectiveBalance.toString()} winc (${formatWincAsBytes(balance.effectiveBalance)})\n`
+    if (json) {
+      console.log(
+        JSON.stringify({
+          token,
+          address: balance.address,
+          winc: balance.winc.toString(),
+          effectiveBalance: balance.effectiveBalance.toString(),
+          bytes: formatWincAsBytes(balance.winc),
+        })
       );
+    } else {
+      process.stdout.write(`Address (${token}): ${balance.address}\n`);
+      process.stdout.write(
+        `Balance: ${balance.winc.toString()} winc (${formatWincAsBytes(balance.winc)})\n`
+      );
+      if (balance.effectiveBalance !== balance.winc) {
+        process.stdout.write(
+          `Effective (incl. received approvals): ${balance.effectiveBalance.toString()} winc (${formatWincAsBytes(balance.effectiveBalance)})\n`
+        );
+      }
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1233,44 +1439,77 @@ function formatLocalEarningsError(err: unknown): string {
 async function handleStatus(
   docker: Docker,
   config: TownhouseConfig,
-  opts: { units: 'usdc' | 'sats'; satsPerUsdc?: number; configPath: string } = {
+  opts: {
+    units: 'usdc' | 'sats';
+    satsPerUsdc?: number;
+    configPath: string;
+    json?: boolean;
+  } = {
     units: 'usdc',
     configPath: DEFAULT_CONFIG_PATH,
   }
 ): Promise<void> {
+  const json = opts.json === true;
   const orchestrator = new DockerOrchestrator(docker, config, undefined, {
     profile: 'dev',
   });
   const statuses = await orchestrator.status();
 
-  console.log('Node Status:');
-  console.log('------------');
-  for (const s of statuses) {
-    const health = s.health ? ` (${s.health})` : '';
-    console.log(`  ${s.name.padEnd(12)} ${s.state}${health}`);
+  // Accumulated for --json; the human output below mirrors it section by section.
+  const payload: {
+    nodes: { name: string; state: string; health?: string }[];
+    hiddenServices?: { connector?: string; relay?: string };
+    connector: {
+      available: boolean;
+      packetsForwarded?: number;
+      activePeers?: number;
+      totalPeers?: number;
+    };
+    earnings?: unknown;
+  } = {
+    nodes: statuses.map((s) => ({
+      name: s.name,
+      state: s.state,
+      ...(s.health ? { health: s.health } : {}),
+    })),
+    connector: { available: false },
+  };
+
+  if (!json) {
+    console.log('Node Status:');
+    console.log('------------');
+    for (const s of statuses) {
+      const health = s.health ? ` (${s.health})` : '';
+      console.log(`  ${s.name.padEnd(12)} ${s.state}${health}`);
+    }
   }
 
   const connectorHs = config.transport.hiddenService;
   const relayHs = config.transport.relayHiddenService;
+  const connectorUrl = connectorHs?.externalUrl ?? config.transport.externalUrl;
   if (
     config.transport.mode === 'hs' ||
     connectorHs?.externalUrl ||
     relayHs?.externalUrl ||
     config.transport.externalUrl
   ) {
-    console.log('');
-    console.log('Hidden Services:');
-    console.log('----------------');
-    const connectorUrl =
-      connectorHs?.externalUrl ?? config.transport.externalUrl;
-    if (connectorUrl) {
-      console.log(`  Connector (BTP):  ${connectorUrl}`);
-    }
-    if (relayHs?.externalUrl) {
-      console.log(`  Relay (Nostr):    ${relayHs.externalUrl}`);
-    }
-    if (!connectorUrl && !relayHs?.externalUrl) {
-      console.log('  (hs mode set but no externalUrl configured)');
+    payload.hiddenServices = {
+      ...(connectorUrl ? { connector: connectorUrl } : {}),
+      ...(relayHs?.externalUrl ? { relay: relayHs.externalUrl } : {}),
+    };
+    if (!json) {
+      console.log('');
+      console.log('Hidden Services:');
+      console.log('----------------');
+      if (connectorUrl) {
+        console.log(`  Connector (BTP):  ${connectorUrl}`);
+      }
+      if (relayHs?.externalUrl) {
+        console.log(`  Relay (Nostr):    ${relayHs.externalUrl}`);
+      }
+      if (!connectorUrl && !relayHs?.externalUrl) {
+        console.log('  (hs mode set but no externalUrl configured)');
+      }
     }
   }
 
@@ -1282,22 +1521,40 @@ async function handleStatus(
     const metrics = await adminClient.getMetrics();
     const peers = await adminClient.getPeers();
     const activePeers = peers.filter((p) => p.connected).length;
+    payload.connector = {
+      available: true,
+      packetsForwarded: metrics.aggregate.packetsForwarded,
+      activePeers,
+      totalPeers: peers.length,
+    };
 
-    console.log('');
-    console.log('Connector Metrics:');
-    console.log('------------------');
-    console.log(`  Packets forwarded: ${metrics.aggregate.packetsForwarded}`);
-    console.log(`  Active peers:      ${activePeers}/${peers.length}`);
+    if (!json) {
+      console.log('');
+      console.log('Connector Metrics:');
+      console.log('------------------');
+      console.log(`  Packets forwarded: ${metrics.aggregate.packetsForwarded}`);
+      console.log(`  Active peers:      ${activePeers}/${peers.length}`);
+    }
   } catch {
-    console.log('');
-    console.log('Connector Metrics: unavailable');
+    if (!json) {
+      console.log('');
+      console.log('Connector Metrics: unavailable');
+    }
   }
 
-  if (opts.units === 'sats' && opts.satsPerUsdc === undefined) return;
+  if (opts.units === 'sats' && opts.satsPerUsdc === undefined) {
+    if (json) console.log(JSON.stringify(payload));
+    return;
+  }
   const earnings = await resolveEarnings(
     `http://127.0.0.1:${config.connector.adminPort}`,
     opts.configPath
   );
+  payload.earnings = earnings;
+  if (json) {
+    console.log(JSON.stringify(payload));
+    return;
+  }
   for (const line of renderEarningsSection({
     earnings,
     units: opts.units,
@@ -1355,18 +1612,23 @@ async function handleUp(
   // wallet file exists, we log a warning and skip API startup entirely so
   // orchestration-only callers (CI, tooling, smoke tests) still work.
   const walletPath = config.wallet.encrypted_path;
-  let walletManager: WalletManager | undefined;
-  if (!existsSync(walletPath)) {
-    console.error(
-      `Wallet not found at ${walletPath}. Run \`townhouse setup\` first (or restore your wallet backup).`
-    );
-    process.exitCode = 1;
-    return;
-  } else {
-    const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
+  // Resolve the operator wallet: TOWNHOUSE_MNEMONIC (direct, no password) OR the
+  // encrypted wallet + password. P1 / docs/townhouse-mcp-design.md §3.
+  let walletManager: WalletManager | undefined =
+    (await tryEnvMnemonicWallet(walletPath)) ?? undefined;
+  let walletPassword: string | undefined;
+  if (!walletManager) {
+    if (!existsSync(walletPath)) {
+      console.error(
+        `Wallet not found at ${walletPath}. Run \`townhouse setup\` first (or restore your wallet backup), or set TOWNHOUSE_MNEMONIC.`
+      );
+      process.exitCode = 1;
+      return;
+    }
+    walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
     if (!walletPassword) {
       throw new Error(
-        'Wallet password required to start the API. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var.'
+        'Wallet password required to start the API. Use --password flag or TOWNHOUSE_WALLET_PASSWORD env var (or set TOWNHOUSE_MNEMONIC).'
       );
     }
     const loaded = await loadWallet(walletPath);
@@ -1385,22 +1647,24 @@ async function handleUp(
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(`Failed to decrypt wallet: ${msg}`);
     }
+  }
 
-    // Pre-warm AR cache when DVM is in the boot set. The orchestrator's later
-    // ensureArweaveKey('dvm') call (without password) would otherwise pay the
-    // full 5–30s RSA cost AND not write back to disk. Calling here with the
-    // password populates both the in-memory + on-disk caches once and lets
-    // every subsequent invocation be sub-second (epic-49 Followup A).
-    if (profiles.includes('dvm')) {
-      try {
-        await walletManager.ensureArweaveKey('dvm', walletPassword);
-      } catch (err: unknown) {
-        // Non-fatal: orchestrator's own ensureArweaveKey call will retry.
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(
-          `[townhouse up] AR pre-warm failed (non-fatal, orchestrator will retry): ${msg}`
-        );
-      }
+  // Pre-warm AR cache when DVM is in the boot set. The orchestrator's later
+  // ensureArweaveKey('dvm') call (without password) would otherwise pay the
+  // full 5–30s RSA cost AND not write back to disk. Calling here with the
+  // password populates both the in-memory + on-disk caches once and lets
+  // every subsequent invocation be sub-second (epic-49 Followup A). In
+  // TOWNHOUSE_MNEMONIC mode walletPassword is undefined — ensureArweaveKey then
+  // skips the disk cache and pays the RSA cost (still correct, just not cached).
+  if (profiles.includes('dvm')) {
+    try {
+      await walletManager.ensureArweaveKey('dvm', walletPassword);
+    } catch (err: unknown) {
+      // Non-fatal: orchestrator's own ensureArweaveKey call will retry.
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[townhouse up] AR pre-warm failed (non-fatal, orchestrator will retry): ${msg}`
+      );
     }
   }
 
@@ -1570,22 +1834,29 @@ async function handleUp(
 
 async function handleDown(
   config: TownhouseConfig,
-  docker: Docker
+  docker: Docker,
+  json = false
 ): Promise<void> {
   const orchestrator = new DockerOrchestrator(docker, config, undefined, {
     profile: 'dev',
   });
 
+  const nodes: { name: string; state: string }[] = [];
   orchestrator.on(
     'containerState',
     (event: { name: string; state: string }) => {
-      console.log(`  ${event.name}: ${event.state}`);
+      nodes.push(event);
+      if (!json) console.log(`  ${event.name}: ${event.state}`);
     }
   );
 
-  console.log('Stopping nodes...');
+  if (!json) console.log('Stopping nodes...');
   await orchestrator.down();
-  console.log('All nodes stopped.');
+  if (json) {
+    console.log(JSON.stringify({ stopped: true, nodes }));
+  } else {
+    console.log('All nodes stopped.');
+  }
 }
 
 /** Connector admin URL for HS mode. */
@@ -1720,6 +1991,21 @@ async function attachDashboard(hostname: string): Promise<void> {
   }
 }
 
+/**
+ * P2b — emit one NDJSON boot-progress step on stdout when `townhouse up --json`
+ * / `hs up --json` is active. The townhouse-mcp server's `townhouse_up_status`
+ * tool reads these from up.log; a terminal `done`/`error` step tells it the
+ * boot finished (success/failure). Human ribbon output is left intact — the
+ * MCP reader skips non-JSON lines — so this is purely additive and low-risk.
+ */
+function emitUpStep(
+  json: boolean,
+  step: string,
+  extra: Record<string, unknown> = {}
+): void {
+  if (json) console.log(JSON.stringify({ step, ...extra }));
+}
+
 async function handleHsUp(
   _configPath: string,
   configDir: string,
@@ -1730,9 +2016,12 @@ async function handleHsUp(
     force?: boolean;
     skipPreflight?: boolean;
     hsOverrides?: CliHsOverrides;
+    json?: boolean;
   }
 ): Promise<void> {
   const { password, force, skipPreflight, hsOverrides } = options;
+  const json = options.json === true;
+  emitUpStep(json, 'starting', { transport: 'hs' });
 
   // ── Idempotency probe (AC #7) — BEFORE the preflight ────────────────────────
   // If our apex is already live, this is a re-run: re-print the address, refresh
@@ -1750,6 +2039,11 @@ async function handleHsUp(
       if (existing.hostname !== null) {
         // hostname from the connector already includes the .anyone suffix.
         console.log(`Apex live at ${existing.hostname}`);
+        emitUpStep(json, 'done', {
+          transport: 'hs',
+          hostname: existing.hostname,
+          alreadyLive: true,
+        });
         _writeHostJson(configDir, {
           hostname: existing.hostname,
           publishedAt: existing.publishedAt ?? new Date().toISOString(),
@@ -1809,52 +2103,59 @@ async function handleHsUp(
     }
   }
 
-  // Resolve wallet password (AC #10): --password → env var → interactive prompt → reject
+  // Resolve the operator wallet (AC #10): TOWNHOUSE_MNEMONIC (direct, no
+  // password) OR the encrypted wallet + password (--password → env → TTY).
+  // See P1 / docs/townhouse-mcp-design.md §3.
   const walletPath = config.wallet.encrypted_path;
-  if (!existsSync(walletPath)) {
-    console.error(
-      `Wallet not found at ${walletPath}. Run \`townhouse init\` first.`
-    );
-    process.exitCode = 1;
-    return;
-  }
+  let walletManager: WalletManager | undefined =
+    (await tryEnvMnemonicWallet(walletPath)) ?? undefined;
+  // Hoisted: injected into the townhouse-api container env below. Undefined in
+  // TOWNHOUSE_MNEMONIC mode (the container then receives TOWNHOUSE_MNEMONIC).
+  let resolvedPassword: string | undefined;
+  if (!walletManager) {
+    if (!existsSync(walletPath)) {
+      console.error(
+        `Wallet not found at ${walletPath}. Run \`townhouse init\` first (or set TOWNHOUSE_MNEMONIC).`
+      );
+      process.exitCode = 1;
+      return;
+    }
 
-  const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
+    const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
 
-  let resolvedPassword: string;
-  if (walletPassword) {
-    resolvedPassword = walletPassword;
-  } else if (process.stdin.isTTY) {
-    resolvedPassword = await promptPassword('Wallet password: ');
-  } else {
-    // No interactive terminal (CI, SSH without a TTY, piped stdin). Make the
-    // reason explicit so the user knows why no prompt appeared and what to do.
-    console.error(
-      'Wallet password required, but no interactive terminal is available to prompt.\n' +
-        'Pass --password <pw> or set TOWNHOUSE_WALLET_PASSWORD.'
-    );
-    process.exitCode = 1;
-    return;
-  }
+    if (walletPassword) {
+      resolvedPassword = walletPassword;
+    } else if (process.stdin.isTTY) {
+      resolvedPassword = await promptPassword('Wallet password: ');
+    } else {
+      // No interactive terminal (CI, SSH without a TTY, piped stdin). Make the
+      // reason explicit so the user knows why no prompt appeared and what to do.
+      console.error(
+        'Wallet password required, but no interactive terminal is available to prompt.\n' +
+          'Pass --password <pw>, set TOWNHOUSE_WALLET_PASSWORD, or set TOWNHOUSE_MNEMONIC.'
+      );
+      process.exitCode = 1;
+      return;
+    }
 
-  const loaded = await loadWallet(walletPath);
-  if (!loaded) {
-    console.error(`Wallet at ${walletPath} could not be read.`);
-    process.exitCode = 1;
-    return;
-  }
+    const loaded = await loadWallet(walletPath);
+    if (!loaded) {
+      console.error(`Wallet at ${walletPath} could not be read.`);
+      process.exitCode = 1;
+      return;
+    }
 
-  let walletManager: WalletManager | undefined;
-  try {
-    walletManager = new WalletManager({ encryptedPath: walletPath });
-    await walletManager.fromMnemonic(
-      decryptWallet(loaded.wallet, resolvedPassword)
-    );
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to decrypt wallet: ${msg}`);
-    process.exitCode = 1;
-    return;
+    try {
+      walletManager = new WalletManager({ encryptedPath: walletPath });
+      await walletManager.fromMnemonic(
+        decryptWallet(loaded.wallet, resolvedPassword)
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to decrypt wallet: ${msg}`);
+      process.exitCode = 1;
+      return;
+    }
   }
 
   const ribbon = new OnboardingRibbon();
@@ -2018,7 +2319,13 @@ async function handleHsUp(
     const prevWalletDir = process.env['TOWNHOUSE_WALLET_DIR'];
     const prevDockerGid = process.env['TOWNHOUSE_DOCKER_GID'];
     process.env['TOWNHOUSE_HOME'] = configDir;
-    process.env['TOWNHOUSE_WALLET_PASSWORD'] = resolvedPassword;
+    // In TOWNHOUSE_MNEMONIC mode resolvedPassword is undefined; leave the
+    // container's TOWNHOUSE_WALLET_PASSWORD unset (assigning undefined would
+    // coerce to the string "undefined"). The operator's TOWNHOUSE_MNEMONIC is
+    // already in process.env and is forwarded by the compose template instead.
+    if (resolvedPassword !== undefined) {
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = resolvedPassword;
+    }
     process.env['TOWNHOUSE_UID'] = String(process.getuid?.() ?? 1000);
     // Inject the wallet dir as an absolute host path so the townhouse-api
     // container can find the wallet at the same path as config.wallet.encrypted_path.
@@ -2139,12 +2446,17 @@ async function handleHsUp(
     // hostname from the connector already includes the .anyone suffix.
     // ribbon.start('live', hostname) prints: "Apex live at <hostname>" as the FINAL stdout line.
     ribbon.start('live', hostname);
+    emitUpStep(json, 'done', { transport: 'hs', hostname });
 
     // Story 48.1: foreground Ink TUI when stdout is a TTY. Apex is already live
     // here (host.json written, "Apex live at …" printed above); attachDashboard
     // isolates any TUI failure so it is never reported as a boot failure.
     await attachDashboard(hostname);
   } catch (err: unknown) {
+    emitUpStep(json, 'error', {
+      transport: 'hs',
+      message: err instanceof Error ? err.message : String(err),
+    });
     const { exitCode } = renderFailure(err);
     process.exitCode = exitCode;
   } finally {
@@ -2183,9 +2495,12 @@ async function handleDirectUp(
     force?: boolean;
     skipPreflight?: boolean;
     hsOverrides?: CliHsOverrides;
+    json?: boolean;
   }
 ): Promise<void> {
   const { password, force, skipPreflight, hsOverrides } = options;
+  const json = options.json === true;
+  emitUpStep(json, 'starting', { transport: 'direct' });
 
   const adminClientFactory =
     hsOverrides?.createAdminClient ??
@@ -2214,9 +2529,9 @@ async function handleDirectUp(
   // failure deterministic regardless of whether some unrelated connector admin
   // happens to answer the idempotency probe on the canonical port.
   const walletPath = config.wallet.encrypted_path;
-  if (!existsSync(walletPath)) {
+  if (!process.env['TOWNHOUSE_MNEMONIC'] && !existsSync(walletPath)) {
     console.error(
-      `Wallet not found at ${walletPath}. Run \`townhouse init\` first.`
+      `Wallet not found at ${walletPath}. Run \`townhouse init\` first (or set TOWNHOUSE_MNEMONIC).`
     );
     process.exitCode = 1;
     return;
@@ -2236,6 +2551,7 @@ async function handleDirectUp(
       try {
         await ping();
         console.log(`Apex live (direct BTP) at ${DIRECT_BTP_DIAL_URL}`);
+        emitUpStep(json, 'done', { transport: 'direct', alreadyLive: true });
         return;
       } catch {
         // Not running / not ready → fall through to preflight + cold boot.
@@ -2266,41 +2582,47 @@ async function handleDirectUp(
     }
   }
 
-  // Resolve wallet password (--password → env var → interactive prompt → reject).
-  // (walletPath existence was already validated above, before the probe.)
-  const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
-  let resolvedPassword: string;
-  if (walletPassword) {
-    resolvedPassword = walletPassword;
-  } else if (process.stdin.isTTY) {
-    resolvedPassword = await promptPassword('Wallet password: ');
-  } else {
-    console.error(
-      'Wallet password required, but no interactive terminal is available to prompt.\n' +
-        'Pass --password <pw> or set TOWNHOUSE_WALLET_PASSWORD.'
-    );
-    process.exitCode = 1;
-    return;
-  }
+  // Resolve the operator wallet: TOWNHOUSE_MNEMONIC (direct, no password) OR the
+  // encrypted wallet + password (--password → env → TTY). walletPath existence
+  // was already validated above (skipped in mnemonic mode). P1 / §3.
+  let walletManager: WalletManager | undefined =
+    (await tryEnvMnemonicWallet(walletPath)) ?? undefined;
+  // Hoisted: injected into the townhouse-api container env below. Undefined in
+  // TOWNHOUSE_MNEMONIC mode (the container then receives TOWNHOUSE_MNEMONIC).
+  let resolvedPassword: string | undefined;
+  if (!walletManager) {
+    const walletPassword = password ?? process.env['TOWNHOUSE_WALLET_PASSWORD'];
+    if (walletPassword) {
+      resolvedPassword = walletPassword;
+    } else if (process.stdin.isTTY) {
+      resolvedPassword = await promptPassword('Wallet password: ');
+    } else {
+      console.error(
+        'Wallet password required, but no interactive terminal is available to prompt.\n' +
+          'Pass --password <pw>, set TOWNHOUSE_WALLET_PASSWORD, or set TOWNHOUSE_MNEMONIC.'
+      );
+      process.exitCode = 1;
+      return;
+    }
 
-  const loaded = await loadWallet(walletPath);
-  if (!loaded) {
-    console.error(`Wallet at ${walletPath} could not be read.`);
-    process.exitCode = 1;
-    return;
-  }
+    const loaded = await loadWallet(walletPath);
+    if (!loaded) {
+      console.error(`Wallet at ${walletPath} could not be read.`);
+      process.exitCode = 1;
+      return;
+    }
 
-  let walletManager: WalletManager | undefined;
-  try {
-    walletManager = new WalletManager({ encryptedPath: walletPath });
-    await walletManager.fromMnemonic(
-      decryptWallet(loaded.wallet, resolvedPassword)
-    );
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to decrypt wallet: ${msg}`);
-    process.exitCode = 1;
-    return;
+    try {
+      walletManager = new WalletManager({ encryptedPath: walletPath });
+      await walletManager.fromMnemonic(
+        decryptWallet(loaded.wallet, resolvedPassword)
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to decrypt wallet: ${msg}`);
+      process.exitCode = 1;
+      return;
+    }
   }
 
   const ribbon = new OnboardingRibbon();
@@ -2421,7 +2743,13 @@ async function handleDirectUp(
     const prevWalletDir = process.env['TOWNHOUSE_WALLET_DIR'];
     const prevDockerGid = process.env['TOWNHOUSE_DOCKER_GID'];
     process.env['TOWNHOUSE_HOME'] = configDir;
-    process.env['TOWNHOUSE_WALLET_PASSWORD'] = resolvedPassword;
+    // In TOWNHOUSE_MNEMONIC mode resolvedPassword is undefined; leave the
+    // container's TOWNHOUSE_WALLET_PASSWORD unset (assigning undefined would
+    // coerce to the string "undefined"). The operator's TOWNHOUSE_MNEMONIC is
+    // already in process.env and is forwarded by the compose template instead.
+    if (resolvedPassword !== undefined) {
+      process.env['TOWNHOUSE_WALLET_PASSWORD'] = resolvedPassword;
+    }
     process.env['TOWNHOUSE_UID'] = String(process.getuid?.() ?? 1000);
     process.env['TOWNHOUSE_WALLET_DIR'] = dirname(
       resolve(config.wallet.encrypted_path)
@@ -2466,7 +2794,12 @@ async function handleDirectUp(
     // Step 6: success — print the direct dial address as the FINAL stdout line.
     ribbon.stop();
     console.log(`Apex live (direct BTP) at ${DIRECT_BTP_DIAL_URL}`);
+    emitUpStep(json, 'done', { transport: 'direct' });
   } catch (err: unknown) {
+    emitUpStep(json, 'error', {
+      transport: 'direct',
+      message: err instanceof Error ? err.message : String(err),
+    });
     const { exitCode } = renderFailure(err);
     process.exitCode = exitCode;
   } finally {
@@ -2501,22 +2834,33 @@ async function handleHsEnable(
     force?: boolean;
     skipPreflight?: boolean;
     hsOverrides?: CliHsOverrides;
+    json?: boolean;
   }
 ): Promise<void> {
   const { hsOverrides } = options;
+  const json = options.json === true;
+  emitUpStep(json, 'starting', { transport: 'hs', action: 'enable' });
 
   // Already HS? Nothing to do — point at the HS up path for a re-attach.
   if (detectExistingHsConfig(configDir)) {
-    console.log(
-      'Hidden-service apex already configured. Use `townhouse hs up` to (re)attach.'
-    );
+    if (json) {
+      emitUpStep(json, 'done', {
+        transport: 'hs',
+        action: 'enable',
+        alreadyHs: true,
+      });
+    } else {
+      console.log(
+        'Hidden-service apex already configured. Use `townhouse hs up` to (re)attach.'
+      );
+    }
     return;
   }
 
   // Tear the direct stack down so its BTP :3000 host bind + container/network
   // namespace are free before the HS stack comes up. Best-effort: a missing
   // direct stack (fresh install) is fine — handleHsUp does a clean cold boot.
-  console.log('Switching direct apex → hidden-service mode...');
+  if (!json) console.log('Switching direct apex → hidden-service mode...');
   try {
     const materialize =
       hsOverrides?.materializeComposeTemplate ?? materializeComposeTemplate;
@@ -2538,18 +2882,24 @@ async function handleHsEnable(
     await orch.down();
   } catch (err: unknown) {
     const detail = err instanceof Error ? err.message : String(err);
-    console.warn(
-      `[townhouse hs enable] direct stack teardown skipped (non-fatal): ${detail}`
-    );
+    if (json) {
+      emitUpStep(json, 'teardown-skipped', { detail });
+    } else {
+      console.warn(
+        `[townhouse hs enable] direct stack teardown skipped (non-fatal): ${detail}`
+      );
+    }
   }
 
   // Bring up HS. force:true ensures the direct connector.yaml is overwritten
   // with the HS config (anon.enabled:true) rather than reused by idempotency.
+  // `json` flows through so handleHsUp emits its terminal done/error NDJSON step.
   await handleHsUp(configPath, configDir, config, docker, {
     password: options.password,
     force: true,
     skipPreflight: options.skipPreflight,
     hsOverrides,
+    json,
   });
 }
 
@@ -2962,6 +3312,7 @@ export async function main(
     args: argv,
     options: {
       help: { type: 'boolean' },
+      version: { type: 'boolean' },
       force: { type: 'boolean' },
       config: { type: 'string', short: 'c' },
       'config-dir': { type: 'string' },
@@ -3018,6 +3369,14 @@ export async function main(
   });
 
   const command = positionals[0];
+
+  // `townhouse --version` / `townhouse version` — print the package version and
+  // exit cleanly. `--json` yields `{ "version": "x.y.z" }` for tooling probes.
+  if (values.version === true || command === 'version') {
+    const version = readCliVersion();
+    console.log(values.json === true ? JSON.stringify({ version }) : version);
+    throw new CliHelpRequested();
+  }
 
   // Handle `townhouse node <verb> --help` before the global --help check so
   // node sub-help takes priority over the global HELP_TEXT.
@@ -3100,7 +3459,8 @@ export async function main(
         presetVal,
         values.yes === true,
         networkVal as NetworkMode | undefined,
-        endpoints
+        endpoints,
+        values.json === true
       );
       break;
     }
@@ -3120,7 +3480,8 @@ export async function main(
         await handleWalletSeed(
           config,
           values.password as string | undefined,
-          values.confirm === true
+          values.confirm === true,
+          values.json === true
         );
       } else {
         console.error(
@@ -3175,7 +3536,7 @@ export async function main(
       await handleStatus(
         dockerInstance ?? new Docker(),
         loadConfig(configPath),
-        { units, satsPerUsdc, configPath }
+        { units, satsPerUsdc, configPath, json: values.json === true }
       );
       break;
     }
@@ -3225,6 +3586,7 @@ export async function main(
           force: values.force === true,
           skipPreflight: values['skip-preflight'] === true,
           hsOverrides,
+          json: values.json === true,
         });
         break;
       }
@@ -3235,6 +3597,7 @@ export async function main(
         force: values.force === true,
         skipPreflight: values['skip-preflight'] === true,
         hsOverrides,
+        json: values.json === true,
       });
       break;
     }
@@ -3242,7 +3605,7 @@ export async function main(
       const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
       const config = loadConfig(configPath);
       const docker = dockerInstance ?? new Docker();
-      await handleDown(config, docker);
+      await handleDown(config, docker, values.json === true);
       break;
     }
     case 'channels':
@@ -3271,6 +3634,7 @@ export async function main(
           force: values.force === true,
           skipPreflight: values['skip-preflight'] === true,
           hsOverrides,
+          json: values.json === true,
         });
       } else if (action === 'enable') {
         await handleHsEnable(configPath, configDir, config, docker, {
@@ -3278,6 +3642,7 @@ export async function main(
           force: values.force === true,
           skipPreflight: values['skip-preflight'] === true,
           hsOverrides,
+          json: values.json === true,
         });
       } else if (action === 'down') {
         await handleHsDown(configDir, config, docker, {

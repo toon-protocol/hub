@@ -424,6 +424,48 @@ describe('credits CLI commands', () => {
         rmSync(dir, { recursive: true, force: true });
       }
     });
+
+    it('--json emits one quote object and no human stdout (P2b)', async () => {
+      const dir = makeTempDir();
+      try {
+        const { configPath } = await initWallet(dir);
+        mockGetWincForToken.mockResolvedValue({
+          winc: '6100000000000',
+          actualTokenAmount: '1000000',
+          equivalentWincTokenAmount: '6100000000000',
+        });
+
+        await main([
+          'credits',
+          'buy',
+          '--token',
+          'sol',
+          '--amount',
+          '0.001',
+          '--quote-only',
+          '-c',
+          configPath,
+          '--password',
+          WALLET_PASSWORD,
+          '--json',
+        ]);
+
+        // Only the JSON object (filter out init's human banner from initWallet).
+        const logged = consoleLogSpy.mock.calls
+          .map((c) => String(c[0]))
+          .filter((l) => l.trim().startsWith('{'));
+        expect(logged).toHaveLength(1);
+        const obj = JSON.parse(logged[0]!) as { kind: string; winc: string };
+        expect(obj.kind).toBe('quote');
+        expect(obj.winc).toBe('6100000000000');
+        // Human progress writes are suppressed in --json mode.
+        const human = stdoutSpy.mock.calls.map((c) => String(c[0])).join('');
+        expect(human).not.toContain('Quote:');
+        expect(mockTopUpWithTokens).not.toHaveBeenCalled();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   // ── --yes skips confirmation ───────────────────────────────────────────
@@ -565,6 +607,43 @@ describe('credits CLI commands', () => {
         const out = stdoutSpy.mock.calls.map((c) => String(c[0])).join('');
         expect(out).toMatch(/Balance: 610000000000 winc/);
         expect(out).toMatch(/~1\s?MB/);
+        expect(process.exitCode).toBeUndefined();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('--json emits one balance object (P2b)', async () => {
+      const dir = makeTempDir();
+      try {
+        const { configPath } = await initWallet(dir);
+        mockGetBalance.mockResolvedValue({
+          winc: '610000000000',
+          controlledWinc: '610000000000',
+          effectiveBalance: '610000000000',
+          receivedApprovals: [],
+          givenApprovals: [],
+        });
+
+        await main([
+          'credits',
+          'balance',
+          '--token',
+          'sol',
+          '-c',
+          configPath,
+          '--password',
+          WALLET_PASSWORD,
+          '--json',
+        ]);
+
+        const logged = consoleLogSpy.mock.calls
+          .map((c) => String(c[0]))
+          .filter((l) => l.trim().startsWith('{'));
+        expect(logged).toHaveLength(1);
+        const obj = JSON.parse(logged[0]!) as { token: string; winc: string };
+        expect(obj.token).toBe('sol');
+        expect(obj.winc).toBe('610000000000');
         expect(process.exitCode).toBeUndefined();
       } finally {
         rmSync(dir, { recursive: true, force: true });
