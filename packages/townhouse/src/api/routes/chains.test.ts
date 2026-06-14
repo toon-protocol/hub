@@ -87,6 +87,45 @@ describe('GET /api/chains', () => {
     const res = await app.inject({ method: 'GET', url: '/api/chains' });
     expect(res.json().chainProviders).toEqual([]);
   });
+
+  it("reports the connector's resolved chain set (EVM+Solana+Mina) for a network preset", async () => {
+    // No explicit chainProviders, but network=testnet → the connector runs the
+    // full preset set. `chainProviders` (editable) stays empty; `resolved`
+    // surfaces every family so the operator view doesn't under-report (#232).
+    const { app, deps } = build();
+    deps.config.network = 'testnet';
+    deps.config.chainProviders = undefined;
+    registerChainsRoutes(app, deps);
+    await app.ready();
+    const res = await app.inject({ method: 'GET', url: '/api/chains' });
+    const body = res.json();
+    expect(body.chainProviders).toEqual([]);
+    expect(body.resolved.network).toBe('testnet');
+    const types = (body.resolved.chainProviders as { chainType: string }[]).map(
+      (p) => p.chainType
+    );
+    expect(types).toContain('evm');
+    expect(types).toContain('solana');
+    expect(types).toContain('mina');
+    // No signing key is ever read back in the resolved view.
+    for (const p of body.resolved.chainProviders as { keyId?: string }[]) {
+      expect(p.keyId === undefined || p.keyId === '***').toBe(true);
+    }
+  });
+
+  it('resolved matches the editable list for explicit chains-add configs', async () => {
+    const { app, deps } = build();
+    deps.config.chainProviders = [EVM];
+    registerChainsRoutes(app, deps);
+    await app.ready();
+    const res = await app.inject({ method: 'GET', url: '/api/chains' });
+    const body = res.json();
+    expect(body.chainProviders).toHaveLength(1);
+    const resolvedTypes = (
+      body.resolved.chainProviders as { chainType: string }[]
+    ).map((p) => p.chainType);
+    expect(resolvedTypes).toEqual(['evm']);
+  });
 });
 
 describe('PATCH /api/chains', () => {

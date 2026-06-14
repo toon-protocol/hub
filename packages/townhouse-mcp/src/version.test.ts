@@ -65,6 +65,27 @@ describe('computeVersionInfo', () => {
     expect(info.satisfies).toBeNull();
     expect(info.note).toMatch(/Could not probe/);
   });
+
+  it('surfaces the TOWNHOUSE_BIN hint when the probe throws CliNotFoundError', async () => {
+    const notFound = Object.assign(
+      new Error('townhouse CLI not found ... Set TOWNHOUSE_BIN to the CLI'),
+      { name: 'CliNotFoundError' }
+    );
+    const info = await computeVersionInfo(self, async () => {
+      throw notFound;
+    });
+    expect(info.detectedCliVersion).toBeNull();
+    expect(info.satisfies).toBeNull();
+    expect(info.note).toMatch(/TOWNHOUSE_BIN/);
+  });
+
+  it('falls back to "could not probe" for a non-CliNotFound probe error', async () => {
+    const info = await computeVersionInfo(self, async () => {
+      throw new Error('some other failure');
+    });
+    expect(info.satisfies).toBeNull();
+    expect(info.note).toMatch(/Could not probe/);
+  });
 });
 
 describe('readSelfPackage', () => {

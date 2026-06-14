@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { CliDriver, CliError, type ExecResult } from './cli-driver.js';
+import {
+  CliDriver,
+  CliError,
+  CliNotFoundError,
+  type ExecResult,
+} from './cli-driver.js';
 import type { ResolvedConfig } from './config.js';
 
 const cfg: ResolvedConfig = {
@@ -52,6 +57,19 @@ describe('CliDriver.runJsonLenient', () => {
       exec({ stdout: 'not json', stderr: 'fatal', code: 1 })
     );
     await expect(d.runJsonLenient(['health'])).rejects.toBeInstanceOf(CliError);
+  });
+});
+
+describe('defaultExec (real spawn)', () => {
+  it('throws CliNotFoundError when the townhouse binary is missing (ENOENT)', async () => {
+    // No injected exec → real defaultExec spawns this bogus path, which ENOENTs.
+    const d = new CliDriver({
+      ...cfg,
+      townhouseBin: '/nonexistent/townhouse-please-do-not-exist',
+    });
+    const err = await d.runJson(['version']).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CliNotFoundError);
+    expect((err as CliNotFoundError).message).toMatch(/TOWNHOUSE_BIN/);
   });
 });
 

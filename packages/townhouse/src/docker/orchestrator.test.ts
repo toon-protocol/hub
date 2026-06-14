@@ -1402,7 +1402,7 @@ describe('DockerOrchestrator', () => {
       const walletManager = new WalletManager({
         encryptedPath: '/tmp/test.enc',
       });
-      walletManager.fromMnemonic(
+      await walletManager.fromMnemonic(
         'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
       );
 
@@ -1434,7 +1434,7 @@ describe('DockerOrchestrator', () => {
       const walletManager = new WalletManager({
         encryptedPath: '/tmp/test.enc',
       });
-      walletManager.fromMnemonic(
+      await walletManager.fromMnemonic(
         'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
       );
 
@@ -1543,7 +1543,7 @@ describe('DockerOrchestrator', () => {
       const walletManager = new WalletManager({
         encryptedPath: '/tmp/test-phase4.enc',
       });
-      walletManager.fromMnemonic(
+      await walletManager.fromMnemonic(
         'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
       );
 
@@ -1612,7 +1612,7 @@ describe('DockerOrchestrator', () => {
       const walletManager = new WalletManager({
         encryptedPath: '/tmp/test-phase4-both.enc',
       });
-      walletManager.fromMnemonic(
+      await walletManager.fromMnemonic(
         'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
       );
       vi.spyOn(walletManager, 'ensureArweaveKey').mockResolvedValue({
@@ -1672,7 +1672,7 @@ describe('DockerOrchestrator', () => {
       const walletManager = new WalletManager({
         encryptedPath: '/tmp/test-phase4-fail.enc',
       });
-      walletManager.fromMnemonic(
+      await walletManager.fromMnemonic(
         'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
       );
       vi.spyOn(walletManager, 'ensureArweaveKey').mockRejectedValue(

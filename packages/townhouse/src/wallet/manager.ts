@@ -60,6 +60,7 @@ import { deriveMillKeys } from '@toon-protocol/mill/wallet';
 import {
   base58Encode as coreBase58Encode,
   hexToMinaBase58PrivateKey,
+  deriveMinaPublicKeyBase58,
 } from '@toon-protocol/core';
 
 const BASE58_ALPHABET =
@@ -76,6 +77,27 @@ function base58Encode(bytes: Uint8Array): string {
   }
   for (let i = 0; i < zeros; i++) result = '1' + result;
   return result || '1';
+}
+
+/**
+ * Resolve a fundable Mina `B62…` address from a derived Mina key. `deriveMillKeys`
+ * emits only a keccak **hex placeholder** as the Mina public key (it leaves
+ * Pallas curve math to `mina-signer`), which is unfundable and rejected by Mina
+ * GraphQL balance queries — so `/wallet/balances` would otherwise display an
+ * unusable hex string for the mill's Mina leg. Resolve the real B62 via
+ * `mina-signer` when present; fall back to the hex placeholder when the optional
+ * peer dep is absent (so behaviour degrades gracefully rather than throwing).
+ */
+async function resolveMinaAddress(mina: {
+  privateKey: string;
+  publicKey: string;
+}): Promise<string> {
+  try {
+    const b62 = await deriveMinaPublicKeyBase58(mina.privateKey);
+    return b62 ?? mina.publicKey;
+  } catch {
+    return mina.publicKey;
+  }
 }
 
 /** Map node type to account index */
@@ -254,7 +276,7 @@ export class WalletManager {
           solanaDerivationPath = chainKeys.solana.path;
         }
         if (chainKeys.mina && type === 'mill') {
-          minaAddress = chainKeys.mina.publicKey;
+          minaAddress = await resolveMinaAddress(chainKeys.mina);
         }
       } catch (err: unknown) {
         // deriveMillKeys failure (e.g. unsupported platform, library load
@@ -571,7 +593,9 @@ export class WalletManager {
             chainExtras[nodeType].solanaDerivationPath = chainKeys.solana.path;
           }
           if (nodeType === 'mill' && chainKeys.mina) {
-            chainExtras[nodeType].minaAddress = chainKeys.mina.publicKey;
+            chainExtras[nodeType].minaAddress = await resolveMinaAddress(
+              chainKeys.mina
+            );
           }
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);

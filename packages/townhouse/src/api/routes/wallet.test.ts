@@ -54,7 +54,7 @@ describe('Wallet Routes', () => {
   beforeEach(async () => {
     // Create a real WalletManager with a test mnemonic
     walletManager = new WalletManager({ encryptedPath: '' });
-    walletManager.fromMnemonic(
+    await walletManager.fromMnemonic(
       'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
     );
 

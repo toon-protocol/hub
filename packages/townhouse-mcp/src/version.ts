@@ -88,7 +88,26 @@ export async function computeVersionInfo(
   self: SelfPackage,
   detect: () => Promise<string | undefined>
 ): Promise<VersionInfo> {
-  const cli = await detect();
+  let cli: string | undefined;
+  try {
+    cli = await detect();
+  } catch (e) {
+    // A CliNotFoundError (the `townhouse` binary couldn't be spawned) is the
+    // single most common operator misconfiguration and has a precise fix, so
+    // surface its actionable "set TOWNHOUSE_BIN" message verbatim rather than
+    // the generic "couldn't probe" note below. Matched by name to avoid a
+    // cli-driver import cycle.
+    if (e instanceof Error && e.name === 'CliNotFoundError') {
+      return {
+        mcpVersion: self.version,
+        expectedTownhouseRange: self.peerRange,
+        detectedCliVersion: null,
+        satisfies: null,
+        note: e.message,
+      };
+    }
+    cli = undefined;
+  }
   if (cli === undefined) {
     return {
       mcpVersion: self.version,

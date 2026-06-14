@@ -20,6 +20,29 @@ export class CliError extends Error {
   }
 }
 
+/**
+ * Thrown when the `townhouse` binary itself can't be spawned (ENOENT) — i.e. the
+ * CLI isn't on PATH and `TOWNHOUSE_BIN` wasn't set to point at it. Distinct from
+ * {@link CliError} (a CLI that ran but exited non-zero) so the MCP layer can give
+ * the operator an actionable "set TOWNHOUSE_BIN" hint instead of a bare
+ * `spawn townhouse ENOENT`. CLI-backed tools (`health`, `channels`, `chains
+ * add/remove`, `set_node_fees`, `seed`, `withdraw`, `credits`, the lifecycle
+ * commands, and the `version` CLI probe) all require a resolvable CLI.
+ */
+export class CliNotFoundError extends Error {
+  constructor(readonly bin: string) {
+    super(
+      `townhouse CLI not found (tried to spawn "${bin}"). Set TOWNHOUSE_BIN to ` +
+        `the CLI entry point (e.g. node_modules/@toon-protocol/townhouse/dist/cli.js ` +
+        `or packages/townhouse/dist/cli.js in a checkout), or install ` +
+        `@toon-protocol/townhouse so the \`townhouse\` command is on PATH. ` +
+        `CLI-backed tools (health, channels, chains, set_node_fees, withdraw, ` +
+        `seed, credits, lifecycle) need it.`
+    );
+    this.name = 'CliNotFoundError';
+  }
+}
+
 export interface ExecResult {
   stdout: string;
   stderr: string;
@@ -133,7 +156,12 @@ function defaultExec(
     let stderr = '';
     child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
     child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-    child.on('error', reject);
+    child.on('error', (e: NodeJS.ErrnoException) => {
+      // ENOENT means the binary couldn't be found — turn the cryptic
+      // `spawn townhouse ENOENT` into an actionable "set TOWNHOUSE_BIN" error.
+      if (e.code === 'ENOENT') reject(new CliNotFoundError(bin));
+      else reject(e);
+    });
     child.on('close', (code) => resolve({ stdout, stderr, code: code ?? -1 }));
   });
 }

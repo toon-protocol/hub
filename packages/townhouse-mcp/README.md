@@ -57,7 +57,7 @@ Add to `claude_desktop_config.json`, then restart:
 | `TOWNHOUSE_CONFIG_DIR`     | `~/.townhouse`          | Config + wallet + boot log (`up.log`).                                                                        |
 | `TOWNHOUSE_AUTOUP`         | `1`                     | Auto-`up` the apex on demand; tools report "booting — retry" while it boots. `0` to disable.                  |
 | `TOWNHOUSE_TRANSPORT_MODE` | `direct`                | Default boot transport (`direct` \| `hs`).                                                                    |
-| `TOWNHOUSE_BIN`            | `townhouse`             | Path to the CLI.                                                                                              |
+| `TOWNHOUSE_BIN`            | `townhouse`             | Path to the CLI. **Required for CLI-backed tools** (see below) when `townhouse` isn't on `PATH` — e.g. `node_modules/@toon-protocol/townhouse/dist/cli.js`. |
 
 ## Tools
 
@@ -71,6 +71,8 @@ Meta: `townhouse_version` (reports this package version, the pinned `townhouse` 
 `townhouse_up` returns immediately with a handle — poll `townhouse_up_status` for per-step boot progress (a boot can take minutes; image pulls / HS bootstrap). Withdraw supports `dryRun:true` for a gas/fee estimate.
 
 `townhouse_metrics` and `townhouse_logs` prefer the apex's live streams (WS `/metrics`, SSE `/api/logs/stream`) and fall back to the `townhouse` CLI JSON path; each result carries a `source` field.
+
+**CLI-backed tools require a resolvable CLI.** Most read tools (`status`, `list_nodes`, `earnings`, `balances`, `metrics`, `logs`, `transport`, `chains list`) are served by the apex API / streams and need no CLI. But `townhouse_health`, `townhouse_channels`, `townhouse_seed`, `townhouse_withdraw`, `townhouse_credits`, `townhouse_set_node_fees`, `townhouse_chains add/remove`, the lifecycle commands, and the CLI-probe half of `townhouse_version` shell out to `townhouse`. If it isn't on `PATH`, set `TOWNHOUSE_BIN` (and usually `TOWNHOUSE_CONFIG_DIR`) — otherwise those tools fail with an actionable "CLI not found — set TOWNHOUSE_BIN" error (and `townhouse_version` reports the same hint in its `note`).
 
 ## Resources
 

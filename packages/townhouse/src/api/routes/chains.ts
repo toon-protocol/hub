@@ -3,6 +3,9 @@
  *
  * GET   /api/chains — current settlement chains (keyId redacted — it is a
  *                     signing secret and must never be read back over the API).
+ *                     Reports BOTH the editable `chainProviders` (what `chains
+ *                     add/remove` mutate) and a `resolved` view of the chains
+ *                     the connector actually runs — see the GET handler.
  * PATCH /api/chains — replace the chain list, persist, and regenerate the
  *                     connector config. Mirrors the /api/transport pattern
  *                     (config mutex + validate + save + rollback).
@@ -14,6 +17,7 @@ import type { ChainProviderEntry } from '../../config/schema.js';
 import { validateConfig } from '../../config/validator.js';
 import { saveConfig } from '../../config/loader.js';
 import { acquireConfigMutex, releaseConfigMutex } from '../config-mutex.js';
+import { resolveConfigNetworkProfile } from '../../config/network-profile.js';
 
 /** Placeholder returned in GET (and accepted in PATCH to mean "unchanged"). */
 const REDACTED = '***';
@@ -64,8 +68,29 @@ export function registerChainsRoutes(
 ): void {
   // ── GET /api/chains ─────────────────────────────────────────────────────
   app.get('/api/chains', async (_request, reply) => {
+    // `chainProviders` is the EDITABLE config list (what `chains add/remove`
+    // mutate and what the dashboard round-trips via GET→edit→PATCH). When the
+    // operator relies on the `network` preset instead of explicit `chains add`,
+    // this list is empty / EVM-only even though the connector runs the full
+    // preset set (EVM + Solana + Mina) — which made `townhouse_chains list`
+    // under-report (issue #232). `resolved` closes that gap: it reports the
+    // chains the connector actually registers, derived from the SAME network
+    // profile the apex connector config is generated from. For explicit
+    // `chains add` configs the two lists match (custom providers pass through
+    // verbatim). The preset path only builds provider entries when a keyId is
+    // supplied (a settlement provider is useless without a signing key), so we
+    // pass the REDACTED sentinel purely to materialise the entries — the real
+    // signing key is never needed, read, or returned here.
+    const profile = resolveConfigNetworkProfile(deps.config, REDACTED);
     return reply.status(200).send({
       chainProviders: redactKeyId(deps.config.chainProviders ?? []),
+      resolved: {
+        network: profile.network,
+        chainProviders: redactKeyId(
+          profile.chainProviders as unknown as ChainProviderEntry[]
+        ),
+        status: profile.status,
+      },
       ts: Date.now(),
     });
   });

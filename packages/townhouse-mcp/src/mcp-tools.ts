@@ -9,7 +9,7 @@
 import { ApiError, ApexUnreachableError } from './api-client.js';
 import type { ApiClient } from './api-client.js';
 import type { CliDriver } from './cli-driver.js';
-import { CliError } from './cli-driver.js';
+import { CliError, CliNotFoundError } from './cli-driver.js';
 import type { ResolvedConfig } from './config.js';
 import { readUpStatus, spawnUpDetached } from './apex-lifecycle.js';
 import {
@@ -149,7 +149,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: 'townhouse_chains',
     description:
       'List, add, or remove settlement chains (op: list | add | remove). ' +
-      'add/remove pass through CLI flags in `args`.',
+      'add/remove pass through CLI flags in `args`. `list` returns both the ' +
+      'editable `chainProviders` (what add/remove mutate) and a `resolved` view ' +
+      'of the chains the connector actually runs — when the apex relies on a ' +
+      'network preset, `resolved` includes Solana/Mina even though ' +
+      '`chainProviders` is empty/EVM-only.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -516,7 +520,11 @@ async function versionInfo(ctx: ToolCtx): Promise<unknown> {
     try {
       const v = await ctx.cli.runJson<{ version: string }>(['version']);
       return v.version;
-    } catch {
+    } catch (e) {
+      // Let a CliNotFoundError through so computeVersionInfo can emit the
+      // actionable "set TOWNHOUSE_BIN" note; any other failure (CLI too old to
+      // support `version`, non-JSON output) is just "couldn't probe".
+      if (e instanceof CliNotFoundError) throw e;
       return undefined;
     }
   });
@@ -565,6 +573,10 @@ function toErrorResult(e: unknown, cfg: ResolvedConfig): ToolResult {
       return err(`Apex busy or still booting — retry shortly. (${text})`);
     }
     return err(text);
+  }
+  if (e instanceof CliNotFoundError) {
+    // Already an actionable "set TOWNHOUSE_BIN" message — surface verbatim.
+    return err(e.message);
   }
   if (e instanceof CliError) {
     return err(
