@@ -391,6 +391,182 @@ describe('writeHsConnectorConfig', () => {
   });
 });
 
+// ── issue #215: per-chain keyId on the preset/network path ──────────────────
+// When the apex resolves chainProviders from `config.network` (a preset tier,
+// NOT explicit chainProviders), resolveNetworkProfile seeds the SINGLE EVM key
+// into the Solana AND Mina provider entries. The writer must replace that
+// EVM-seeded keyId with the correct per-chain base58/EK key — otherwise the
+// connector (≥3.10.4, strict keyId-format registration) rejects the non-EVM
+// providers and Solana/Mina pay-to-write breaks.
+describe('writeHsConnectorConfig — per-chain keyId on preset path (issue #215)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'hs-config-215-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // A real EVM hex private key shape (0x + 64 hex), a representative base58
+  // Solana key, and an EK… Mina key.
+  const APEX_EVM_KEY = `0x${'ab'.repeat(32)}`;
+  const APEX_SOLANA_KEY = '4'.repeat(44);
+  const APEX_MINA_KEY = `EK${'a'.repeat(50)}`;
+
+  function presetConfig(network: 'testnet' | 'devnet') {
+    const config = getDefaultConfig();
+    config.network = network;
+    // NO explicit chainProviders → resolveNetworkProfile derives EVM + Solana +
+    // Mina providers from the preset tier (and seeds the EVM key into all).
+    config.chainProviders = undefined;
+    return config;
+  }
+
+  for (const network of ['testnet', 'devnet'] as const) {
+    it(`${network}: Solana/Mina providers get base58/EK keyIds, not the EVM hex`, () => {
+      const { yamlPath } = writeHsConnectorConfig(
+        tmpDir,
+        presetConfig(network),
+        {
+          force: true,
+          apexSettlementKeys: {
+            evmPrivateKeyHex: APEX_EVM_KEY,
+            solanaPrivateKeyBase58: APEX_SOLANA_KEY,
+            minaPrivateKeyBase58: APEX_MINA_KEY,
+          },
+        }
+      );
+      const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+        string,
+        unknown
+      >;
+      const cps = parsed['chainProviders'] as Record<string, unknown>[];
+
+      const evm = cps.find((c) => c['chainType'] === 'evm');
+      const sol = cps.find((c) => c['chainType'] === 'solana');
+      const mina = cps.find((c) => c['chainType'] === 'mina');
+
+      expect(evm, 'preset path must emit an EVM provider').toBeTruthy();
+      expect(sol, 'preset path must emit a Solana provider').toBeTruthy();
+      expect(mina, 'preset path must emit a Mina provider').toBeTruthy();
+
+      // EVM keeps the EVM hex key.
+      expect(evm?.['keyId']).toBe(APEX_EVM_KEY);
+
+      // Solana: base58, NOT the EVM hex (the #215 bug).
+      expect(sol?.['keyId']).toBe(APEX_SOLANA_KEY);
+      expect(sol?.['keyId']).not.toBe(APEX_EVM_KEY);
+      expect(String(sol?.['keyId']).startsWith('0x')).toBe(false);
+
+      // Mina: EK… base58check, NOT the EVM hex.
+      expect(mina?.['keyId']).toBe(APEX_MINA_KEY);
+      expect(mina?.['keyId']).not.toBe(APEX_EVM_KEY);
+      expect(String(mina?.['keyId']).startsWith('EK')).toBe(true);
+    });
+  }
+
+  it('still leaves the non-EVM keyId blank when no derived key is available', () => {
+    // Only the EVM key provided — the writer must NOT plant the EVM hex on the
+    // Solana/Mina entries; it leaves them blank (the validator tolerates blanks)
+    // rather than emitting a wrong-format key.
+    const { yamlPath } = writeHsConnectorConfig(
+      tmpDir,
+      presetConfig('testnet'),
+      {
+        force: true,
+        apexSettlementKeys: { evmPrivateKeyHex: APEX_EVM_KEY },
+      }
+    );
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const cps = parsed['chainProviders'] as Record<string, unknown>[];
+    const sol = cps.find((c) => c['chainType'] === 'solana');
+    const mina = cps.find((c) => c['chainType'] === 'mina');
+    // keyId is either absent or, at worst, NOT the EVM hex.
+    expect(sol?.['keyId']).not.toBe(APEX_EVM_KEY);
+    expect(mina?.['keyId']).not.toBe(APEX_EVM_KEY);
+  });
+
+  it('throws loudly on a wrong-format (EVM hex) Solana keyId', () => {
+    const config = getDefaultConfig();
+    config.chainProviders = [
+      {
+        chainType: 'solana',
+        chainId: 'solana:devnet',
+        rpcUrl: 'https://api.devnet.solana.com',
+        programId: 'EdJxYPDxGvaJuu57DSUptf4soLv8enpdyQJJhHDLiydG',
+        keyId: APEX_EVM_KEY, // explicit, wrong-format (0x hex) Solana key
+      },
+    ];
+    expect(() =>
+      writeHsConnectorConfig(tmpDir, config, { force: true })
+    ).toThrow(/Invalid Solana keyId/);
+  });
+
+  it('throws loudly on a wrong-format (EVM hex) Mina keyId', () => {
+    const config = getDefaultConfig();
+    config.chainProviders = [
+      {
+        chainType: 'mina',
+        chainId: 'mina:devnet',
+        graphqlUrl: 'https://api.minascan.io/node/devnet/v1/graphql',
+        zkAppAddress: 'B62qtestzkappaddressplaceholderxxxxxxxxxxxxxxxxxxxxx',
+        keyId: APEX_EVM_KEY, // explicit, wrong-format (0x hex) Mina key
+      },
+    ];
+    expect(() =>
+      writeHsConnectorConfig(tmpDir, config, { force: true })
+    ).toThrow(/Invalid Mina keyId/);
+  });
+
+  it('throws loudly on a wrong-format (non-0x) EVM keyId', () => {
+    const config = getDefaultConfig();
+    config.chainProviders = [
+      {
+        chainType: 'evm',
+        chainId: 'evm:base:8453',
+        rpcUrl: 'https://mainnet.base.org',
+        registryAddress: '0xaaaa1725E7734CE288F8367e1Bb143E90bb3F0512',
+        tokenAddress: '0xbbbbb2315678afecb367f032d93F642f64180aa3',
+        keyId: APEX_SOLANA_KEY, // base58, wrong for EVM
+      },
+    ];
+    expect(() =>
+      writeHsConnectorConfig(tmpDir, config, { force: true })
+    ).toThrow(/Invalid EVM keyId/);
+  });
+
+  it('the same fix applies to the DIRECT writer (shared buildApexGenerator)', () => {
+    const { yamlPath } = writeDirectConnectorConfig(
+      tmpDir,
+      presetConfig('testnet'),
+      {
+        force: true,
+        apexSettlementKeys: {
+          evmPrivateKeyHex: APEX_EVM_KEY,
+          solanaPrivateKeyBase58: APEX_SOLANA_KEY,
+          minaPrivateKeyBase58: APEX_MINA_KEY,
+        },
+      }
+    );
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const cps = parsed['chainProviders'] as Record<string, unknown>[];
+    expect(cps.find((c) => c['chainType'] === 'solana')?.['keyId']).toBe(
+      APEX_SOLANA_KEY
+    );
+    expect(cps.find((c) => c['chainType'] === 'mina')?.['keyId']).toBe(
+      APEX_MINA_KEY
+    );
+  });
+});
+
 describe('writeDirectConnectorConfig (Phase 2 direct-apex)', () => {
   let tmpDir: string;
 

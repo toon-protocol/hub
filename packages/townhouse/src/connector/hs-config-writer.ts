@@ -86,21 +86,45 @@ function buildApexGenerator(
     apexEvmKey ?? DEFAULT_HS_CHAIN_PROVIDERS[0]?.keyId
   ).chainProviders as ChainProviderEntry[];
 
-  // Fill a missing keyId with the matching mnemonic-derived apex key, per
-  // chainType. The connector (3.9.0) resolves a non-EVM keyId as a RAW base58
-  // private key (Solana: base58 of a 32-byte Ed25519 seed; Mina: `EK…`
-  // base58check) — identical contract to the EVM keyId path.
+  // Fill the matching mnemonic-derived apex key per chainType.
+  //
+  // EVM: fill only when keyId is missing (an explicit operator EVM key wins).
+  //
+  // Solana / Mina (issue #215): the preset/network path in
+  // resolveNetworkProfile seeds the SINGLE EVM `keyId` into the Solana AND Mina
+  // provider entries too (network-profile.ts forwards opts.keyId to all three
+  // builders). So a non-EVM entry can arrive here with keyId === apexEvmKey —
+  // an EVM hex (`0x…`) wrongly planted on a chain that expects a base58/EK key.
+  // Connector ≥3.10.4 enforces per-chain keyId format at registration and
+  // rejects the EVM-hex Solana/Mina providers, breaking non-EVM pay-to-write.
+  // Fix: for Solana/Mina, overwrite the keyId with the correct derived per-chain
+  // key when it is MISSING or equals the EVM key (the seeded-wrong case) —
+  // without clobbering a legitimately-distinct explicit operator keyId.
   const fillApexKey = (providers: ChainProviderEntry[]): ChainProviderEntry[] =>
     providers.map((p) => {
-      if (p.keyId) return p;
-      if (p.chainType === 'evm' && apexEvmKey) {
-        return { ...p, keyId: apexEvmKey };
+      if (p.chainType === 'evm') {
+        if (p.keyId) return p;
+        return apexEvmKey ? { ...p, keyId: apexEvmKey } : p;
       }
-      if (p.chainType === 'solana' && apexSolanaKey) {
-        return { ...p, keyId: apexSolanaKey };
-      }
-      if (p.chainType === 'mina' && apexMinaKey) {
-        return { ...p, keyId: apexMinaKey };
+      const seededWithEvmKey = !!apexEvmKey && p.keyId === apexEvmKey;
+      const needsFill = !p.keyId || seededWithEvmKey;
+      const correctKey =
+        p.chainType === 'solana'
+          ? apexSolanaKey
+          : p.chainType === 'mina'
+            ? apexMinaKey
+            : undefined;
+      if (needsFill) {
+        if (correctKey) {
+          return { ...p, keyId: correctKey };
+        }
+        // No correct per-chain key available. If the entry was seeded with the
+        // EVM key (the #215 bug), STRIP it rather than emit a wrong-format key
+        // that the connector would reject — leave the provider keyId-less.
+        if (seededWithEvmKey) {
+          const { keyId: _seeded, ...rest } = p;
+          return rest as ChainProviderEntry;
+        }
       }
       return p;
     });
@@ -110,7 +134,58 @@ function buildApexGenerator(
       ? { ...config, chainProviders: fillApexKey(derived) }
       : { ...config, chainProviders: [...DEFAULT_HS_CHAIN_PROVIDERS] };
 
+  validateChainProviderKeyIds(apexConfig.chainProviders ?? []);
+
   return new ConnectorConfigGenerator(apexConfig);
+}
+
+/**
+ * Defense-in-depth (issue #215): validate that each chainProvider's keyId is in
+ * the correct format for its chain BEFORE the config is written, and FAIL LOUDLY
+ * rather than silently emitting a wrong key that the connector will later reject
+ * at registration time (a far more confusing failure mode).
+ *
+ *   - EVM:    `0x` + 64 hex chars (32-byte private key).
+ *   - Mina:   `EK` + base58check (the Mina private-key prefix).
+ *   - Solana: base58 (a `0x…` hex value is the EVM-key-seeding bug from #215).
+ *
+ * keyId-less providers are tolerated here (the dev-fallback / no-key paths leave
+ * them blank intentionally); only a PRESENT, wrong-format keyId throws.
+ */
+function validateChainProviderKeyIds(
+  providers: readonly ChainProviderEntry[]
+): void {
+  const EVM_KEY = /^0x[0-9a-fA-F]{64}$/;
+  // base58 alphabet (Bitcoin): no 0, O, I, l.
+  const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
+  for (const p of providers) {
+    const keyId = p.keyId;
+    if (!keyId) continue;
+    if (p.chainType === 'evm') {
+      if (!EVM_KEY.test(keyId)) {
+        throw new Error(
+          `Invalid EVM keyId for chainProvider ${p.chainId ?? '(unknown)'}: ` +
+            `expected 0x + 64 hex chars, got "${keyId.slice(0, 12)}…".`
+        );
+      }
+    } else if (p.chainType === 'solana') {
+      if (keyId.startsWith('0x') || !BASE58.test(keyId)) {
+        throw new Error(
+          `Invalid Solana keyId for chainProvider ${p.chainId ?? '(unknown)'}: ` +
+            `expected a base58 key, got "${keyId.slice(0, 12)}…" ` +
+            `(an EVM 0x-hex key here is the #215 seeding bug).`
+        );
+      }
+    } else if (p.chainType === 'mina') {
+      if (!keyId.startsWith('EK') || !BASE58.test(keyId)) {
+        throw new Error(
+          `Invalid Mina keyId for chainProvider ${p.chainId ?? '(unknown)'}: ` +
+            `expected an EK… base58check key, got "${keyId.slice(0, 12)}…" ` +
+            `(an EVM 0x-hex key here is the #215 seeding bug).`
+        );
+      }
+    }
+  }
 }
 
 /**
