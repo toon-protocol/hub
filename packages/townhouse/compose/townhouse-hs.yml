@@ -236,6 +236,15 @@ services:
       # inside the townhouse-api process. It must be in the API container's env
       # (not only the mill container's env) so the check works correctly.
       MILL_RELAYS: '${MILL_RELAYS:-}'
+      # Chain RPC + token config for the wallet balances/withdraw routes. The
+      # network profile + compose .env supply these under the production names;
+      # the API must read them (it previously read only TOWNHOUSE_DEV_* dev vars,
+      # so EVM balances showed `fetch failed` / `usdc_address_not_configured`
+      # and withdraw was blocked on a real testnet/mainnet apex — #232).
+      EVM_RPC_URL: '${EVM_RPC_URL:-}'
+      EVM_USDC_ADDRESS: '${EVM_USDC_ADDRESS:-}'
+      SOLANA_RPC_URL: '${SOLANA_RPC_URL:-}'
+      SOLANA_USDC_MINT: '${SOLANA_USDC_MINT:-}'
     healthcheck:
       # nosemgrep: trailofbits.generic.wget-unencrypted-url.wget-unencrypted-url -- container-internal probe
       # Use 127.0.0.1 (not localhost) to avoid IPv6 resolution surprises. The

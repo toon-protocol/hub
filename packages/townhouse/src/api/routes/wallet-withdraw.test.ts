@@ -182,6 +182,31 @@ describe('POST /api/wallet/withdraw', () => {
     expect(body.txHash).toBe(MOCK_TX_HASH);
   });
 
+  it('USDC withdrawal works when only the production EVM_USDC_ADDRESS is set (network profile)', async () => {
+    // Production/testnet apex supplies the network-profile name, not the dev
+    // TOON_USDC_ADDRESS. Withdraw must not 503 with usdc_address_not_configured
+    // (#232).
+    vi.stubEnv('TOON_USDC_ADDRESS', '');
+    vi.stubEnv(
+      'EVM_USDC_ADDRESS',
+      '0x1234567890123456789012345678901234567890'
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/wallet/withdraw',
+      payload: {
+        nodeType: 'mill',
+        chainFamily: 'evm',
+        token: 'USDC',
+        recipient: VALID_RECIPIENT,
+        amount: '1000000',
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as { txHash: string };
+    expect(body.txHash).toBe(MOCK_TX_HASH);
+  });
+
   it('dryRun returns gas estimate without broadcasting', async () => {
     const res = await app.inject({
       method: 'POST',

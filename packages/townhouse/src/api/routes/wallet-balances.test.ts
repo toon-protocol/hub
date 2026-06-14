@@ -123,6 +123,69 @@ describe('GET /api/wallet/balances', () => {
     }
   });
 
+  it('honors the production EVM_USDC_ADDRESS env name (network profile), not just the dev TOON_USDC_ADDRESS', async () => {
+    await wallet.fromMnemonic(DEV_MNEMONIC);
+    // Production/testnet apex: only the network-profile name is set; the dev
+    // name is absent. USDC must resolve and be marked available (#232).
+    vi.stubEnv('TOON_USDC_ADDRESS', '');
+    vi.stubEnv(
+      'EVM_USDC_ADDRESS',
+      '0x1234567890123456789012345678901234567890'
+    );
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ result: '0x1' }),
+        })
+      )
+    );
+
+    registerWalletBalancesRoutes(app, buildDeps(wallet));
+    const res = await app.inject({ method: 'GET', url: '/wallet/balances' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as {
+      entries: { token: string; available: boolean; reason?: string }[];
+    };
+    const usdcEntries = body.entries.filter((e) => e.token === 'USDC');
+    expect(usdcEntries.length).toBeGreaterThan(0);
+    for (const e of usdcEntries) {
+      expect(e.available).toBe(true);
+      expect(e.reason).toBeUndefined();
+    }
+  });
+
+  it('prefers the production EVM_RPC_URL over the dev TOWNHOUSE_DEV_ANVIL_RPC for EVM calls', async () => {
+    await wallet.fromMnemonic(DEV_MNEMONIC);
+    vi.stubEnv('EVM_RPC_URL', 'https://rpc.example.testnet/evm');
+    vi.stubEnv('TOWNHOUSE_DEV_ANVIL_RPC', 'http://127.0.0.1:28545');
+    vi.stubEnv(
+      'EVM_USDC_ADDRESS',
+      '0x1234567890123456789012345678901234567890'
+    );
+
+    const seenUrls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        seenUrls.push(url);
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ result: '0x1' }),
+        });
+      })
+    );
+
+    registerWalletBalancesRoutes(app, buildDeps(wallet));
+    const res = await app.inject({ method: 'GET', url: '/wallet/balances' });
+    expect(res.statusCode).toBe(200);
+    // EVM RPC calls must hit the production URL, never the dev anvil default.
+    expect(seenUrls).toContain('https://rpc.example.testnet/evm');
+    expect(seenUrls.some((u) => u.includes('28545'))).toBe(false);
+  });
+
   it('happy path returns entries for all chains', async () => {
     await wallet.fromMnemonic(DEV_MNEMONIC);
     vi.stubEnv(

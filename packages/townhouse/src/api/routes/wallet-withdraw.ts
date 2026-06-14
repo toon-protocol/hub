@@ -118,11 +118,17 @@ export function registerWalletWithdrawRoutes(
       });
     }
 
+    // Prefer the production/testnet env names the network profile + compose
+    // provide (EVM_RPC_URL, EVM_USDC_ADDRESS), fall back to the dev-stack names,
+    // then the localhost default. Reading only the dev names blocked withdraw
+    // (`usdc_address_not_configured`) on a real testnet/mainnet apex (#232).
     const anvil =
-      process.env['TOWNHOUSE_DEV_ANVIL_RPC'] ?? 'http://127.0.0.1:28545';
-    const usdcAddress = (process.env['TOON_USDC_ADDRESS'] || undefined) as
-      | `0x${string}`
-      | undefined;
+      process.env['EVM_RPC_URL'] ??
+      process.env['TOWNHOUSE_DEV_ANVIL_RPC'] ??
+      'http://127.0.0.1:28545';
+    const usdcAddress = (process.env['EVM_USDC_ADDRESS'] ||
+      process.env['TOON_USDC_ADDRESS'] ||
+      undefined) as `0x${string}` | undefined;
 
     // Get keys
     let nodeKeys: ReturnType<typeof deps.wallet.getNodeKeys>;
@@ -285,7 +291,9 @@ export function registerWalletWithdrawRoutes(
       }
 
       const anvil =
-        process.env['TOWNHOUSE_DEV_ANVIL_RPC'] ?? 'http://127.0.0.1:28545';
+        process.env['EVM_RPC_URL'] ??
+        process.env['TOWNHOUSE_DEV_ANVIL_RPC'] ??
+        'http://127.0.0.1:28545';
       try {
         const receipt: TransactionReceiptPayload = await getReceipt(
           anvil,

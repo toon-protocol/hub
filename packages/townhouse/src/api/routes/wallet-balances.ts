@@ -268,14 +268,27 @@ export function registerWalletBalancesRoutes(
       return reply.status(503).send({ error: 'wallet_not_initialized' });
     }
 
+    // Prefer the production/testnet env names the network profile + compose
+    // provide (EVM_RPC_URL, EVM_USDC_ADDRESS, SOLANA_RPC_URL, ...), fall back to
+    // the dev-stack names, then the localhost default. Reading only the dev
+    // names made EVM balances fail (`fetch failed` / `usdc_address_not_configured`)
+    // on a real testnet/mainnet apex (#232 finding #1).
     const anvil =
-      process.env['TOWNHOUSE_DEV_ANVIL_RPC'] ?? 'http://127.0.0.1:28545';
+      process.env['EVM_RPC_URL'] ??
+      process.env['TOWNHOUSE_DEV_ANVIL_RPC'] ??
+      'http://127.0.0.1:28545';
     const solanaRpc =
-      process.env['TOWNHOUSE_DEV_SOLANA_RPC'] ?? 'http://127.0.0.1:28899';
+      process.env['SOLANA_RPC_URL'] ??
+      process.env['TOWNHOUSE_DEV_SOLANA_RPC'] ??
+      'http://127.0.0.1:28899';
     const minaGraphql =
+      process.env['MINA_GRAPHQL_URL'] ??
       process.env['TOWNHOUSE_DEV_MINA_GRAPHQL'] ??
       'http://127.0.0.1:28085/graphql';
-    const usdcAddress = process.env['TOON_USDC_ADDRESS'] || undefined;
+    const usdcAddress =
+      process.env['EVM_USDC_ADDRESS'] ||
+      process.env['TOON_USDC_ADDRESS'] ||
+      undefined;
 
     const tasks: FetchTask[] = [];
     for (const keyInfo of keys) {
