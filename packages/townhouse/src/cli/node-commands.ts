@@ -38,20 +38,28 @@ const STAGE_LABELS = [
 export const NODE_ADD_HELP = `townhouse node add — Provision a child node
 
 Usage:
-  townhouse node add [<type>] [--json] [-c <path>]
+  townhouse node add [<type>] [--relays <urls>] [--turbo-token <jwk>] [--json] [-c <path>]
 
 Arguments:
-  <type>   Node type to provision: town, mill, dvm (default: town)
+  <type>          Node type to provision: town, mill, dvm (default: town)
 
 Flags:
-  --json   Machine-readable JSON output
-  -c       Path to config file
+  --relays            mill only: comma-separated Nostr relay URLs (required for mill
+                      unless set in config.yaml or the MILL_RELAYS env var)
+  --turbo-token       dvm only: Arweave Turbo credential (JWK string) enabling
+                      larger/paid kind:5094 uploads (free-tier <100KB works without)
+  --settlement-chain  town only: settlement chain advertised in kind:10032; must be
+                      a supported chain (see 'townhouse chains supported')
+  --asset             town only: settlement token on that chain — USDC | ETH | SOL |
+                      MINA (default USDC where supported, else native)
+  --json              Machine-readable JSON output
+  -c                  Path to config file
 
 Examples:
-  townhouse node add           # provision a Town relay (default)
-  townhouse node add town      # same as above
-  townhouse node add mill   # earn from chain swaps (5x earnings unlock)
-  townhouse node add dvm       # add a DVM compute node`;
+  townhouse node add                                          # provision a Town relay (default)
+  townhouse node add town --settlement-chain evm:base:8453 --asset USDC   # price publishes in USDC on Base
+  townhouse node add mill --relays wss://relay.damus.io,wss://nos.lol   # chain-swap node
+  townhouse node add dvm --turbo-token "$(cat arweave.json)"  # DVM compute / Arweave node`;
 
 export const NODE_REMOVE_HELP = `townhouse node remove — Deprovision a child node
 
@@ -78,7 +86,7 @@ Flags:
 export const NODE_HELP = `townhouse node — Manage child nodes
 
 Usage:
-  townhouse node add [<type>] [--json] [-c <path>]    Provision a child node (default: town)
+  townhouse node add [<type>] [--relays <urls>] [--turbo-token <jwk>] [--json] [-c <path>]   Provision a child node (default: town)
   townhouse node remove <id> [--yes] [--json] [-c <path>]   Deprovision a child node
   townhouse node list [--json] [-c <path>]            List provisioned nodes
 
@@ -136,6 +144,19 @@ export interface NodeAddOptions {
   apiUrl?: string;
   fetch?: FetchFn;
   confirm?: (question: string) => Promise<boolean>;
+  /**
+   * mill only: comma-separated Nostr relay URLs (`--relays`). Split + trimmed
+   * into an array and sent in the request body, so the API resolves relays from
+   * the request rather than its frozen process.env — no MILL_RELAYS export
+   * before `hs up` required.
+   */
+  relays?: string;
+  /** dvm only: Arweave Turbo credential JWK string (`--turbo-token`). */
+  turboToken?: string;
+  /** town only: settlement chain id to advertise (`--settlement-chain`), e.g. evm:base:8453. */
+  settlementChain?: string;
+  /** town only: settlement token on that chain (`--asset`): USDC | ETH | SOL | MINA. */
+  asset?: string;
 }
 
 export async function handleNodeAdd(
@@ -161,6 +182,35 @@ export async function handleNodeAdd(
   const url = resolveApiUrl(options.apiUrl);
   const fetchImpl = options.fetch ?? fetch;
 
+  // Build the request body. Operator inputs travel with the add request so the
+  // API resolves them from the body (precedence flag > config > env) instead of
+  // its own frozen process.env. Only attach a field when relevant + provided.
+  const requestBody: {
+    type: string;
+    relays?: string[];
+    turboToken?: string;
+    settlementChainId?: string;
+    assetCode?: string;
+  } = {
+    type,
+  };
+  if (type === 'mill' && options.relays !== undefined) {
+    const relays = options.relays
+      .split(',')
+      .map((r) => r.trim())
+      .filter(Boolean);
+    if (relays.length > 0) requestBody.relays = relays;
+  }
+  if (type === 'dvm' && options.turboToken) {
+    requestBody.turboToken = options.turboToken;
+  }
+  if (type === 'town') {
+    if (options.settlementChain) {
+      requestBody.settlementChainId = options.settlementChain.trim();
+    }
+    if (options.asset) requestBody.assetCode = options.asset.trim();
+  }
+
   if (!options.json) {
     // Print all stages dim while waiting for the blocking POST to return.
     process.stdout.write(
@@ -176,7 +226,7 @@ export async function handleNodeAdd(
     response = await fetchImpl(`${url}/api/nodes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
   } catch (err: unknown) {

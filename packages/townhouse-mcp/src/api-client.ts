@@ -95,7 +95,16 @@ export class ApiClient {
   }
 
   // ── Mutate (money / topology) ─────────────────────────────────────────────
-  addNode(body: { type: 'town' | 'mill' | 'dvm' }): Promise<unknown> {
+  addNode(body: {
+    type: 'town' | 'mill' | 'dvm';
+    // mill: Nostr relay URLs (required for mill unless set in config/env).
+    relays?: string[];
+    // dvm: Arweave Turbo credential (JWK string) for larger/paid uploads.
+    turboToken?: string;
+    // town: settlement chain + token advertised in kind:10032.
+    settlementChainId?: string;
+    assetCode?: string;
+  }): Promise<unknown> {
     return this.request('POST', '/api/nodes', body);
   }
   removeNode(id: string): Promise<unknown> {

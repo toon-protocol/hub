@@ -32,7 +32,7 @@ import type { ApiDeps, NodeType } from '../types.js';
 import type { DockerOrchestrator } from '../../docker/orchestrator.js';
 import type { WalletManager } from '../../wallet/manager.js';
 import type { ConnectorAdminClient } from '../../connector/admin-client.js';
-import { getDefaultConfig } from '../../config/index.js';
+import { getDefaultConfig, loadConfig } from '../../config/index.js';
 import {
   readNodesYaml,
   writeNodesYaml,
@@ -645,6 +645,140 @@ describe('POST /api/nodes success path', () => {
     await expect(fs.access(millConfigPath)).rejects.toMatchObject({
       code: 'ENOENT',
     });
+  });
+
+  // ── Operator-supplied inputs: flag > config > env (mill relays) ─────────────
+
+  it('mill: --relays in request body injects MILL_RELAYS and persists to config.yaml', async () => {
+    // No env relays — prove the request body alone is sufficient (the fix for
+    // the "MILL_RELAYS must be exported before hs up" frozen-env trap).
+    vi.stubEnv('MILL_RELAYS', '');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'mill',
+        relays: ['wss://relay.a.example', 'wss://relay.b.example'],
+      }),
+    });
+
+    expect(res.statusCode).toBe(201);
+    // Injected into the container env as a comma-joined string.
+    expect(orchestrator.startNodeViaComposeFn).toHaveBeenCalledWith(
+      'mill',
+      expect.objectContaining({
+        MILL_RELAYS: 'wss://relay.a.example,wss://relay.b.example',
+      })
+    );
+    // Persisted to config.yaml so a later recreate needs no flag/env.
+    const persisted = loadConfig(configPath);
+    expect(persisted.nodes.mill.relays).toEqual([
+      'wss://relay.a.example',
+      'wss://relay.b.example',
+    ]);
+  });
+
+  it('mill: relays from config.yaml satisfy preflight when env + body are empty', async () => {
+    vi.stubEnv('MILL_RELAYS', '');
+    const base = getDefaultConfig();
+    deps.config = {
+      ...base,
+      nodes: {
+        ...base.nodes,
+        mill: { ...base.nodes.mill, relays: ['wss://cfg.example'] },
+      },
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'mill' }),
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(orchestrator.startNodeViaComposeFn).toHaveBeenCalledWith(
+      'mill',
+      expect.objectContaining({ MILL_RELAYS: 'wss://cfg.example' })
+    );
+  });
+
+  it('mill: 400 preflight when relays absent from body, config, AND env', async () => {
+    vi.stubEnv('MILL_RELAYS', '');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'mill' }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.step).toBe('preflight');
+    // New actionable message names the flag, config, and env in priority order.
+    expect(body.err).toMatch(/--relays/);
+    const yaml = await readNodesYaml(nodesYamlPath);
+    expect(yaml.entries.filter((e) => e.type === 'mill')).toHaveLength(0);
+  });
+
+  it('mill: --relays in body takes precedence over MILL_RELAYS env', async () => {
+    vi.stubEnv('MILL_RELAYS', 'wss://env-only.example');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'mill', relays: ['wss://body.example'] }),
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(orchestrator.startNodeViaComposeFn).toHaveBeenCalledWith(
+      'mill',
+      expect.objectContaining({ MILL_RELAYS: 'wss://body.example' })
+    );
+  });
+
+  // ── Operator-supplied inputs: dvm Turbo token (read/inject, never persisted) ─
+
+  it('dvm: --turbo-token in body injects TURBO_TOKEN and does NOT persist it', async () => {
+    vi.stubEnv('TURBO_TOKEN', '');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'dvm', turboToken: '{"kty":"RSA"}' }),
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(orchestrator.startNodeViaComposeFn).toHaveBeenCalledWith(
+      'dvm',
+      expect.objectContaining({ TURBO_TOKEN: '{"kty":"RSA"}' })
+    );
+    // The Turbo token is a secret — it must NEVER be written to config.yaml.
+    // The dvm path performs no config persistence, so the file stays absent.
+    await expect(fs.access(configPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('dvm: provisions WITHOUT a Turbo token (free-tier) — no TURBO_TOKEN injected', async () => {
+    vi.stubEnv('TURBO_TOKEN', '');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'dvm' }),
+    });
+
+    expect(res.statusCode).toBe(201);
+    const dvmCall = orchestrator.startNodeViaComposeFn.mock.calls.find(
+      (c) => c[0] === 'dvm'
+    );
+    expect(dvmCall?.[1]).not.toHaveProperty('TURBO_TOKEN');
   });
 });
 

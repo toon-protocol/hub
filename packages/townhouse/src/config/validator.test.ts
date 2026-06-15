@@ -42,6 +42,60 @@ describe('validateConfig', () => {
     expect(config.nodes.dvm.feePerJob).toBe(5000);
   });
 
+  it('accepts + round-trips mill.relays and dvm.turboToken (not silently dropped)', () => {
+    const raw = validRaw();
+    const nodes = raw['nodes'] as Record<string, Record<string, unknown>>;
+    (nodes['mill'] as Record<string, unknown>)['relays'] = [
+      'wss://relay.a.example',
+      'wss://relay.b.example',
+    ];
+    (nodes['dvm'] as Record<string, unknown>)['turboToken'] = '{"kty":"RSA"}';
+
+    const config = validateConfig(raw);
+    // Regression: validateConfig rebuilds via pickOptional allowlists, so a new
+    // field is dropped on save unless it's in the allowlist. Assert it survives.
+    expect(config.nodes.mill.relays).toEqual([
+      'wss://relay.a.example',
+      'wss://relay.b.example',
+    ]);
+    expect(config.nodes.dvm.turboToken).toBe('{"kty":"RSA"}');
+  });
+
+  it('accepts + round-trips town.assetCode/assetScale and apex.routingFeeBasisPoints', () => {
+    const raw = validRaw();
+    const nodes = raw['nodes'] as Record<string, Record<string, unknown>>;
+    (nodes['town'] as Record<string, unknown>)['assetCode'] = 'USDC';
+    (nodes['town'] as Record<string, unknown>)['assetScale'] = 6;
+    raw['apex'] = { routingFeeBasisPoints: 25 };
+
+    const config = validateConfig(raw);
+    expect(config.nodes.town.assetCode).toBe('USDC');
+    expect(config.nodes.town.assetScale).toBe(6);
+    expect(config.apex?.routingFeeBasisPoints).toBe(25);
+  });
+
+  it('rejects apex.routingFeeBasisPoints that is negative or non-integer', () => {
+    const raw = validRaw();
+    raw['apex'] = { routingFeeBasisPoints: -1 };
+    expect(() => validateConfig(raw)).toThrow(ConfigValidationError);
+    raw['apex'] = { routingFeeBasisPoints: 1.5 };
+    expect(() => validateConfig(raw)).toThrow(ConfigValidationError);
+  });
+
+  it('rejects mill.relays that is not an array of strings', () => {
+    const raw = validRaw();
+    const nodes = raw['nodes'] as Record<string, Record<string, unknown>>;
+    (nodes['mill'] as Record<string, unknown>)['relays'] = [123];
+    expect(() => validateConfig(raw)).toThrow(ConfigValidationError);
+  });
+
+  it('rejects dvm.turboToken that is not a string', () => {
+    const raw = validRaw();
+    const nodes = raw['nodes'] as Record<string, Record<string, unknown>>;
+    (nodes['dvm'] as Record<string, unknown>)['turboToken'] = 42;
+    expect(() => validateConfig(raw)).toThrow(ConfigValidationError);
+  });
+
   it('rejects null input', () => {
     expect(() => validateConfig(null)).toThrow(ConfigValidationError);
   });

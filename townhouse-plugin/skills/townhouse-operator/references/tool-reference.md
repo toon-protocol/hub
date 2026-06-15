@@ -14,7 +14,7 @@ long-lived layer.
 | `townhouse_down` | CLI `down` / `hs down` | `{ hs? }` | `{ stopped, nodes }`. |
 | `townhouse_status` | API `/api/nodes`+`/api/transport`, CLI fallback | — | `{ source:'api'\|'cli', nodes, transport, … }`. |
 | `townhouse_list_nodes` | API `GET /api/nodes` | — | `{ nodes:[…] }` (id, type, ilpAddress, status). |
-| `townhouse_add_node` | API `POST /api/nodes` | `{ type }` (`town`\|`mill`\|`dvm`) | atomic provision pipeline result. |
+| `townhouse_add_node` | API `POST /api/nodes` | `{ type }` (`town`\|`mill`\|`dvm`); mill also takes `relays` (string[], **required** unless in config/`MILL_RELAYS` env); dvm optionally `turboToken` (Arweave JWK string). | atomic provision pipeline result. Pass `relays`/`turboToken` here rather than exporting env before the apex started. |
 | `townhouse_remove_node` | API `DELETE /api/nodes/:id` | `{ id }` | deprovision result. |
 | `townhouse_set_node_fees` | API `PATCH /nodes/:type/config` | `{ type, feePerEvent?, feeBasisPoints?, feePerJob?, kindPricing?, enabled? }` | restarts the connector (brief route drop). |
 | `townhouse_chains` | API `list` / CLI `add`,`remove` | `{ op, args? }` | `op:'list'` reads API; `add`/`remove` pass `args` to the CLI. |

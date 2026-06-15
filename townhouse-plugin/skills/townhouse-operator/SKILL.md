@@ -80,11 +80,16 @@ down before bringing the other up.
 ## Nodes
 
 - `townhouse_list_nodes()` — provisioned nodes (id, type, ilpAddress, status).
-- `townhouse_add_node({ type })` — provision a `town | mill | dvm` child (an
-  atomic multi-step pipeline: derive keys → register child peer → tag the apex as
-  parent → start). A child must be registered `relation:'child'` **and** tag the
-  apex (`g.townhouse`) as its parent, or paid traffic is rejected (T00/F06) — the
-  pipeline handles this; if a publish to the child is rejected, suspect this.
+- `townhouse_add_node({ type, relays?, turboToken? })` — provision a
+  `town | mill | dvm` child (an atomic multi-step pipeline: derive keys →
+  register child peer → tag the apex as parent → start). A child must be
+  registered `relation:'child'` **and** tag the apex (`g.townhouse`) as its
+  parent, or paid traffic is rejected (T00/F06) — the pipeline handles this; if a
+  publish to the child is rejected, suspect this. **mill requires `relays`**
+  (Nostr relay URLs) — pass them here (or set `nodes.mill.relays`/`MILL_RELAYS`);
+  without any, add returns a `preflight` 400. **dvm** optionally takes
+  `turboToken` (Arweave Turbo JWK) for larger uploads. Passing these in the call
+  avoids the trap where env vars exported *after* the apex booted are never seen.
 - `townhouse_remove_node({ id })` — deprovision by id.
 - `townhouse_set_node_fees({ type, feePerEvent?, feeBasisPoints?, feePerJob?, kindPricing?, enabled? })`
   — tune fees (town `feePerEvent`, mill `feeBasisPoints`, dvm `feePerJob` +

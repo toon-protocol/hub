@@ -255,7 +255,16 @@ services:
       # MUST equal the apex connector's nodeId (g.townhouse). entrypoint-town
       # maps PARENT_PEER_ID → TOON_PARENT_PEER_ID.
       PARENT_PEER_ID: g.townhouse
-      FEE_PER_EVENT: '0'
+      # Publish price (ILP base units per event). Default 0; the node-env overlay
+      # (assembleNodeEnv) sets it from config.nodes.town.feePerEvent. The town
+      # enforces it AND advertises it in kind:10032 (feePerByte).
+      FEE_PER_EVENT: ${FEE_PER_EVENT:-0}
+      # Apex public BTP URL advertised in kind:10032 (entrypoint-town maps it to
+      # TOON_BTP_ENDPOINT). Direct default resolves to ws://127.0.0.1:3000/btp;
+      # operators set transport.externalUrl for a real public address.
+      PUBLIC_BTP_URL: ${PUBLIC_BTP_URL:-}
+      ASSET_CODE: ${ASSET_CODE:-}
+      ASSET_SCALE: ${ASSET_SCALE:-}
       # Chain selection — driven by the `network` flag (resolveNetworkProfile).
       # Comes from the node-env overlay + ~/.townhouse/compose/.env (env-writer).
       TOON_CHAIN: ${EVM_CHAIN:-}

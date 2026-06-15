@@ -44,7 +44,10 @@ Get either wrong and paid traffic to the child is rejected.
 
 ### Recovery
 
-**Preferred (let townhouse re-converge):** `townhouse`'s boot reconciler re-registers every child from `~/.townhouse/nodes.yaml` (the source of truth) against the connector's live peer roster. It runs on `hs up`. If your stack is HS-mode and you can re-run the boot path, that is the cleanest fix — it diffs `nodes.yaml` against `GET /admin/peers` and re-registers any missing child with exactly the right shape:
+**Preferred (let townhouse re-converge):** re-run `townhouse hs up`. It now performs a two-stage auto-rebind from `~/.townhouse/nodes.yaml` (the source of truth):
+
+1. **Boot rebinder** (`src/rebind.ts`) — for each recorded child it rebuilds the full container env from the wallet + `config.yaml` (including persisted mill `relays` / dvm `turboToken`) and (re)starts the container via `startNodeViaCompose`. This handles the case where `hs down` removed the child containers, and also picks up config edits (change `nodes.mill.relays`, `hs up`, the mill is recreated). `startNodeViaCompose` is idempotent — an unchanged, already-running child is a no-op.
+2. **Boot reconciler** (`src/reconciler.ts`) — diffs `nodes.yaml` against the connector's live `GET /admin/peers` roster and re-registers any missing child with exactly the right shape:
 
 ```jsonc
 // what the reconciler POSTs to /admin/peers per missing child:

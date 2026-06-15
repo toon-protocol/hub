@@ -49,6 +49,13 @@ import {
 import { materializeComposeTemplate } from './compose-loader.js';
 import type { ComposeLoaderOptions } from './compose-loader.js';
 import { BootReconciler } from './reconciler.js';
+import {
+  rebindChildContainers,
+  type RebindDeps,
+  type RebindSummary,
+} from './rebind.js';
+import { resolvePublicBtpUrl } from './state/node-env.js';
+import { listSupportedSettlementAssets } from './config/supported-tokens.js';
 import { createApiServer } from './api/server.js';
 import { createWizardApiServer } from './api/wizard-server.js';
 import type { ApiServer } from './api/index.js';
@@ -209,7 +216,22 @@ export interface CliHsOverrides {
      * the cold-pull narration phase is skipped (silent degrade).
      */
     pullImage?: (image: string) => Promise<void>;
+    /**
+     * Start/recreate a child node container with the given env overlay. Used by
+     * the boot rebinder; optional on the stub so existing tests that don't
+     * provision children need not implement it.
+     */
+    startNodeViaCompose?: (
+      type: NodeType,
+      env: Record<string, string>
+    ) => Promise<void>;
   };
+  /**
+   * Override the boot rebinder (auto-rebind of child containers on `hs up`).
+   * Tests inject a spy to assert wiring without touching Docker/the wallet.
+   * When omitted, the default calls the real `rebindChildContainers`.
+   */
+  rebindChildren?: (deps: RebindDeps) => Promise<RebindSummary>;
   /** Override ConnectorAdminClient construction (avoids real HTTP in tests). */
   createAdminClient?: (
     baseUrl: string,
@@ -1743,10 +1765,10 @@ async function handleUp(
     !process.env['TURBO_TOKEN']
   ) {
     console.warn(
-      '[townhouse] WARN: TURBO_TOKEN is not set — Arweave DVM (kind:5094) uploads will fail at first job.'
+      '[townhouse] WARN: TURBO_TOKEN is not set — Arweave DVM (kind:5094) free-tier (<100KB) uploads still work, but larger/paid uploads will fail.'
     );
     console.warn(
-      '[townhouse] Export TURBO_TOKEN=<arweave-jwk-json> before `townhouse up` to enable uploads.'
+      '[townhouse] Pass `townhouse node add dvm --turbo-token <arweave-jwk-json>` (HS mode) or export TURBO_TOKEN before `townhouse up` to enable full uploads.'
     );
   }
 
@@ -1897,6 +1919,138 @@ async function reconcileWithBriefRetry(
         throw err;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+}
+
+/**
+ * Auto-rebind provisioned child nodes from `~/.townhouse/nodes.yaml` after the
+ * apex is up. Shared by `hs up` (HS) and `up` (direct), which both run
+ * `orchestrator.up([])` (apex only) and both tear children down on `down`. Two
+ * stages, in order:
+ *   1. rebind containers — rebuild each child's env from wallet + config and
+ *      (re)start it (idempotent; picks up config edits). Containers must exist
+ *      before peers re-register.
+ *   2. reconcile peers — re-register each child with the connector (the connector
+ *      restart on `up` drops the in-memory child routes).
+ * Every step is non-fatal: failures are logged with `logPrefix`, boot proceeds.
+ */
+async function rebindAndReconcileChildren(opts: {
+  configDir: string;
+  walletManager: WalletManager | undefined;
+  orch: {
+    startNodeViaCompose?: (
+      type: NodeType,
+      env: Record<string, string>
+    ) => Promise<void>;
+  };
+  config: TownhouseConfig;
+  logPrefix: string;
+  hsOverrides?: CliHsOverrides;
+}): Promise<void> {
+  const { configDir, walletManager, orch, config, logPrefix, hsOverrides } =
+    opts;
+  const nodesYamlPath = join(configDir, 'nodes.yaml');
+
+  // Resolve the apex public BTP URL the town advertises in its kind:10032. The
+  // .anyone hostname is read from host.json (written by a prior `hs up`); on a
+  // restart it's already present, so the rebound town gets a reachable endpoint.
+  let publicBtpUrl: string | undefined;
+  try {
+    let hostname: string | undefined;
+    try {
+      const raw = readFileSync(join(configDir, 'host.json'), 'utf-8');
+      const parsed = JSON.parse(raw) as { hostname?: unknown };
+      if (typeof parsed.hostname === 'string') hostname = parsed.hostname;
+    } catch {
+      /* host.json absent on first boot — direct/externalUrl still resolve */
+    }
+    publicBtpUrl = resolvePublicBtpUrl(config, hostname);
+  } catch {
+    publicBtpUrl = undefined;
+  }
+
+  // The child compose services interpolate ${TOWNHOUSE_HOME}/${TOWNHOUSE_WALLET_DIR}
+  // /${TOWNHOUSE_UID}/${TOWNHOUSE_DOCKER_GID} (bind mounts, uid). `node add` gets
+  // these from the api container's env, but the rebind runs on the HOST after
+  // `up`'s env block was already torn down — so set them here for the rebind's
+  // `docker compose up` subprocess (else the bind spec is `:/.townhouse` → error).
+  const composeEnvPrev: Record<string, string | undefined> = {
+    TOWNHOUSE_HOME: process.env['TOWNHOUSE_HOME'],
+    TOWNHOUSE_WALLET_DIR: process.env['TOWNHOUSE_WALLET_DIR'],
+    TOWNHOUSE_UID: process.env['TOWNHOUSE_UID'],
+    TOWNHOUSE_DOCKER_GID: process.env['TOWNHOUSE_DOCKER_GID'],
+  };
+  process.env['TOWNHOUSE_HOME'] = configDir;
+  process.env['TOWNHOUSE_WALLET_DIR'] = dirname(
+    resolve(config.wallet.encrypted_path)
+  );
+  process.env['TOWNHOUSE_UID'] = String(process.getuid?.() ?? 1000);
+  try {
+    process.env['TOWNHOUSE_DOCKER_GID'] = String(
+      statSync('/var/run/docker.sock').gid
+    );
+  } catch {
+    process.env['TOWNHOUSE_DOCKER_GID'] = '0';
+  }
+
+  try {
+    // Stage 1: rebind child containers.
+    const rebindFn = hsOverrides?.rebindChildren ?? rebindChildContainers;
+    if (walletManager && typeof orch.startNodeViaCompose === 'function') {
+      const startNodeViaCompose = orch.startNodeViaCompose.bind(orch);
+      try {
+        const summary = await rebindFn({
+          nodesYamlPath,
+          wallet: walletManager,
+          orchestrator: { startNodeViaCompose },
+          config,
+          publicBtpUrl,
+          log: (line) => console.error(`${logPrefix} ${line}`),
+        });
+        for (const s of summary.skipped) {
+          console.error(`${logPrefix} node ${s.id} not rebound: ${s.reason}`);
+        }
+        for (const f of summary.failed) {
+          console.error(
+            `${logPrefix} node ${f.id} rebind failed (non-fatal): ${f.err}`
+          );
+        }
+      } catch (rebindErr: unknown) {
+        const detail =
+          rebindErr instanceof Error
+            ? (rebindErr.stack ?? rebindErr.message)
+            : String(rebindErr);
+        console.error(`${logPrefix} child rebind error (non-fatal): ${detail}`);
+      }
+    }
+
+    // Stage 2: reconcile connector peer state to nodes.yaml (Story 46.1).
+    const reconcilerLogPath = join(configDir, 'reconciler.log');
+    const reconcilerFactory =
+      hsOverrides?.createReconciler ??
+      ((nodesPath: string, logPath: string) => {
+        const reconcilerAdminClient = new ConnectorAdminClient(
+          HS_CONNECTOR_ADMIN_URL,
+          5_000
+        );
+        return new BootReconciler(reconcilerAdminClient, nodesPath, logPath);
+      });
+    const reconciler = reconcilerFactory(nodesYamlPath, reconcilerLogPath);
+    try {
+      await reconcileWithBriefRetry(reconciler, 5_000);
+    } catch (reconcilerErr: unknown) {
+      const detail =
+        reconcilerErr instanceof Error
+          ? (reconcilerErr.stack ?? reconcilerErr.message)
+          : String(reconcilerErr);
+      console.error(`${logPrefix} reconciler error (non-fatal): ${detail}`);
+    }
+  } finally {
+    // Restore the compose-interpolation env vars we set for the rebind.
+    for (const [k, v] of Object.entries(composeEnvPrev)) {
+      if (v === undefined) Reflect.deleteProperty(process.env, k);
+      else process.env[k] = v;
     }
   }
 }
@@ -2392,39 +2546,18 @@ async function handleHsUp(
       }
     }
 
-    // Step 5b: reconcile connector peer state to nodes.yaml (Story 46.1).
-    // Runs after orchestrator.up([]) but BEFORE host.json is written and the
-    // hostname is printed. Reconciler divergences are non-fatal — the
+    // Step 5b: auto-rebind child containers + reconcile connector peers from
+    // nodes.yaml (Story 46.1 + rebind). Runs after orchestrator.up([]) but
+    // BEFORE host.json is written and the hostname is printed. Non-fatal — any
     // failure is logged to stderr but does not block apex boot.
-    const nodesYamlPath = join(configDir, 'nodes.yaml');
-    const reconcilerLogPath = join(configDir, 'reconciler.log');
-    const reconcilerFactory =
-      hsOverrides?.createReconciler ??
-      ((nodesPath: string, logPath: string) => {
-        const reconcilerAdminClient = new ConnectorAdminClient(
-          HS_CONNECTOR_ADMIN_URL,
-          5_000
-        );
-        return new BootReconciler(reconcilerAdminClient, nodesPath, logPath);
-      });
-    const reconciler = reconcilerFactory(nodesYamlPath, reconcilerLogPath);
-    // Brief retry on cold-boot transient errors — orchestrator.up() returns
-    // once Docker accepts the create call, not when the connector inside
-    // the container has bound its admin port. A short retry budget keeps
-    // cold-boot stderr quiet on the common "connector still warming" case
-    // while still surfacing genuine connector-down failures via the final
-    // non-fatal log below.
-    try {
-      await reconcileWithBriefRetry(reconciler, 5_000);
-    } catch (reconcilerErr: unknown) {
-      const detail =
-        reconcilerErr instanceof Error
-          ? (reconcilerErr.stack ?? reconcilerErr.message)
-          : String(reconcilerErr);
-      console.error(
-        `[townhouse hs up] reconciler error (non-fatal): ${detail}`
-      );
-    }
+    await rebindAndReconcileChildren({
+      configDir,
+      walletManager,
+      orch,
+      config,
+      logPrefix: '[townhouse hs up]',
+      hsOverrides,
+    });
 
     // Step 6: fetch published hostname and publishedAt for host.json (AC #6).
     const adminClientFactory2 =
@@ -2792,6 +2925,19 @@ async function handleDirectUp(
         process.env['TOWNHOUSE_DOCKER_GID'] = prevDockerGid;
       }
     }
+
+    // Step 5b: auto-rebind child containers + reconcile connector peers from
+    // nodes.yaml — same as `hs up`. Direct mode also tears children down on
+    // `down` and restarts the connector on `up`, so without this a restart leaves
+    // children stopped and unrouted. Non-fatal: failures are logged, boot proceeds.
+    await rebindAndReconcileChildren({
+      configDir,
+      walletManager,
+      orch,
+      config,
+      logPrefix: '[townhouse up]',
+      hsOverrides,
+    });
 
     // Step 6: success — print the direct dial address as the FINAL stdout line.
     ribbon.stop();
@@ -3379,6 +3525,12 @@ export async function main(
       'graphql-url': { type: 'string' },
       zkapp: { type: 'string' },
       'key-id': { type: 'string' },
+      // node add operator inputs (mill relays / dvm Arweave Turbo credential /
+      // town settlement chain + token)
+      relays: { type: 'string' },
+      'turbo-token': { type: 'string' },
+      'settlement-chain': { type: 'string' },
+      asset: { type: 'string' },
     },
     strict: false,
     allowPositionals: true,
@@ -3692,6 +3844,10 @@ export async function main(
             apiUrl: nodeApiUrl,
             fetch: nodeCommandOverrides?.fetch,
             confirm: nodeCommandOverrides?.confirm,
+            relays: values['relays'] as string | undefined,
+            turboToken: values['turbo-token'] as string | undefined,
+            settlementChain: values['settlement-chain'] as string | undefined,
+            asset: values['asset'] as string | undefined,
           });
           break;
         }
@@ -3729,6 +3885,29 @@ export async function main(
       const configPath = (values.config as string) ?? DEFAULT_CONFIG_PATH;
       const action = positionals[1];
       const chainIdArg = positionals[2];
+      // `chains supported` — list the (chain, token) settlement options the
+      // operator can pass to `node add town --settlement-chain/--asset`.
+      if (action === 'supported') {
+        const cfg = loadConfig(configPath);
+        const assets = listSupportedSettlementAssets(cfg);
+        if (values.json === true) {
+          console.log(JSON.stringify({ chains: assets }));
+        } else if (assets.length === 0) {
+          console.log(
+            'No supported settlement chains. Set `network` (mainnet/testnet/devnet) or run `townhouse chains add`.'
+          );
+        } else {
+          console.log(
+            'Supported settlement chains/tokens — use with `node add town --settlement-chain <id> --asset <code>`:'
+          );
+          for (const a of assets) {
+            console.log(
+              `  ${a.chainId}  ${a.assetCode} (scale ${a.assetScale})${a.native ? ' [native]' : ''}`
+            );
+          }
+        }
+        break;
+      }
       const flags: ChainsFlags = {
         chainType: values['chain-type'] as string | undefined,
         chainId: values['chain-id'] as string | undefined,

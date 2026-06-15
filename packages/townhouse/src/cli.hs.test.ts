@@ -102,6 +102,8 @@ interface HsOverrideOptions {
   reconcileSpy?: ReturnType<typeof vi.fn>;
   /** If true, the reconciler stub throws — verifies non-fatal handling. */
   reconcileThrows?: boolean;
+  /** If supplied, used as the `rebindChildren` override (boot rebinder spy). */
+  rebindSpy?: ReturnType<typeof vi.fn>;
   /**
    * Pull-progress events to emit from each `pullImage(ref)` call. Indexed
    * by image ref. When omitted, `pullImage` resolves silently.
@@ -124,6 +126,7 @@ function makeHsOverrides({
   emitContainerStateOnUp = false,
   reconcileSpy,
   reconcileThrows = false,
+  rebindSpy,
   pullEventsByImage,
   pullImageThrows = false,
 }: HsOverrideOptions = {}): CliHsOverrides {
@@ -176,7 +179,13 @@ function makeHsOverrides({
         listeners.set(event, existing);
       },
       pullImage: pullImage as (image: string) => Promise<void>,
+      // Present so the boot-rebind wiring is exercised; the rebinder itself is
+      // stubbed via `rebindChildren` below, so this is never actually invoked.
+      startNodeViaCompose: vi.fn(async () => undefined),
     })),
+    rebindChildren:
+      rebindSpy ??
+      vi.fn(async () => ({ started: [], skipped: [], failed: [] })),
     createAdminClient: vi.fn(() => {
       adminClientCallCount++;
       const isProbeCall = adminClientCallCount === 1;
@@ -595,6 +604,64 @@ describe('CLI hs subcommand', () => {
         join(configDir, 'reconciler.log')
       );
       expect(reconcileSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up calls the boot rebinder once with nodes.yaml path + config (before reconcile)', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const rebindSpy = vi.fn(async () => ({
+        started: [],
+        skipped: [],
+        failed: [],
+      }));
+      const overrides = makeHsOverrides({ rebindSpy });
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+      expect(rebindSpy).toHaveBeenCalledTimes(1);
+      expect(rebindSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          nodesYamlPath: join(configDir, 'nodes.yaml'),
+          config: expect.anything(),
+          wallet: expect.anything(),
+          orchestrator: expect.anything(),
+        })
+      );
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up: boot-rebind errors are non-fatal (logged, apex still comes up)', async () => {
+    const hostname = 'rebinderr.anyone';
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const rebindSpy = vi.fn(async () => {
+        throw new Error('rebind boom');
+      });
+      const overrides = makeHsOverrides({ hostname, rebindSpy });
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+      expect(process.exitCode).not.toBe(1);
+      const errOutput = consoleErrorSpy.mock.calls
+        .map((c) => c[0] as string)
+        .join('\n');
+      expect(errOutput).toContain('child rebind error (non-fatal)');
+      expect(errOutput).toContain('rebind boom');
+      const allOutput =
+        consoleSpy.mock.calls.map((c) => c[0] as string).join('') +
+        stdoutSpy.mock.calls.map((c) => c[0] as string).join('');
+      expect(allOutput).toContain(`Apex live at ${hostname}`);
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
@@ -1607,6 +1674,33 @@ describe('CLI up — direct-BTP default (Phase 3)', () => {
       // A direct connector.yaml (no anon) was written.
       const written = readFileSync(join(configDir, 'connector.yaml'), 'utf-8');
       expect(written).not.toContain('anon');
+      expect(process.exitCode).toBeUndefined();
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('plain `up` auto-rebinds children + reconciles peers (direct mode)', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const rebindSpy = vi.fn(async () => ({
+        started: [],
+        skipped: [],
+        failed: [],
+      }));
+      const reconcileSpy = vi.fn(async () => undefined);
+      const overrides = makeHsOverrides({ rebindSpy, reconcileSpy });
+      await main(['up', '-c', configPath], undefined, undefined, overrides);
+
+      expect(rebindSpy).toHaveBeenCalledTimes(1);
+      expect(rebindSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          nodesYamlPath: join(configDir, 'nodes.yaml'),
+        })
+      );
+      // Direct mode now also re-registers child peers (it didn't before).
+      expect(overrides.createReconciler).toHaveBeenCalledTimes(1);
+      expect(reconcileSpy).toHaveBeenCalledTimes(1);
       expect(process.exitCode).toBeUndefined();
     } finally {
       rmSync(configDir, { recursive: true, force: true });

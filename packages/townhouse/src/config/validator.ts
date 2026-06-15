@@ -37,6 +37,16 @@ function assertString(value: unknown, path: string): asserts value is string {
   }
 }
 
+function assertStringArray(
+  value: unknown,
+  path: string
+): asserts value is string[] {
+  if (!Array.isArray(value)) {
+    throw new ConfigValidationError(`${path} must be an array of strings`);
+  }
+  value.forEach((item, idx) => assertString(item, `${path}[${idx}]`));
+}
+
 function assertNumber(value: unknown, path: string): asserts value is number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new ConfigValidationError(`${path} must be a finite number`);
@@ -98,6 +108,24 @@ function validateNodeConfig(
   }
   if (raw['image'] !== undefined) {
     assertString(raw['image'], `${path}.image`);
+  }
+  // town: settlement chain/asset advertised in kind:10032.
+  if (raw['settlementChainId'] !== undefined) {
+    assertString(raw['settlementChainId'], `${path}.settlementChainId`);
+  }
+  if (raw['assetCode'] !== undefined) {
+    assertString(raw['assetCode'], `${path}.assetCode`);
+  }
+  if (raw['assetScale'] !== undefined) {
+    assertNumber(raw['assetScale'], `${path}.assetScale`);
+  }
+  // mill: operator-supplied Nostr relay URLs (persisted from `node add mill`).
+  if (raw['relays'] !== undefined) {
+    assertStringArray(raw['relays'], `${path}.relays`);
+  }
+  // dvm: operator-supplied Arweave Turbo credential (persisted from node add).
+  if (raw['turboToken'] !== undefined) {
+    assertString(raw['turboToken'], `${path}.turboToken`);
   }
 
   return raw as { enabled: boolean } & Record<string, unknown>;
@@ -228,6 +256,32 @@ export function validateConfig(raw: unknown): TownhouseConfig {
         '(connector-managed anon binary). Without one of these, the underlying ' +
         'connector will reject the manifest at boot.'
     );
+  }
+
+  // apex (optional) — connector negotiation values (routing fee).
+  let apex: TownhouseConfig['apex'];
+  if (raw['apex'] !== undefined) {
+    assertObject(raw['apex'], 'config.apex');
+    const a = raw['apex'] as Record<string, unknown>;
+    if (a['routingFeeBasisPoints'] !== undefined) {
+      assertNumber(
+        a['routingFeeBasisPoints'],
+        'config.apex.routingFeeBasisPoints'
+      );
+      if (
+        !Number.isInteger(a['routingFeeBasisPoints'] as number) ||
+        (a['routingFeeBasisPoints'] as number) < 0
+      ) {
+        throw new ConfigValidationError(
+          'config.apex.routingFeeBasisPoints must be a non-negative integer'
+        );
+      }
+    }
+    apex = {
+      ...(a['routingFeeBasisPoints'] !== undefined
+        ? { routingFeeBasisPoints: a['routingFeeBasisPoints'] as number }
+        : {}),
+    };
   }
 
   // network (optional)
@@ -438,15 +492,26 @@ export function validateConfig(raw: unknown): TownhouseConfig {
     nodes: {
       town: {
         enabled: town['enabled'] as boolean,
-        ...pickOptional(town, ['feePerEvent', 'image']),
+        ...pickOptional(town, [
+          'feePerEvent',
+          'settlementChainId',
+          'assetCode',
+          'assetScale',
+          'image',
+        ]),
       },
       mill: {
         enabled: mill['enabled'] as boolean,
-        ...pickOptional(mill, ['feeBasisPoints', 'image']),
+        ...pickOptional(mill, ['feeBasisPoints', 'image', 'relays']),
       },
       dvm: {
         enabled: dvm['enabled'] as boolean,
-        ...pickOptional(dvm, ['feePerJob', 'kindPricing', 'image']),
+        ...pickOptional(dvm, [
+          'feePerJob',
+          'kindPricing',
+          'image',
+          'turboToken',
+        ]),
       },
     },
     wallet: { encrypted_path: wallet['encrypted_path'] as string },
@@ -495,6 +560,7 @@ export function validateConfig(raw: unknown): TownhouseConfig {
     ...(network !== undefined ? { network } : {}),
     ...(endpoints !== undefined ? { endpoints } : {}),
     ...(chainProviders !== undefined ? { chainProviders } : {}),
+    ...(apex !== undefined ? { apex } : {}),
   };
 }
 

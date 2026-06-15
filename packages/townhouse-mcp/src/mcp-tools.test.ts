@@ -133,6 +133,34 @@ describe('dispatchTool — API-backed tools', () => {
     expect(api.addNode).toHaveBeenCalledWith({ type: 'mill' });
   });
 
+  it('townhouse_add_node forwards mill relays (trimmed, blanks dropped)', async () => {
+    const api = {
+      addNode: vi.fn().mockResolvedValue({ step: 'register-peer' }),
+    };
+    await dispatchTool(ctx({ api }), 'townhouse_add_node', {
+      type: 'mill',
+      relays: [' wss://a.example ', '', 'wss://b.example'],
+    });
+    expect(api.addNode).toHaveBeenCalledWith({
+      type: 'mill',
+      relays: ['wss://a.example', 'wss://b.example'],
+    });
+  });
+
+  it('townhouse_add_node forwards dvm turboToken', async () => {
+    const api = {
+      addNode: vi.fn().mockResolvedValue({ step: 'register-peer' }),
+    };
+    await dispatchTool(ctx({ api }), 'townhouse_add_node', {
+      type: 'dvm',
+      turboToken: '{"kty":"RSA"}',
+    });
+    expect(api.addNode).toHaveBeenCalledWith({
+      type: 'dvm',
+      turboToken: '{"kty":"RSA"}',
+    });
+  });
+
   it('townhouse_set_node_fees strips `type` from the patch body', async () => {
     const api = { setNodeConfig: vi.fn().mockResolvedValue({ ok: true }) };
     await dispatchTool(ctx({ api }), 'townhouse_set_node_fees', {

@@ -20,7 +20,17 @@ import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { bytesToHex } from '@noble/hashes/utils';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { resolveConfigNetworkProfile } from '../../config/network-profile.js';
+import { saveConfig } from '../../config/loader.js';
+import {
+  assembleNodeEnv,
+  resolveMillRelays,
+  resolveDvmTurboToken,
+  resolvePublicBtpUrl,
+} from '../../state/node-env.js';
+import {
+  resolveTownSettlementAsset,
+  UnsupportedSettlementError,
+} from '../../config/supported-tokens.js';
 import type { ApiDeps } from '../types.js';
 import type { NodeType } from '../types.js';
 import type {
@@ -172,6 +182,23 @@ function buildMillSwapPairConfig(config: TownhouseConfig): object {
  * Body content is intentionally ignored — only HTTP status matters, so this
  * helper stays decoupled from the three distinct node health payload shapes.
  */
+/**
+ * Read the published `.anyone` hostname from `<homeDir>/host.json` (written by
+ * `townhouse hs up`). Returns undefined if the file is absent or unparseable —
+ * the caller falls back to config/direct resolution. Best-effort: never throws.
+ */
+async function readHostJsonHostname(
+  homeDir: string
+): Promise<string | undefined> {
+  try {
+    const raw = await fs.readFile(join(homeDir, 'host.json'), 'utf-8');
+    const parsed = JSON.parse(raw) as { hostname?: unknown };
+    return typeof parsed.hostname === 'string' ? parsed.hostname : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function waitForHealthy(url: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   const POLL_INTERVAL_MS = 1_000;
@@ -193,80 +220,6 @@ async function waitForHealthy(url: string, timeoutMs: number): Promise<void> {
   throw new Error(
     `Health check timeout: ${url} did not return 200 within ${timeoutMs}ms`
   );
-}
-
-/**
- * Build the per-node env vars that compose interpolates at `up -d` time.
- * Callers must start from `process.env` and layer these on top (done inside
- * `startNodeViaCompose`). The returned object is the SECRET OVERLAY ONLY.
- *
- * NEVER log the return value of this function — it contains secret keys.
- */
-/**
- * Resolve the network-mode chain env (EVM_CHAIN/EVM_RPC_URL/EVM_CHAIN_ID/
- * EVM_USDC_ADDRESS/SOLANA_*) the HS compose interpolates into the town/mill
- * containers. Same source of truth as the apex connector (hs-config-writer)
- * and the `.env` written by env-writer — so the children use the public RPCs
- * for the operator's chosen network instead of falling back to the unreachable
- * local `anvil` default (the cause of the "disconnected" boot-loop).
- */
-export function buildNetworkNodeEnv(
-  config: TownhouseConfig
-): Record<string, string> {
-  const profile = resolveConfigNetworkProfile(config);
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(profile.nodeEnv)) {
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
-}
-
-function buildNodeEnv(
-  type: NodeType,
-  nostrSecretKeyHex: string,
-  nostrPubkeyHex: string,
-  evmPrivateKeyHex: string,
-  mnemonic: string | null,
-  apexEvmAddress: string,
-  chainEnv: Record<string, string>
-): Record<string, string> {
-  // Town's TOON_SETTLEMENT_PRIVATE_KEY (and mill's settlement key, if it
-  // were ever read) requires a 0x-prefixed 32-byte hex string. bytesToHex
-  // from @noble/hashes returns unprefixed hex — without the 0x, town
-  // crashes at boot with `TOON_SETTLEMENT_PRIVATE_KEY must be a 0x-prefixed
-  // 32-byte hex string`. Story 46.4 live gate run (Finding O, 2026-05-12).
-  const evmPrivateKeyHex0x = `0x${evmPrivateKeyHex}`;
-  // The *_NOSTR_PUBKEY overlay is interpolated into each service's
-  // NODE_NOSTR_PUBKEY env in the HS compose template. It is the x-only pubkey
-  // derived from the same secret the container already receives — purely
-  // informational so operators / SDK clients can read it via `docker inspect`
-  // or `node list --json` without re-deriving from the secret (issue #81).
-  // Safe to log (public key), unlike the *_SECRET_KEY overlay.
-  switch (type) {
-    case 'town':
-      return {
-        TOWN_SECRET_KEY: nostrSecretKeyHex,
-        TOWN_NOSTR_PUBKEY: nostrPubkeyHex,
-        TOWN_SETTLEMENT_PRIVATE_KEY: evmPrivateKeyHex0x,
-        APEX_EVM_ADDRESS: apexEvmAddress,
-        ...chainEnv,
-      };
-    case 'mill':
-      return {
-        MILL_SECRET_KEY: nostrSecretKeyHex,
-        MILL_NOSTR_PUBKEY: nostrPubkeyHex,
-        MILL_SETTLEMENT_PRIVATE_KEY: evmPrivateKeyHex0x,
-        MILL_MNEMONIC: mnemonic ?? '',
-        APEX_EVM_ADDRESS: apexEvmAddress,
-        ...chainEnv,
-      };
-    case 'dvm':
-      // DVM does no on-chain settlement — no chain env needed.
-      return {
-        DVM_SECRET_KEY: nostrSecretKeyHex,
-        DVM_NOSTR_PUBKEY: nostrPubkeyHex,
-      };
-  }
 }
 
 export function registerNodeLifecycleRoutes(
@@ -339,7 +292,15 @@ export function registerNodeLifecycleRoutes(
 
   // ── POST /api/nodes ────────────────────────────────────────────────────────
 
-  app.post<{ Body: { type: NodeType } }>(
+  app.post<{
+    Body: {
+      type: NodeType;
+      relays?: string[];
+      turboToken?: string;
+      settlementChainId?: string;
+      assetCode?: string;
+    };
+  }>(
     '/api/nodes',
     {
       schema: {
@@ -349,6 +310,17 @@ export function registerNodeLifecycleRoutes(
           required: ['type'],
           properties: {
             type: { type: 'string', enum: ['town', 'mill', 'dvm'] },
+            // mill: Nostr relay URLs (CLI `--relays`, comma-split into an array).
+            relays: {
+              type: 'array',
+              items: { type: 'string', maxLength: 512 },
+              maxItems: 64,
+            },
+            // dvm: Arweave Turbo credential (CLI `--turbo-token`, a JWK string).
+            turboToken: { type: 'string', maxLength: 8192 },
+            // town: settlement chain + token (CLI `--settlement-chain` / `--asset`).
+            settlementChainId: { type: 'string', maxLength: 128 },
+            assetCode: { type: 'string', maxLength: 16 },
           },
         },
       },
@@ -359,7 +331,13 @@ export function registerNodeLifecycleRoutes(
       }
 
       try {
-        const { type } = request.body;
+        const {
+          type,
+          relays: bodyRelays,
+          turboToken: bodyTurboToken,
+          settlementChainId: bodySettlementChainId,
+          assetCode: bodyAssetCode,
+        } = request.body;
         const homeDir = dirname(deps.configPath);
         const nodesYamlPath = join(homeDir, 'nodes.yaml');
         const imageManifestPath = join(homeDir, 'image-manifest.json');
@@ -376,16 +354,56 @@ export function registerNodeLifecycleRoutes(
           });
         }
 
-        // Pre-check: MILL_RELAYS must be set before any state is written.
-        // Mill's validateConfig() throws INVALID_CONFIG on an empty relayUrls
-        // array, producing a silent 60-second healthcheck timeout. Catching the
-        // missing var here — before writeNodesYaml (step 3) — means no rollback
-        // is needed and the caller gets an actionable 400 with zero side-effects.
-        if (type === 'mill' && !process.env['MILL_RELAYS']?.trim()) {
+        // Resolve operator-supplied node inputs (flag > config > env) BEFORE any
+        // state mutation, so a validation failure rolls back nothing and the
+        // resolved values can be both injected into the container env (step 4)
+        // and — for mill relays — persisted to config.yaml (step 6).
+        const millRelays =
+          type === 'mill' ? resolveMillRelays(bodyRelays, deps.config) : [];
+        const dvmTurboToken =
+          type === 'dvm'
+            ? resolveDvmTurboToken(bodyTurboToken, deps.config)
+            : '';
+
+        // Pre-check: mill REQUIRES at least one relay URL — mill's
+        // validateConfig() throws INVALID_CONFIG on an empty relayUrls array,
+        // producing a silent 60-second healthcheck timeout. Resolved from
+        // flag/config/env above so the operator can pass `--relays` at add time
+        // (no MILL_RELAYS export before `hs up` needed). Catching it here —
+        // before writeNodesYaml (step 3) — means no rollback and an actionable
+        // 400 with zero side-effects.
+        if (type === 'mill' && millRelays.length === 0) {
           return reply.status(400).send({
             step: 'preflight',
-            err: 'MILL_RELAYS is not set or is blank. Export a comma-separated list of relay URLs before provisioning Mill (e.g. export MILL_RELAYS=wss://relay.example.com). See packages/townhouse/README.md.',
+            err: 'No relay URLs for Mill. Pass `--relays wss://relay1,wss://relay2` to `townhouse node add mill`, set nodes.mill.relays in config.yaml, or export MILL_RELAYS before `townhouse hs up`. See packages/townhouse/README.md.',
           });
+        }
+
+        // Pre-check: resolve + validate the town's settlement chain/token
+        // (flag > config) against the deployment's supported set. Invalid →
+        // actionable 400 before any state is written. The resolved selection is
+        // written back onto deps.config so assembleNodeEnv derives the asset and
+        // the success-path persist captures it.
+        if (type === 'town') {
+          try {
+            const asset = resolveTownSettlementAsset(deps.config, {
+              settlementChainId:
+                bodySettlementChainId ??
+                deps.config.nodes.town.settlementChainId,
+              assetCode: bodyAssetCode ?? deps.config.nodes.town.assetCode,
+            });
+            if (asset) {
+              deps.config.nodes.town.settlementChainId = asset.chainId;
+              deps.config.nodes.town.assetCode = asset.assetCode;
+            }
+          } catch (err: unknown) {
+            if (err instanceof UnsupportedSettlementError) {
+              return reply
+                .status(400)
+                .send({ step: 'preflight', err: err.message });
+            }
+            throw err;
+          }
         }
 
         const derivationIndex = ACCOUNT_INDEX[type];
@@ -516,7 +534,7 @@ export function registerNodeLifecycleRoutes(
         // ── Step 3b: mill — write mill.config.json (same rollback bucket as step 3) ──
         let millConfigWritten = false;
         if (type === 'mill') {
-          // MILL_RELAYS pre-check already ran in pre-checks above — guaranteed set here.
+          // millRelays resolved + non-empty guaranteed by the preflight above.
           try {
             const defaultMillConfig = JSON.stringify(
               buildMillSwapPairConfig(deps.config),
@@ -598,15 +616,36 @@ export function registerNodeLifecycleRoutes(
           },
           'Step 4: starting container via compose'
         );
-        const nodeEnv = buildNodeEnv(
+        // Assemble the full container env (identity keys + chain env + resolved
+        // operator inputs). compose interpolates `${MILL_RELAYS:-}` /
+        // `${TURBO_TOKEN:-}` in the child service from this overlay
+        // (startNodeViaCompose merges it over process.env), so the values travel
+        // with the add request — they no longer depend on the API container's
+        // frozen process.env. Same assembler the boot rebinder uses, so a node
+        // started here and restarted on `hs up` get identical env.
+        // Resolve the apex public BTP URL for the town's kind:10032. The
+        // .anyone hostname (HS) is read from host.json, written by `hs up` once
+        // the connector publishes — present when the operator adds a town after
+        // the apex is live. If absent now, the next `hs up` rebind re-injects it.
+        const publicBtpUrl =
+          type === 'town'
+            ? resolvePublicBtpUrl(
+                deps.config,
+                await readHostJsonHostname(homeDir)
+              )
+            : undefined;
+        const nodeEnv = assembleNodeEnv({
           type,
           nostrSecretKeyHex,
-          keys.nostrPubkey,
+          nostrPubkey: keys.nostrPubkey,
           evmPrivateKeyHex,
-          mnemonicSnapshot,
+          mnemonic: mnemonicSnapshot,
           apexEvmAddress,
-          buildNetworkNodeEnv(deps.config)
-        );
+          config: deps.config,
+          relays: millRelays,
+          turboToken: dvmTurboToken || undefined,
+          publicBtpUrl,
+        });
         try {
           await deps.orchestrator.startNodeViaCompose(type, nodeEnv);
         } catch (err: unknown) {
@@ -776,6 +815,32 @@ export function registerNodeLifecycleRoutes(
             err: errMsg,
             rollbackError: combinedRollbackError,
           });
+        }
+
+        // Persist the resolved mill relays to config.yaml so a later
+        // `node remove && node add` (and any future reconciliation) reads them
+        // back without re-supplying a flag or shell env var. Non-fatal: the node
+        // is already live + registered, so a config-write failure must NOT fail
+        // the request — log a warning and return success. The dvm Turbo token is
+        // intentionally NOT persisted (it's a secret — see schema.ts).
+        // (town's resolved settlementChainId/assetCode were already written onto
+        // deps.config in the preflight above.)
+        if (type === 'mill') deps.config.nodes.mill.relays = millRelays;
+        if (type === 'mill' || type === 'town') {
+          try {
+            saveConfig(deps.configPath, deps.config);
+          } catch (err: unknown) {
+            request.log.warn(
+              {
+                event: 'node_lifecycle_config_persist_warn',
+                type,
+                err: sanitizeErrorMessage(
+                  err instanceof Error ? err.message : String(err)
+                ),
+              },
+              'Provisioned node but failed to persist its config.yaml selection — node is live; re-supply the flag if it is recreated'
+            );
+          }
         }
 
         request.log.info(

@@ -301,7 +301,18 @@ services:
       # apex forwards ("No payment channel claim attached"). entrypoint-town maps
       # PARENT_PEER_ID → TOON_PARENT_PEER_ID.
       PARENT_PEER_ID: g.townhouse
-      FEE_PER_EVENT: '0'
+      # Publish price (ILP base units per event). Default 0; the node-env overlay
+      # (assembleNodeEnv) sets it from config.nodes.town.feePerEvent. The town
+      # enforces it AND advertises it in kind:10032 (feePerByte).
+      FEE_PER_EVENT: ${FEE_PER_EVENT:-0}
+      # Apex public BTP URL the town advertises in kind:10032 so clients learn
+      # where to route packets for g.townhouse.town (.anyone URL or direct).
+      # Set by the node-env overlay / boot rebinder; entrypoint-town maps it to
+      # TOON_BTP_ENDPOINT.
+      PUBLIC_BTP_URL: ${PUBLIC_BTP_URL:-}
+      # Settlement asset advertised in kind:10032 (operator-configurable token).
+      ASSET_CODE: ${ASSET_CODE:-}
+      ASSET_SCALE: ${ASSET_SCALE:-}
       # Chain selection — driven by the `network` flag (resolveNetworkProfile).
       # EVM_CHAIN is the primary EVM preset name (e.g. base-mainnet) → town
       # TOON_CHAIN; EVM_RPC_URL is the matching RPC. Both come from the node-env

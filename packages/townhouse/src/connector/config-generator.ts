@@ -202,6 +202,17 @@ export class ConnectorConfigGenerator {
       });
     }
 
+    // Apex routing fee (operator negotiation value). Emitted ONLY when the
+    // operator explicitly sets it, so the default config is byte-unchanged and
+    // apex boot carries no risk from an unknown field. Enforcement is
+    // connector-side: this assumes the connector image reads a top-level
+    // `routingFeeBasisPoints`. Verify against your connector version — if the
+    // connector rejects unknown keys, this needs the connector's actual fee
+    // field (or upstream connector support).
+    if (this.config.apex?.routingFeeBasisPoints !== undefined) {
+      yamlObj['routingFeeBasisPoints'] = this.config.apex.routingFeeBasisPoints;
+    }
+
     return yamlStringify(yamlObj);
   }
 

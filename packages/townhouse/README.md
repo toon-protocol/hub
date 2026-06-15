@@ -127,11 +127,25 @@ The apex on its own only routes and takes a fee. To actually **earn**, attach a 
 
 ```bash
 npx @toon-protocol/townhouse node add        # provision a town relay (default)
-npx @toon-protocol/townhouse node add mill   # or a multi-chain swap node
-npx @toon-protocol/townhouse node add dvm    # or a NIP-90 compute / Arweave node
+npx @toon-protocol/townhouse node add mill --relays wss://relay.damus.io,wss://nos.lol   # multi-chain swap node
+npx @toon-protocol/townhouse node add dvm --turbo-token "$(cat arweave.json)"            # NIP-90 compute / Arweave node
 ```
 
 `node add` provisions the container, registers it as a child of your apex, and routes paid client traffic to it for free. List and remove nodes with `node list` and `node remove <id>`.
+
+**Per-node configuration.** Operator-supplied inputs are resolved in the order **flag → `config.yaml` → environment variable**:
+
+| Node   | Input                  | How to supply it                                                                                   |
+| ------ | ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `town` | Settlement chain + token (optional) | `--settlement-chain evm:84532 --asset ETH` · or `nodes.town.settlementChainId`/`assetCode` in `config.yaml` |
+| `mill` | Nostr relay URLs (**required**) | `--relays wss://a,wss://b` · or `nodes.mill.relays` in `config.yaml` · or `MILL_RELAYS` env        |
+| `dvm`  | Arweave Turbo credential (optional) | `--turbo-token '<jwk>'` · or `TURBO_TOKEN` env (free-tier <100KB uploads work without it)   |
+
+**Town settlement token/chain.** The town advertises a settlement asset in its kind:10032 so clients know what it prices in. Choose from the chains your deployment supports — run `townhouse chains supported` to list them — and a token that chain supports (EVM: `USDC`/`ETH` · Solana: `USDC`/`SOL` · Mina: `MINA` only). `assetScale` is derived (USDC 6, ETH 18, SOL 9, MINA 9). Unsupported selections are rejected with the list of valid options. Defaults to USDC on the deployment's first supported chain (the native token where USDC isn't available, e.g. Mina).
+
+Prefer the flags — they travel with the `node add` request, so you don't have to export `MILL_RELAYS`/`TURBO_TOKEN` **before** `up`/`hs up` (the API container's environment is fixed at boot, so a variable exported afterward is never seen). Mill relays you pass are persisted to `config.yaml`, so a later `node remove && node add` doesn't need the flag again. The DVM Turbo credential is a secret and is **not** written to `config.yaml` — pass it via `--turbo-token` (or `TURBO_TOKEN`) each time.
+
+**Restart = auto-rebind.** Your provisioned nodes are recorded in `~/.townhouse/nodes.yaml`. On every `townhouse hs up`, townhouse rebuilds each child's env from the wallet + `config.yaml` and restarts its container, then re-registers it with the apex — so after `hs down && hs up` (or a host reboot followed by `hs up`) your town/mill/dvm come back automatically, no `node add` needed. Editing a value in `config.yaml` (e.g. `nodes.mill.relays`) and re-running `hs up` recreates that child with the new config. The DVM Turbo token isn't persisted, so re-export `TURBO_TOKEN` before `hs up` if you rely on it for large uploads.
 
 ### 4. Stop your apex — `hs down`
 
