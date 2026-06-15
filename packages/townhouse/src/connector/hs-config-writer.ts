@@ -81,10 +81,18 @@ function buildApexGenerator(
   const apexSolanaKey = apexSettlementKeys.solanaPrivateKeyBase58;
   const apexMinaKey = apexSettlementKeys.minaPrivateKeyBase58;
 
-  const derived = resolveConfigNetworkProfile(
-    config,
-    apexEvmKey ?? DEFAULT_HS_CHAIN_PROVIDERS[0]?.keyId
-  ).chainProviders as ChainProviderEntry[];
+  // The single EVM-format key forwarded to the network resolver — either the
+  // operator's apex EVM key, or (when absent) the dev-fallback placeholder key.
+  // resolveNetworkProfile seeds THIS key into the Solana AND Mina provider
+  // entries too (#215), so seed-detection below must compare against this exact
+  // value, not just apexEvmKey — otherwise the fallback-seeded case (no apex
+  // keys supplied at all) leaves a wrong-format EVM-hex keyId on the now
+  // settlement-complete testnet-default Solana/Mina entries and the keyId
+  // validator rejects it.
+  const resolverEvmKey = apexEvmKey ?? DEFAULT_HS_CHAIN_PROVIDERS[0]?.keyId;
+
+  const derived = resolveConfigNetworkProfile(config, resolverEvmKey)
+    .chainProviders as ChainProviderEntry[];
 
   // Fill the matching mnemonic-derived apex key per chainType.
   //
@@ -106,7 +114,7 @@ function buildApexGenerator(
         if (p.keyId) return p;
         return apexEvmKey ? { ...p, keyId: apexEvmKey } : p;
       }
-      const seededWithEvmKey = !!apexEvmKey && p.keyId === apexEvmKey;
+      const seededWithEvmKey = !!resolverEvmKey && p.keyId === resolverEvmKey;
       const needsFill = !p.keyId || seededWithEvmKey;
       const correctKey =
         p.chainType === 'solana'

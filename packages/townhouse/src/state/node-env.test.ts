@@ -53,7 +53,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe('assembleNodeEnv — town negotiation values', () => {
   it('injects PUBLIC_BTP_URL, FEE_PER_EVENT, and the derived USDC asset', () => {
-    // getDefaultConfig() resolves to mainnet → EVM (Base/Arbitrum) supported.
+    // withTown() uses network:'custom' with an explicit EVM chainProvider.
     const config = withTown({ feePerEvent: 1000, assetCode: 'USDC' });
     const env = assembleNodeEnv(
       baseParams({ type: 'town', config, publicBtpUrl: 'wss://abc.anyone/btp' })

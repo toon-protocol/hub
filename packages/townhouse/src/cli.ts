@@ -182,7 +182,8 @@ Flags:
   --no-browser   Skip opening the browser automatically (setup command)
   --port         Override the API port (setup command, default 9400)
   --preset       Init from a named preset (init only). Supported: demo
-  --network      Chain network for apex + nodes (init only): mainnet (default), testnet, devnet, custom
+  --network      Chain network for apex + nodes (init only): testnet (default), devnet, mainnet, custom
+                 (mainnet has no deployed TOON settlement contracts → relay-only)
   --evm-url / --sol-url   RPC URLs for --network custom (the project's dev chains; or EVM_URL/SOL_URL env)
   --yes          Non-interactive (init only); with --preset=demo uses demo password if --password absent
   --json         Machine-readable JSON output (node commands; NDJSON for \`logs\`)
@@ -353,6 +354,20 @@ async function handleInit(
   // RPC URLs pointing at the project's dev chains (e.g. the Akash anvil/solana).
   if (network !== undefined) {
     configToWrite.network = network;
+    // TOON's settlement contracts are not deployed on mainnet yet (the
+    // base-mainnet preset has empty registry/tokenNetwork addresses), so an
+    // explicit `--network mainnet` produces nodes with no settlement chain that
+    // degrade to relay-only / DEVELOPMENT MODE. Warn loudly rather than fail —
+    // the operator may genuinely want relay-only, or be staging for a future
+    // mainnet deploy. (When unset, resolveConfigNetworkProfile defaults to the
+    // settlement-complete `testnet` tier instead.)
+    if (network === 'mainnet' && !json) {
+      console.warn(
+        '⚠️  network=mainnet: TOON settlement contracts are not deployed on mainnet yet —\n' +
+          '    nodes will run RELAY-ONLY (no on-chain settlement). Use --network testnet\n' +
+          '    (or devnet) for a settlement-ready deployment.'
+      );
+    }
   }
   if (endpoints && (endpoints.evmUrl || endpoints.solUrl)) {
     configToWrite.endpoints = endpoints;

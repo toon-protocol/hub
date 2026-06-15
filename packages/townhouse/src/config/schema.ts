@@ -321,9 +321,12 @@ export interface TownhouseConfig {
   /**
    * Network mode selecting the chain tier for BOTH the apex connector and the
    * child node containers (EVM = Base primary + Arbitrum; Solana; Mina):
-   * - `mainnet` (default when unset) — public production chains
-   * - `testnet` — public Sepolia / Solana testnet / Mina devnet
+   * - `testnet` (default when unset) — public Sepolia / Solana+Mina devnets,
+   *   settlement-complete (this is the sane default so an operator who omits
+   *   `--network` gets a settlement-ready node, not a relay-only/dev fallback)
    * - `devnet` — public Sepolia / Solana+Mina devnets (no local chain)
+   * - `mainnet` — public production chains, but TOON settlement contracts are
+   *   NOT deployed there yet → resolves relay-only (no chainProviders)
    * - `custom` — operator supplies `chainProviders` directly, OR just RPC URLs
    *   via `endpoints` (below) to point at the project's dev chains
    *

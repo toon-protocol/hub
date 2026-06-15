@@ -12,9 +12,30 @@ function cfg(over: Partial<TownhouseConfig> = {}): TownhouseConfig {
 }
 
 describe('resolveConfigNetworkProfile', () => {
-  it('defaults (no network) → mainnet Base node env', () => {
+  it('defaults (no network) → settlement-complete testnet Base node env', () => {
+    // Regression: an unset network must NOT resolve to base-mainnet (which has
+    // no deployed TOON settlement contracts and silently degrades the node to
+    // relay-only / DEVELOPMENT MODE). It defaults to the settlement-ready
+    // testnet tier (Base Sepolia) so a provisioned node points at a real chain.
     const p = resolveConfigNetworkProfile(cfg());
+    expect(p.nodeEnv.EVM_CHAIN).toBe('base-sepolia');
+    expect(p.nodeEnv.EVM_CHAIN_ID).toBe('84532');
+  });
+
+  it('apex providers for unset network are settlement-complete (testnet)', () => {
+    // With a keyId (the apex path) the default tier must emit real
+    // chainProviders + report evm:configured — the whole point of the fix.
+    const p = resolveConfigNetworkProfile(cfg(), '0xkey');
+    expect(p.status.evm).toBe('configured');
+    expect(p.chainProviders.length).toBeGreaterThan(0);
+  });
+
+  it('explicit network=mainnet → relay-only (no EVM settlement)', () => {
+    // Operators can still opt into mainnet, but it is honestly relay-only until
+    // TOON contracts ship there.
+    const p = resolveConfigNetworkProfile(cfg({ network: 'mainnet' }), '0xkey');
     expect(p.nodeEnv.EVM_CHAIN).toBe('base-mainnet');
+    expect(p.status.evm).toBe('unconfigured');
   });
 
   it('custom + endpoints → anvil (31337) + operator URLs reach the node env', () => {

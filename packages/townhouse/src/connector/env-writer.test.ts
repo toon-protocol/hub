@@ -31,19 +31,27 @@ describe('writeHsNodeEnvFile', () => {
     return { ...getDefaultConfig(), ...over };
   }
 
-  it('writes compose/.env with mainnet (default) Base + Solana endpoints', () => {
+  it('writes compose/.env with the default (testnet) Base Sepolia + Solana endpoints', () => {
+    // Default (no network) resolves to the settlement-complete testnet tier so
+    // an operator who omits --network gets a settlement-ready node, not a
+    // relay-only/dev fallback (base-mainnet has no deployed TOON contracts).
     const { envPath, keys } = writeHsNodeEnvFile(dir, cfg());
     expect(envPath).toBe(join(dir, 'compose', '.env'));
+    const body = readFileSync(envPath, 'utf-8');
+    expect(body).toContain('EVM_CHAIN=base-sepolia');
+    expect(body).toContain('EVM_CHAIN_ID=84532');
+    expect(body).toContain('SOLANA_RPC_URL=https://api.devnet.solana.com');
+    expect(keys).toContain('EVM_CHAIN');
+    // Never a localhost RPC (the cause of the disconnected boot-loop).
+    expect(body).not.toMatch(/localhost|127\.0\.0\.1/);
+  });
+
+  it('honors explicit network=mainnet (relay-only Base mainnet endpoints)', () => {
+    const { envPath } = writeHsNodeEnvFile(dir, cfg({ network: 'mainnet' }));
     const body = readFileSync(envPath, 'utf-8');
     expect(body).toContain('EVM_CHAIN=base-mainnet');
     expect(body).toContain('EVM_RPC_URL=https://mainnet.base.org');
     expect(body).toContain('EVM_CHAIN_ID=8453');
-    expect(body).toContain(
-      'SOLANA_RPC_URL=https://api.mainnet-beta.solana.com'
-    );
-    expect(keys).toContain('EVM_CHAIN');
-    // Never a localhost RPC (the cause of the disconnected boot-loop).
-    expect(body).not.toMatch(/localhost|127\.0\.0\.1/);
   });
 
   it('honors the configured network mode (testnet → Base Sepolia)', () => {

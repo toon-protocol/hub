@@ -276,8 +276,31 @@ describe('writeHsConnectorConfig', () => {
     expect(cps[0]?.['keyId']).toBe(explicit);
   });
 
-  it('keeps the funded dev placeholder key for the no-chains default fallback', () => {
-    const config = getDefaultConfig(); // no chainProviders
+  it('derives settlement-complete testnet providers (apex key filled) for the no-chains default', () => {
+    // With no explicit chainProviders, the config network defaults to the
+    // settlement-complete `testnet` tier (Base Sepolia), so the apex gets a REAL
+    // EVM settlement provider filled with the operator's apex key — not the dead
+    // dev-Anvil placeholder fallback (which only kicks in when the resolver
+    // yields zero providers, i.e. an explicit relay-only/mainnet network).
+    const config = getDefaultConfig(); // no chainProviders → testnet default
+    const { yamlPath } = writeHsConnectorConfig(tmpDir, config, {
+      force: true,
+      apexSettlementKeys: { evmPrivateKeyHex: APEX_EVM_KEY },
+    });
+    const parsed = parse(readFileSync(yamlPath, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const cps = parsed['chainProviders'] as Record<string, unknown>[];
+    const evm = cps.find((c) => c['chainType'] === 'evm');
+    expect(evm?.['keyId']).toBe(APEX_EVM_KEY);
+    // Not the dev-Anvil placeholder RPC — a real public Base Sepolia endpoint.
+    expect(String(evm?.['rpcUrl'])).not.toMatch(/127\.0\.0\.1|localhost/);
+  });
+
+  it('falls back to the funded dev placeholder only when the network yields no providers (mainnet)', () => {
+    const config = getDefaultConfig();
+    config.network = 'mainnet'; // relay-only: no settlement providers derived
     const { yamlPath } = writeHsConnectorConfig(tmpDir, config, {
       force: true,
       apexSettlementKeys: { evmPrivateKeyHex: APEX_EVM_KEY },

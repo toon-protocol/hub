@@ -13,7 +13,10 @@
 import type { FastifyInstance, FastifySchema } from 'fastify';
 import type { NetworkMode } from '@toon-protocol/core';
 import type { ApiDeps, NodeType } from '../types.js';
-import { resolveConfigNetworkProfile } from '../../config/network-profile.js';
+import {
+  resolveConfigNetworkProfile,
+  DEFAULT_NETWORK,
+} from '../../config/network-profile.js';
 import { validateConfig } from '../../config/validator.js';
 import { saveConfig } from '../../config/loader.js';
 import { acquireConfigMutex, releaseConfigMutex } from '../config-mutex.js';
@@ -30,7 +33,7 @@ interface NetworkPatchRequest {
 function networkView(config: ApiDeps['config']) {
   const profile = resolveConfigNetworkProfile(config);
   return {
-    network: config.network ?? 'mainnet',
+    network: config.network ?? DEFAULT_NETWORK,
     status: profile.status,
     // Public endpoints only — no secrets in the network node env.
     nodeEnv: profile.nodeEnv,

@@ -10,6 +10,16 @@
  *      children (an operator who ran `chains add` gets those on every node).
  *   2. `config.network` (`mainnet`/`testnet`/`devnet`/`custom`), with
  *      `config.endpoints` URLs threaded through for the `custom` mode.
+ *
+ * When `config.network` is unset we default to {@link DEFAULT_NETWORK} =
+ * `'testnet'` — the lowest settlement-complete tier (Base Sepolia registry +
+ * TokenNetwork, Solana devnet program, Mina devnet zkApp). Mainnet is NOT used
+ * as the default because TOON's settlement contracts are not deployed there yet
+ * (`base-mainnet` preset has empty registry/tokenNetwork addresses), so an unset
+ * network would otherwise resolve to a node with no settlement chain that
+ * silently degrades to relay-only / "DEVELOPMENT MODE". Operators who explicitly
+ * want mainnet must set `network: mainnet` (and accept relay-only until contracts
+ * ship); `init` warns loudly in that case.
  */
 
 import {
@@ -18,6 +28,15 @@ import {
   type ChainProviderConfigEntry,
 } from '@toon-protocol/core';
 import type { TownhouseConfig } from './schema.js';
+
+/**
+ * Default network tier when `config.network` is unset. `'testnet'` is the
+ * lowest settlement-complete tier — choosing it (over `'mainnet'`, whose TOON
+ * contracts are not deployed) means a node provisioned without an explicit
+ * `--network` points at a real settlement-ready chain instead of silently
+ * degrading to relay-only / dev mode.
+ */
+export const DEFAULT_NETWORK = 'testnet' as const;
 
 /**
  * Resolve the effective network profile for a config.
@@ -37,7 +56,7 @@ export function resolveConfigNetworkProfile(
       customProviders: config.chainProviders as ChainProviderConfigEntry[],
     });
   }
-  return resolveNetworkProfile(config.network ?? 'mainnet', {
+  return resolveNetworkProfile(config.network ?? DEFAULT_NETWORK, {
     keyId,
     endpoints: config.endpoints,
   });

@@ -49,15 +49,16 @@ describe('GET /api/network', () => {
   beforeEach(() => resetConfigMutex());
   afterEach(() => vi.clearAllMocks());
 
-  it('defaults to mainnet and surfaces the resolved Base profile', async () => {
+  it('defaults to testnet and surfaces the settlement-ready Base Sepolia profile', async () => {
+    // An unset network defaults to the settlement-complete testnet tier (not
+    // mainnet, which has no deployed TOON contracts and degrades to dev mode).
     const { app, deps } = build();
     registerNetworkRoutes(app, deps);
     const res = await app.inject({ method: 'GET', url: '/api/network' });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.network).toBe('mainnet');
-    expect(body.nodeEnv.EVM_CHAIN).toBe('base-mainnet');
-    expect(body.status.evm).toBe('unconfigured'); // no TOON contracts yet
+    expect(body.network).toBe('testnet');
+    expect(body.nodeEnv.EVM_CHAIN).toBe('base-sepolia');
     await app.close();
   });
 });
