@@ -172,6 +172,12 @@ export function validateConfig(raw: unknown): TownhouseConfig {
   if (transport['externalUrl'] !== undefined) {
     assertString(transport['externalUrl'], 'config.transport.externalUrl');
   }
+  if (transport['relayExternalUrl'] !== undefined) {
+    assertString(
+      transport['relayExternalUrl'],
+      'config.transport.relayExternalUrl'
+    );
+  }
   // hiddenService is optional and only meaningful when mode='hs'. We
   // validate the inner shape unconditionally if present (a hiddenService
   // block under mode='direct' is operator confusion, not silent acceptance).
@@ -548,6 +554,9 @@ export function validateConfig(raw: unknown): TownhouseConfig {
               stopTimeoutMs?: number;
             },
           }
+        : {}),
+      ...(transport['relayExternalUrl'] !== undefined
+        ? { relayExternalUrl: transport['relayExternalUrl'] as string }
         : {}),
     },
     api: {

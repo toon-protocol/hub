@@ -54,7 +54,7 @@ import {
   type RebindDeps,
   type RebindSummary,
 } from './rebind.js';
-import { resolvePublicBtpUrl } from './state/node-env.js';
+import { resolvePublicBtpUrl, resolveRelayUrl } from './state/node-env.js';
 import { listSupportedSettlementAssets } from './config/supported-tokens.js';
 import { createApiServer } from './api/server.js';
 import { createWizardApiServer } from './api/wizard-server.js';
@@ -149,6 +149,7 @@ Usage:
                                                  Boot a direct-BTP apex + children (default; clients dial ws://host:3000/btp). --transport hs = HS path; --dev = contributor children-only dev stack
   townhouse down [-c <path>] [--json]            Stop all nodes
   townhouse status [-c <path>] [--json]          Show node status
+  townhouse urls [-c <path>] [--json]            Print BTP (write) + relay (read) URLs to share with clients
   townhouse metrics [-c <path>]                  Show connector metrics
   townhouse wallet show [--json] [--hex] [--paths] [-c <path>] [--password <pw>]  Show derived addresses
   townhouse wallet seed --confirm [-c <path>] [--password <pw>] [--json]    Print the BIP-39 seed phrase (password-gated, requires --confirm)
@@ -226,6 +227,9 @@ export interface CliHsOverrides {
       type: NodeType,
       env: Record<string, string>
     ) => Promise<void>;
+    /** Relay hidden-service sidecar lifecycle (HS-mode public relay reads). */
+    ensureRelaySidecar?: () => Promise<void>;
+    getRelayHsHostname?: (timeoutMs?: number) => Promise<string | null>;
   };
   /**
    * Override the boot rebinder (auto-rebind of child containers on `hs up`).
@@ -1967,22 +1971,32 @@ async function rebindAndReconcileChildren(opts: {
     opts;
   const nodesYamlPath = join(configDir, 'nodes.yaml');
 
-  // Resolve the apex public BTP URL the town advertises in its kind:10032. The
-  // .anyone hostname is read from host.json (written by a prior `hs up`); on a
-  // restart it's already present, so the rebound town gets a reachable endpoint.
+  // Resolve the public BTP (write) + relay (read) URLs the town advertises in
+  // its kind:10032. The .anyone hostnames are read from host.json (written by a
+  // prior `hs up`); on a restart they're already present, so the rebound town
+  // gets reachable endpoints.
   let publicBtpUrl: string | undefined;
+  let relayUrl: string | undefined;
   try {
     let hostname: string | undefined;
+    let relayHostname: string | undefined;
     try {
       const raw = readFileSync(join(configDir, 'host.json'), 'utf-8');
-      const parsed = JSON.parse(raw) as { hostname?: unknown };
+      const parsed = JSON.parse(raw) as {
+        hostname?: unknown;
+        relayHostname?: unknown;
+      };
       if (typeof parsed.hostname === 'string') hostname = parsed.hostname;
+      if (typeof parsed.relayHostname === 'string')
+        relayHostname = parsed.relayHostname;
     } catch {
       /* host.json absent on first boot — direct/externalUrl still resolve */
     }
     publicBtpUrl = resolvePublicBtpUrl(config, hostname);
+    relayUrl = resolveRelayUrl(config, relayHostname);
   } catch {
     publicBtpUrl = undefined;
+    relayUrl = undefined;
   }
 
   // The child compose services interpolate ${TOWNHOUSE_HOME}/${TOWNHOUSE_WALLET_DIR}
@@ -2021,6 +2035,7 @@ async function rebindAndReconcileChildren(opts: {
           orchestrator: { startNodeViaCompose },
           config,
           publicBtpUrl,
+          relayUrl,
           log: (line) => console.error(`${logPrefix} ${line}`),
         });
         for (const s of summary.skipped) {
@@ -2574,6 +2589,42 @@ async function handleHsUp(
       hsOverrides,
     });
 
+    // Step 5c: relay hidden service — publish the town's Nostr relay over a
+    // `.anyone` HS so external clients can READ for free (separate from the
+    // apex BTP write path). Default-on in HS mode, but only meaningful once a
+    // town exists (the sidecar forwards to it), so gated on a town being
+    // provisioned + (re)started by the rebind above. Non-fatal. The resolved
+    // hostname → host.json.relayHostname; the town picks it up (relayUrl in its
+    // kind:10032) on the next boot, and `townhouse urls` shows it immediately.
+    let relayHostname: string | undefined;
+    if (
+      nodesYamlHasTown(configDir) &&
+      typeof orch.ensureRelaySidecar === 'function' &&
+      typeof orch.getRelayHsHostname === 'function'
+    ) {
+      try {
+        await orch.ensureRelaySidecar();
+        relayHostname = (await orch.getRelayHsHostname()) ?? undefined;
+        if (relayHostname) {
+          console.error(
+            `[townhouse hs up] relay hidden service published: wss://${relayHostname}/`
+          );
+        } else {
+          console.error(
+            '[townhouse hs up] relay hidden service started; hostname not resolved yet (will appear on next `hs up` / `townhouse urls`)'
+          );
+        }
+      } catch (relayErr: unknown) {
+        const detail =
+          relayErr instanceof Error
+            ? (relayErr.stack ?? relayErr.message)
+            : String(relayErr);
+        console.error(
+          `[townhouse hs up] relay hidden service error (non-fatal): ${detail}`
+        );
+      }
+    }
+
     // Step 6: fetch published hostname and publishedAt for host.json (AC #6).
     const adminClientFactory2 =
       hsOverrides?.createAdminClient ??
@@ -2589,6 +2640,7 @@ async function handleHsUp(
       hostname,
       publishedAt,
       writtenAt: new Date().toISOString(),
+      ...(relayHostname ? { relayHostname } : {}),
     });
 
     // Step 8: ribbon phase 3 + final stdout line (AC #5).
@@ -3067,9 +3119,25 @@ async function handleHsEnable(
 }
 
 /** Atomically write ~/.townhouse/host.json (AC #6). */
+/** True if `<configDir>/nodes.yaml` records a provisioned town node. */
+function nodesYamlHasTown(configDir: string): boolean {
+  try {
+    return /type:\s*town/.test(
+      readFileSync(join(configDir, 'nodes.yaml'), 'utf-8')
+    );
+  } catch {
+    return false;
+  }
+}
+
 function _writeHostJson(
   configDir: string,
-  data: { hostname: string; publishedAt: string; writtenAt: string }
+  data: {
+    hostname: string;
+    publishedAt: string;
+    writtenAt: string;
+    relayHostname?: string;
+  }
 ): void {
   const hostJsonPath = join(configDir, 'host.json');
   const tmpPath = `${hostJsonPath}.tmp`;
@@ -3078,6 +3146,8 @@ function _writeHostJson(
     {
       hostname: data.hostname,
       publishedAt: data.publishedAt,
+      // Relay hidden-service .anyone hostname (free client reads), when published.
+      ...(data.relayHostname ? { relayHostname: data.relayHostname } : {}),
       connectorAdminUrl: HS_CONNECTOR_ADMIN_URL,
       townhouseApiUrl: HS_TOWNHOUSE_API_URL,
       writtenAt: data.writtenAt,
@@ -3691,6 +3761,60 @@ export async function main(
             '  townhouse credits balance --token <id> [-c <path>] [--password <pw>]'
         );
         process.exitCode = 1;
+      }
+      break;
+    }
+    case 'urls': {
+      // Print the apex BTP (pay-to-write) + town relay (free-read) URLs an
+      // operator shares out-of-band with clients. Resolves from config +
+      // host.json (the .anyone hostnames written by `hs up`).
+      const configPath = (values['config'] as string) ?? DEFAULT_CONFIG_PATH;
+      const cfg = loadConfig(configPath);
+      const dir = dirname(configPath);
+      let hostname: string | undefined;
+      let relayHostname: string | undefined;
+      try {
+        const raw = readFileSync(join(dir, 'host.json'), 'utf-8');
+        const parsed = JSON.parse(raw) as {
+          hostname?: unknown;
+          relayHostname?: unknown;
+        };
+        if (typeof parsed.hostname === 'string') hostname = parsed.hostname;
+        if (typeof parsed.relayHostname === 'string')
+          relayHostname = parsed.relayHostname;
+      } catch {
+        /* host.json absent (apex not booted) — fall back to config-only */
+      }
+      const btpUrl = resolvePublicBtpUrl(cfg, hostname);
+      const relayUrl = resolveRelayUrl(cfg, relayHostname);
+      // The town's ILP destination (only meaningful once a town is provisioned).
+      let ilpDestination: string | undefined;
+      try {
+        const ny = readFileSync(join(dir, 'nodes.yaml'), 'utf-8');
+        if (/type:\s*town/.test(ny)) ilpDestination = 'g.townhouse.town';
+      } catch {
+        /* no nodes.yaml yet */
+      }
+      if (values['json'] === true) {
+        console.log(
+          JSON.stringify({
+            write: btpUrl ?? null,
+            ilpDestination: ilpDestination ?? null,
+            read: relayUrl ?? null,
+          })
+        );
+      } else {
+        console.log('Share these with clients (out-of-band):');
+        console.log('');
+        console.log(
+          `  Write (pay-to-publish, BTP):  ${btpUrl ?? '(apex not running — run `townhouse up` / `hs up`)'}`
+        );
+        if (ilpDestination) {
+          console.log(`  ILP destination:              ${ilpDestination}`);
+        }
+        console.log(
+          `  Read  (free Nostr reads):     ${relayUrl ?? '(relay not publicly exposed — set transport.relayExternalUrl or enable the relay hidden service)'}`
+        );
       }
       break;
     }

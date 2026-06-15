@@ -7,6 +7,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   assembleNodeEnv,
   resolvePublicBtpUrl,
+  resolveRelayUrl,
   type AssembleNodeEnvParams,
 } from './node-env.js';
 import { getDefaultConfig } from '../config/index.js';
@@ -146,5 +147,61 @@ describe('resolvePublicBtpUrl', () => {
   it('direct mode with no hostname falls back to the loopback dial URL', () => {
     const config = getDefaultConfig(); // mode: 'direct'
     expect(resolvePublicBtpUrl(config)).toBe('ws://127.0.0.1:3000/btp');
+  });
+});
+
+describe('resolveRelayUrl', () => {
+  it('uses transport.relayExternalUrl override (normalised to end in /)', () => {
+    const base = getDefaultConfig();
+    const config: TownhouseConfig = {
+      ...base,
+      transport: {
+        ...base.transport,
+        relayExternalUrl: 'ws://host.example:7100',
+      },
+    };
+    expect(resolveRelayUrl(config)).toBe('ws://host.example:7100/');
+  });
+
+  it('derives wss://<relayHostname>/ for an HS relay hidden service', () => {
+    const config = getDefaultConfig();
+    expect(resolveRelayUrl(config, 'relay123.anyone')).toBe(
+      'wss://relay123.anyone/'
+    );
+  });
+
+  it('returns undefined when not publicly exposed (no override, no HS hostname)', () => {
+    expect(resolveRelayUrl(getDefaultConfig())).toBeUndefined();
+  });
+
+  it('override wins over an HS hostname', () => {
+    const base = getDefaultConfig();
+    const config: TownhouseConfig = {
+      ...base,
+      transport: { ...base.transport, relayExternalUrl: 'wss://op.example/' },
+    };
+    expect(resolveRelayUrl(config, 'relay123.anyone')).toBe(
+      'wss://op.example/'
+    );
+  });
+});
+
+describe('assembleNodeEnv — town relay URL', () => {
+  it('injects PUBLIC_RELAY_URL when a relay URL is provided', () => {
+    const env = assembleNodeEnv(
+      baseParams({
+        type: 'town',
+        config: withTown({}),
+        relayUrl: 'wss://relay123.anyone/',
+      })
+    );
+    expect(env['PUBLIC_RELAY_URL']).toBe('wss://relay123.anyone/');
+  });
+
+  it('omits PUBLIC_RELAY_URL when no relay URL is provided', () => {
+    const env = assembleNodeEnv(
+      baseParams({ type: 'town', config: withTown({}) })
+    );
+    expect(env).not.toHaveProperty('PUBLIC_RELAY_URL');
   });
 });

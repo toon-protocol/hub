@@ -182,6 +182,9 @@ function makeHsOverrides({
       // Present so the boot-rebind wiring is exercised; the rebinder itself is
       // stubbed via `rebindChildren` below, so this is never actually invoked.
       startNodeViaCompose: vi.fn(async () => undefined),
+      // Relay HS sidecar lifecycle — only invoked when nodes.yaml has a town.
+      ensureRelaySidecar: vi.fn(async () => undefined),
+      getRelayHsHostname: vi.fn(async () => 'relay-test.anyone'),
     })),
     rebindChildren:
       rebindSpy ??
@@ -604,6 +607,63 @@ describe('CLI hs subcommand', () => {
         join(configDir, 'reconciler.log')
       );
       expect(reconcileSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up publishes the relay HS + writes host.json.relayHostname when a town exists', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      // Seed a provisioned town so the relay-HS step fires.
+      writeFileSync(
+        join(configDir, 'nodes.yaml'),
+        'entries:\n  - id: town\n    type: town\n    peerId: town\n    ilpAddress: g.townhouse.town\n    derivationIndex: 0\n    enabledAt: 2026-01-01T00:00:00.000Z\n    lastSeenAt: null\n'
+      );
+      const overrides = makeHsOverrides({});
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+
+      const orch = (overrides.createOrchestrator as ReturnType<typeof vi.fn>)
+        .mock.results[0]?.value as {
+        ensureRelaySidecar: ReturnType<typeof vi.fn>;
+        getRelayHsHostname: ReturnType<typeof vi.fn>;
+      };
+      expect(orch.ensureRelaySidecar).toHaveBeenCalledTimes(1);
+      expect(orch.getRelayHsHostname).toHaveBeenCalledTimes(1);
+
+      const hostJson = JSON.parse(
+        readFileSync(join(configDir, 'host.json'), 'utf-8')
+      ) as { relayHostname?: string };
+      expect(hostJson.relayHostname).toBe('relay-test.anyone');
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('hs up skips the relay HS when no town is provisioned', async () => {
+    const { configDir, configPath } = await makeHsTestDir();
+    try {
+      const overrides = makeHsOverrides({});
+      await main(
+        ['hs', 'up', '-c', configPath],
+        undefined,
+        undefined,
+        overrides
+      );
+      const orch = (overrides.createOrchestrator as ReturnType<typeof vi.fn>)
+        .mock.results[0]?.value as {
+        ensureRelaySidecar: ReturnType<typeof vi.fn>;
+      };
+      expect(orch.ensureRelaySidecar).not.toHaveBeenCalled();
+      const hostJson = JSON.parse(
+        readFileSync(join(configDir, 'host.json'), 'utf-8')
+      ) as { relayHostname?: string };
+      expect(hostJson.relayHostname).toBeUndefined();
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }

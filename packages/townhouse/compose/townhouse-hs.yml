@@ -310,6 +310,10 @@ services:
       # Set by the node-env overlay / boot rebinder; entrypoint-town maps it to
       # TOON_BTP_ENDPOINT.
       PUBLIC_BTP_URL: ${PUBLIC_BTP_URL:-}
+      # Public Nostr relay read URL advertised in kind:10032/10166 (HS .anyone
+      # relay URL, derived by `hs up` from the relay hidden service). entrypoint
+      # maps it to TOON_EXTERNAL_RELAY_URL.
+      PUBLIC_RELAY_URL: ${PUBLIC_RELAY_URL:-}
       # Settlement asset advertised in kind:10032 (operator-configurable token).
       ASSET_CODE: ${ASSET_CODE:-}
       ASSET_SCALE: ${ASSET_SCALE:-}

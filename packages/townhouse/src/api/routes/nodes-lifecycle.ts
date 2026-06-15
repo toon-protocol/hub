@@ -26,6 +26,7 @@ import {
   resolveMillRelays,
   resolveDvmTurboToken,
   resolvePublicBtpUrl,
+  resolveRelayUrl,
 } from '../../state/node-env.js';
 import {
   resolveTownSettlementAsset,
@@ -187,15 +188,25 @@ function buildMillSwapPairConfig(config: TownhouseConfig): object {
  * `townhouse hs up`). Returns undefined if the file is absent or unparseable —
  * the caller falls back to config/direct resolution. Best-effort: never throws.
  */
-async function readHostJsonHostname(
+async function readHostJson(
   homeDir: string
-): Promise<string | undefined> {
+): Promise<{ hostname?: string; relayHostname?: string }> {
   try {
     const raw = await fs.readFile(join(homeDir, 'host.json'), 'utf-8');
-    const parsed = JSON.parse(raw) as { hostname?: unknown };
-    return typeof parsed.hostname === 'string' ? parsed.hostname : undefined;
+    const parsed = JSON.parse(raw) as {
+      hostname?: unknown;
+      relayHostname?: unknown;
+    };
+    return {
+      hostname:
+        typeof parsed.hostname === 'string' ? parsed.hostname : undefined,
+      relayHostname:
+        typeof parsed.relayHostname === 'string'
+          ? parsed.relayHostname
+          : undefined,
+    };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -623,16 +634,18 @@ export function registerNodeLifecycleRoutes(
         // with the add request — they no longer depend on the API container's
         // frozen process.env. Same assembler the boot rebinder uses, so a node
         // started here and restarted on `hs up` get identical env.
-        // Resolve the apex public BTP URL for the town's kind:10032. The
-        // .anyone hostname (HS) is read from host.json, written by `hs up` once
-        // the connector publishes — present when the operator adds a town after
-        // the apex is live. If absent now, the next `hs up` rebind re-injects it.
+        // Resolve the apex public BTP URL + public relay read URL for the
+        // town's kind:10032. The .anyone hostnames (HS) are read from host.json,
+        // written by `hs up` — present when the operator adds a town after the
+        // apex is live. If absent now, the next `hs up` rebind re-injects them.
+        const hostJson = type === 'town' ? await readHostJson(homeDir) : {};
         const publicBtpUrl =
           type === 'town'
-            ? resolvePublicBtpUrl(
-                deps.config,
-                await readHostJsonHostname(homeDir)
-              )
+            ? resolvePublicBtpUrl(deps.config, hostJson.hostname)
+            : undefined;
+        const relayUrl =
+          type === 'town'
+            ? resolveRelayUrl(deps.config, hostJson.relayHostname)
             : undefined;
         const nodeEnv = assembleNodeEnv({
           type,
@@ -645,6 +658,7 @@ export function registerNodeLifecycleRoutes(
           relays: millRelays,
           turboToken: dvmTurboToken || undefined,
           publicBtpUrl,
+          relayUrl,
         });
         try {
           await deps.orchestrator.startNodeViaCompose(type, nodeEnv);

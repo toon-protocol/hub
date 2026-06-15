@@ -176,6 +176,19 @@ const RELAY_ATOR_SIDECAR_IMAGE = 'toon:townhouse-ator-sidecar';
 const RELAY_ATOR_SOCKS_PORT = 9051;
 
 /**
+ * Relay hidden-service sidecar wiring (HS mode). These are the HS compose's
+ * ACTUAL network + town container names (compose/townhouse-hs.yml: network
+ * `townhouse-hs-net`, town container `townhouse-hs-town`) — NOT the dev-profile
+ * `NETWORK_NAME`/`${PREFIX}town` the legacy sidecar code used (which never
+ * resolved). The keypair lives in a named volume so the `.anyone` address is
+ * stable across `hs down`/`up`.
+ */
+const RELAY_HS_NETWORK = 'townhouse-hs-net';
+const RELAY_HS_KEYS_VOLUME = `${CONTAINER_PREFIX}hs-relay-anon`;
+const RELAY_SIDECAR_NAME = `${CONTAINER_PREFIX}hs-ator-sidecar-relay`;
+const RELAY_HS_TARGET_HOST = `${CONTAINER_PREFIX}hs-town`;
+
+/**
  * Error thrown by DockerOrchestrator HS-path failures (Story 45.3).
  * Carries the failed-service name + subprocess diagnostics so CLI consumers
  * (Story 45.4) can render Sally's failure-state copy library (UX-DR5).
@@ -341,13 +354,9 @@ export class DockerOrchestrator extends EventEmitter {
 
     // Start all node containers in parallel
     await Promise.all(profiles.map((type) => this.startNode(type)));
-
-    // Optional: bring up the relay-side ator sidecar after town is started.
-    // It forwards inbound HS traffic to the town container's relay WS port,
-    // so it must be created after the town container exists in DNS.
-    if (profiles.includes('town') && this.config.transport.relayHiddenService) {
-      await this.startRelayAtorSidecar();
-    }
+    // The relay hidden-service sidecar (HS mode) is driven by the CLI via
+    // ensureRelaySidecar() after the apex + town are up — not from the dev
+    // profile path here.
   }
 
   /**
@@ -754,6 +763,10 @@ export class DockerOrchestrator extends EventEmitter {
   }
 
   private async downHs(): Promise<void> {
+    // Remove the relay sidecar first — it's created outside the compose project
+    // (createContainer) and holds the townhouse-hs-net network, so `compose
+    // down` would fail to remove the network while it's attached. Best-effort.
+    await this.removeRelaySidecar().catch(() => undefined);
     const composePath = this.requireComposePath();
     const args = ['compose', '-f', composePath, 'down'];
     // NO -v flag — preserves the townhouse-hs-anon volume so the .anyone
@@ -1438,33 +1451,79 @@ export class DockerOrchestrator extends EventEmitter {
    * docker/townhouse-ator-sidecar/Dockerfile). The town container picks up
    * the resulting .anyone URL via the operator-set externalUrl field.
    */
-  private async startRelayAtorSidecar(): Promise<void> {
-    const hsConfig = this.config.transport.relayHiddenService;
-    if (!hsConfig) return;
+  /**
+   * Ensure the relay hidden-service sidecar is running (HS mode). Forwards the
+   * relay `.anyone` HS to the town container's Nostr port (7100) so external
+   * clients can READ over the hidden service. Idempotent: a no-op if already
+   * running; recreates a stale/exited one. The keypair persists in a named
+   * volume → stable address across `hs down`/`up`. Requires the town container
+   * to exist (the sidecar resolves its DNS at boot), so call it AFTER the town
+   * is (re)started.
+   */
+  async ensureRelaySidecar(): Promise<void> {
+    const name = RELAY_SIDECAR_NAME;
+    // Idempotent: leave a running sidecar in place; remove a stale one.
+    try {
+      const existing = this.docker.getContainer(name);
+      const info = await existing.inspect();
+      if (info.State?.Running === true) return;
+      await existing.remove({ force: true });
+    } catch {
+      // not present — create below
+    }
 
-    const name = `${CONTAINER_PREFIX}ator-sidecar-relay`;
     const env = [
-      `HS_TARGET_HOST=${CONTAINER_PREFIX}town`,
+      `HS_TARGET_HOST=${RELAY_HS_TARGET_HOST}`,
       `HS_TARGET_PORT=${TOWN_RELAY_PORT}`,
-      `HS_PORT=${hsConfig.port}`,
+      `HS_PORT=${TOWN_RELAY_PORT}`,
       `SOCKS_PORT=${RELAY_ATOR_SOCKS_PORT}`,
+      `NICKNAME=townhouse-relay`,
     ];
 
     this.emit('containerState', { name, state: 'creating' });
-
     const container = await this.docker.createContainer({
       name,
       Image: RELAY_ATOR_SIDECAR_IMAGE,
       Env: env,
       HostConfig: {
-        NetworkMode: NETWORK_NAME,
-        Binds: [`${hsConfig.dir}:/var/lib/anon/hs:rw`],
+        NetworkMode: RELAY_HS_NETWORK,
+        Binds: [`${RELAY_HS_KEYS_VOLUME}:/var/lib/anon/hs:rw`],
+        RestartPolicy: { Name: 'unless-stopped' },
       },
     });
-
     this.emit('containerState', { name, state: 'starting' });
     await container.start();
     this.emit('containerState', { name, state: 'running' });
+  }
+
+  /**
+   * Read the relay sidecar's published `.anyone` hostname (it writes the file
+   * once anon finishes bootstrapping). Polls until the file is non-empty or
+   * `timeoutMs` elapses; returns null on timeout. The file already contains the
+   * routable `.anyone` address (no scheme mapping needed).
+   */
+  async getRelayHsHostname(timeoutMs = 120_000): Promise<string | null> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        const { stdout } = await this.execFileAsync(
+          'docker',
+          ['exec', RELAY_SIDECAR_NAME, 'cat', '/var/lib/anon/hs/hostname'],
+          { timeout: 5_000, maxBuffer: 1 << 20 }
+        );
+        const host = String(stdout).trim();
+        if (host) return host;
+      } catch {
+        // sidecar not ready / file absent yet — keep polling
+      }
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+    return null;
+  }
+
+  /** Stop + remove the relay sidecar (called before `hs down`'s compose down). */
+  async removeRelaySidecar(): Promise<void> {
+    await this.stopAndRemove(RELAY_SIDECAR_NAME);
   }
 
   /**

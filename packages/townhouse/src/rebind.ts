@@ -51,6 +51,12 @@ export interface RebindDeps {
    * hostname isn't resolved yet (town falls back to its default).
    */
   publicBtpUrl?: string;
+  /**
+   * Public Nostr relay read URL injected into the town's env so its
+   * kind:10032 advertises where clients subscribe (resolved by the caller from
+   * config/host.json — see resolveRelayUrl). Omit for non-town / unexposed.
+   */
+  relayUrl?: string;
   /** Optional progress sink (defaults to no-op). */
   log?: (line: string) => void;
 }
@@ -121,6 +127,7 @@ export async function rebindChildContainers(
         apexEvmAddress,
         config: deps.config,
         publicBtpUrl: deps.publicBtpUrl,
+        relayUrl: deps.relayUrl,
       });
       await deps.orchestrator.startNodeViaCompose(type, env);
       summary.started.push(entry.id);

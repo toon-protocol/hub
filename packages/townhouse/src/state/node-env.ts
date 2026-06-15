@@ -156,6 +156,29 @@ export function resolvePublicBtpUrl(
   return undefined;
 }
 
+/**
+ * Resolve the public Nostr relay READ URL the town advertises (kind:10032
+ * `relayUrl` + kind:10166), so clients know where to subscribe for free reads.
+ * Precedence:
+ *   1. operator override `transport.relayExternalUrl` (both modes);
+ *   2. HS mode → `wss://<relayHostname>/` from the relay hidden service's
+ *      resolved `.anyone` hostname;
+ *   3. otherwise undefined — the relay isn't publicly exposed (direct mode
+ *      without `relayExternalUrl` keeps the relay loopback-only / unadvertised).
+ */
+export function resolveRelayUrl(
+  config: TownhouseConfig,
+  relayHostname?: string
+): string | undefined {
+  const ext = config.transport.relayExternalUrl;
+  if (ext) {
+    const trimmed = ext.replace(/\/+$/, '');
+    return `${trimmed}/`;
+  }
+  if (relayHostname) return `wss://${relayHostname}/`;
+  return undefined;
+}
+
 /** Inputs for {@link assembleNodeEnv}. */
 export interface AssembleNodeEnvParams {
   type: NodeType;
@@ -171,6 +194,8 @@ export interface AssembleNodeEnvParams {
   turboToken?: string;
   /** town: apex public BTP URL to advertise in kind:10032 (see resolvePublicBtpUrl). */
   publicBtpUrl?: string;
+  /** town: public relay read URL to advertise in kind:10032 (see resolveRelayUrl). */
+  relayUrl?: string;
 }
 
 /**
@@ -212,6 +237,9 @@ export function assembleNodeEnv(
     // which maps them to TOON_* via docker/src/entrypoint-town.ts.
     const town = config.nodes.town;
     if (params.publicBtpUrl) env['PUBLIC_BTP_URL'] = params.publicBtpUrl;
+    // Public relay read URL (entrypoint-town maps PUBLIC_RELAY_URL →
+    // TOON_EXTERNAL_RELAY_URL, which the town advertises in kind:10032/10166).
+    if (params.relayUrl) env['PUBLIC_RELAY_URL'] = params.relayUrl;
     if (town.feePerEvent !== undefined) {
       env['FEE_PER_EVENT'] = String(town.feePerEvent);
     }

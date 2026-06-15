@@ -263,6 +263,11 @@ services:
       # TOON_BTP_ENDPOINT). Direct default resolves to ws://127.0.0.1:3000/btp;
       # operators set transport.externalUrl for a real public address.
       PUBLIC_BTP_URL: ${PUBLIC_BTP_URL:-}
+      # Public Nostr relay read URL advertised in kind:10032/10166. In direct
+      # mode set transport.relayExternalUrl (e.g. ws://<host>:7100) + expose the
+      # port with TOWNHOUSE_RELAY_BIND=0.0.0.0. entrypoint maps it to
+      # TOON_EXTERNAL_RELAY_URL.
+      PUBLIC_RELAY_URL: ${PUBLIC_RELAY_URL:-}
       ASSET_CODE: ${ASSET_CODE:-}
       ASSET_SCALE: ${ASSET_SCALE:-}
       # Chain selection — driven by the `network` flag (resolveNetworkProfile).

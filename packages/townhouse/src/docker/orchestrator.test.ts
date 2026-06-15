@@ -913,37 +913,58 @@ describe('DockerOrchestrator', () => {
       ).toBe(false);
     });
 
-    it('creates relay ator sidecar with correct env when relayHiddenService is set', async () => {
+    it('ensureRelaySidecar() creates the relay sidecar with HS-correct env/network/volume', async () => {
       const config = configWithNodes(['town']);
-      config.transport.relayHiddenService = {
-        dir: '/var/lib/townhouse/hs/relay',
-        port: 7100,
-        externalUrl: 'wss://abc123.anyone',
-      };
+      // No existing sidecar — idempotency check must miss so it creates one.
+      mockDocker.docker.getContainer.mockReturnValue({
+        inspect: vi.fn().mockRejectedValue(new Error('No such container')),
+        remove: vi.fn().mockResolvedValue(undefined),
+        start: vi.fn().mockResolvedValue(undefined),
+      });
 
       const orchestrator = new DockerOrchestrator(
         mockDocker.docker as any,
-        config
+        config,
+        undefined,
+        { profile: 'hs', composePath: '/tmp/fake-hs.yml' }
       );
-      await orchestrator.up(['town']);
+      await orchestrator.ensureRelaySidecar();
 
+      // Uses the HS compose's REAL network + town container name (the legacy
+      // path used townhouse-net / townhouse-town and never resolved), and a
+      // named keypair volume for a stable .anyone address.
       expect(mockDocker.docker.createContainer).toHaveBeenCalledWith(
         expect.objectContaining({
-          name: 'townhouse-ator-sidecar-relay',
+          name: 'townhouse-hs-ator-sidecar-relay',
           Image: 'toon:townhouse-ator-sidecar',
           Env: expect.arrayContaining([
-            'HS_TARGET_HOST=townhouse-town',
+            'HS_TARGET_HOST=townhouse-hs-town',
             'HS_TARGET_PORT=7100',
             'HS_PORT=7100',
             'SOCKS_PORT=9051',
           ]),
           HostConfig: expect.objectContaining({
-            NetworkMode: 'townhouse-net',
+            NetworkMode: 'townhouse-hs-net',
             Binds: expect.arrayContaining([
-              '/var/lib/townhouse/hs/relay:/var/lib/anon/hs:rw',
+              'townhouse-hs-relay-anon:/var/lib/anon/hs:rw',
             ]),
           }),
         })
+      );
+    });
+
+    it('ensureRelaySidecar() is idempotent — skips creation when already running', async () => {
+      const config = configWithNodes(['town']);
+      // Default getContainer returns a Running container → should skip create.
+      const orchestrator = new DockerOrchestrator(
+        mockDocker.docker as any,
+        config,
+        undefined,
+        { profile: 'hs', composePath: '/tmp/fake-hs.yml' }
+      );
+      await orchestrator.ensureRelaySidecar();
+      expect(mockDocker.docker.createContainer).not.toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'townhouse-hs-ator-sidecar-relay' })
       );
     });
 

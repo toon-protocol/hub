@@ -291,6 +291,15 @@ export interface TransportConfig {
    * Reuses HiddenServiceConfig — same shape as connector HS config.
    */
   relayHiddenService?: HiddenServiceConfig;
+  /**
+   * Public Nostr relay read URL the town advertises (kind:10032 `relayUrl` +
+   * kind:10166 seed entry) so clients know where to subscribe for FREE reads.
+   * - DIRECT mode: set this to your externally-reachable `ws(s)://<host>:7100`
+   *   and bind the port with `TOWNHOUSE_RELAY_BIND=0.0.0.0`.
+   * - HS mode: leave unset — `hs up` derives `wss://<relay-addr>.anyone/` from
+   *   the relay hidden service. Set it only to override the derived value.
+   */
+  relayExternalUrl?: string;
 }
 
 export interface ApiConfig {
