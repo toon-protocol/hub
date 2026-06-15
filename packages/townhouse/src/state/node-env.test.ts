@@ -114,14 +114,16 @@ describe('resolvePublicBtpUrl', () => {
     expect(resolvePublicBtpUrl(config)).toBe('wss://op.example/btp');
   });
 
-  it('builds wss://<hostname>/btp whenever a .anyone hostname is resolved', () => {
+  it('builds ws://<hostname>:3000/btp whenever a .anyone hostname is resolved', () => {
+    // Issue #259: the HS serves plain ws on the connector's virtual port :3000,
+    // NOT wss on :443 — advertising the latter broke client auto-discovery.
     const base = getDefaultConfig();
     const config: TownhouseConfig = {
       ...base,
       transport: { mode: 'hs', externalUrl: 'auto' },
     };
     expect(resolvePublicBtpUrl(config, 'abc.anyone')).toBe(
-      'wss://abc.anyone/btp'
+      'ws://abc.anyone:3000/btp'
     );
   });
 
@@ -131,7 +133,7 @@ describe('resolvePublicBtpUrl', () => {
     // of a host.json hostname must still yield the .anyone URL, not loopback.
     const config = getDefaultConfig(); // mode: 'direct'
     expect(resolvePublicBtpUrl(config, 'abc.anyone')).toBe(
-      'wss://abc.anyone/btp'
+      'ws://abc.anyone:3000/btp'
     );
   });
 
@@ -163,10 +165,12 @@ describe('resolveRelayUrl', () => {
     expect(resolveRelayUrl(config)).toBe('ws://host.example:7100/');
   });
 
-  it('derives wss://<relayHostname>/ for an HS relay hidden service', () => {
+  it('derives ws://<relayHostname>:7100/ for an HS relay hidden service', () => {
+    // Issue #259: the relay HS sidecar serves plain ws on the town's Nostr port
+    // :7100, NOT wss on :443.
     const config = getDefaultConfig();
     expect(resolveRelayUrl(config, 'relay123.anyone')).toBe(
-      'wss://relay123.anyone/'
+      'ws://relay123.anyone:7100/'
     );
   });
 

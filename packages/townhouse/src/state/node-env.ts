@@ -15,6 +15,22 @@ import type { TownhouseConfig } from '../config/schema.js';
 import type { NodeType } from '../api/types.js';
 
 /**
+ * Virtual ports the `.anyone` hidden services publish, and therefore the ports
+ * clients MUST dial on the `.anyone` hostname. These mirror the fixed values in
+ * the HS plumbing and must stay in sync:
+ *   - BTP   → `hs-config-writer.ts` `HS_PORT` (the connector's BTP server).
+ *   - relay → `docker/orchestrator.ts` `TOWN_RELAY_PORT` (the relay sidecar's
+ *             `HS_PORT`, forwarding to the town's Nostr WebSocket).
+ *
+ * ATOR hidden services tunnel plaintext WebSocket through the encrypted circuit
+ * (no TLS), so the advertised scheme is `ws://` — NOT `wss://` — and the port is
+ * explicit. Advertising `wss://<host>.anyone/btp` (implicit `:443`, TLS) was
+ * unreachable and broke client auto-discovery (issue #259).
+ */
+const HS_BTP_PORT = 3000;
+const HS_RELAY_PORT = 7100;
+
+/**
  * Resolve the network-mode chain env (EVM_CHAIN/EVM_RPC_URL/EVM_CHAIN_ID/
  * EVM_USDC_ADDRESS/SOLANA_*) the compose template interpolates into the
  * town/mill containers. Same source of truth as the apex connector
@@ -133,8 +149,11 @@ export function resolveDvmTurboToken(
  * Precedence:
  *   1. operator override `transport.externalUrl` (when set and not the literal
  *      `'auto'`), normalised to end in `/btp`;
- *   2. HS mode → `wss://<hostname>/btp` from the resolved `.anyone` hostname
- *      (host.json), or undefined when not yet published;
+ *   2. HS mode → `ws://<hostname>:3000/btp` from the resolved `.anyone` hostname
+ *      (host.json), or undefined when not yet published. The explicit `:3000`
+ *      (the connector's HS virtual port) + plain `ws` scheme match what the HS
+ *      actually serves; `wss://<hostname>/btp` (`:443`, TLS) was unreachable
+ *      and broke client auto-discovery (issue #259);
  *   3. direct mode → the loopback dial URL (operators expose externally via
  *      `transport.externalUrl` or a reverse proxy).
  */
@@ -151,7 +170,7 @@ export function resolvePublicBtpUrl(
   // that the apex is running as a hidden service — `hs up` does NOT rewrite
   // config.transport.mode (it stays 'direct' from init), so keying off the
   // hostname's presence is correct where the config mode is not.
-  if (hostname) return `wss://${hostname}/btp`;
+  if (hostname) return `ws://${hostname}:${HS_BTP_PORT}/btp`;
   if (config.transport.mode === 'direct') return 'ws://127.0.0.1:3000/btp';
   return undefined;
 }
@@ -161,8 +180,10 @@ export function resolvePublicBtpUrl(
  * `relayUrl` + kind:10166), so clients know where to subscribe for free reads.
  * Precedence:
  *   1. operator override `transport.relayExternalUrl` (both modes);
- *   2. HS mode → `wss://<relayHostname>/` from the relay hidden service's
- *      resolved `.anyone` hostname;
+ *   2. HS mode → `ws://<relayHostname>:7100/` from the relay hidden service's
+ *      resolved `.anyone` hostname. The explicit `:7100` (the relay sidecar's
+ *      HS virtual port) + plain `ws` scheme match what the HS actually serves;
+ *      `wss://<relayHostname>/` (`:443`, TLS) was unreachable (issue #259);
  *   3. otherwise undefined — the relay isn't publicly exposed (direct mode
  *      without `relayExternalUrl` keeps the relay loopback-only / unadvertised).
  */
@@ -175,7 +196,7 @@ export function resolveRelayUrl(
     const trimmed = ext.replace(/\/+$/, '');
     return `${trimmed}/`;
   }
-  if (relayHostname) return `wss://${relayHostname}/`;
+  if (relayHostname) return `ws://${relayHostname}:${HS_RELAY_PORT}/`;
   return undefined;
 }
 
