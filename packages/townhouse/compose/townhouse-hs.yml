@@ -305,6 +305,13 @@ services:
       # (assembleNodeEnv) sets it from config.nodes.town.feePerEvent. The town
       # enforces it AND advertises it in kind:10032 (feePerByte).
       FEE_PER_EVENT: ${FEE_PER_EVENT:-0}
+      # NIP-40 TTL (seconds) for the town's kind:10032 announcement (issue #261).
+      # The town re-publishes at half this interval so a live apex stays fresh
+      # while an offline one's announcement expires — clients then skip its
+      # unreachable BTP endpoint instead of failing against it. Especially
+      # relevant for an HS apex (relay can outlive the BTP hidden service).
+      # Default 1h; set 0 to disable the expiration tag + heartbeat.
+      TOON_ANNOUNCEMENT_TTL_SECONDS: ${TOON_ANNOUNCEMENT_TTL_SECONDS:-3600}
       # Apex public BTP URL the town advertises in kind:10032 so clients learn
       # where to route packets for g.townhouse.town (.anyone URL or direct).
       # Set by the node-env overlay / boot rebinder; entrypoint-town maps it to

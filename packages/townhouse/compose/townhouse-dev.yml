@@ -228,6 +228,8 @@ services:
       CONNECTOR_URL: ws://townhouse-dev-connector:3000
       CONNECTOR_ADMIN_URL: http://townhouse-dev-connector:9401
       FEE_PER_EVENT: '0'
+      # NIP-40 TTL (seconds) for the kind:10032 announcement + heartbeat (#261).
+      TOON_ANNOUNCEMENT_TTL_SECONDS: ${TOON_ANNOUNCEMENT_TTL_SECONDS:-3600}
       # Interpolated from TOWN_01_NOSTR_PUBKEY exported by townhouse-dev-infra.sh (issue #81).
       NODE_NOSTR_PUBKEY: '${TOWN_01_NOSTR_PUBKEY:-}'
       NODE_EVM_ADDRESS: ''
@@ -266,6 +268,8 @@ services:
       CONNECTOR_URL: ws://townhouse-dev-connector:3000
       CONNECTOR_ADMIN_URL: http://townhouse-dev-connector:9401
       FEE_PER_EVENT: '0'
+      # NIP-40 TTL (seconds) for the kind:10032 announcement + heartbeat (#261).
+      TOON_ANNOUNCEMENT_TTL_SECONDS: ${TOON_ANNOUNCEMENT_TTL_SECONDS:-3600}
       # Interpolated from TOWN_02_NOSTR_PUBKEY exported by townhouse-dev-infra.sh (issue #81).
       NODE_NOSTR_PUBKEY: '${TOWN_02_NOSTR_PUBKEY:-}'
       NODE_EVM_ADDRESS: ''
