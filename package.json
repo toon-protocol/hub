@@ -1,5 +1,5 @@
 {
-  "name": "toon-protocol",
+  "name": "hub",
   "version": "0.3.0",
   "private": true,
   "description": "ILP-gated Nostr relay. Pay to write, free to read.",
@@ -14,7 +14,10 @@
     "lint": "eslint .",
     "format": "prettier --write \"packages/*/src/**/*.ts\"",
     "format:check": "prettier --check \"packages/*/src/**/*.ts\"",
-    "demo:ilp-gated-relay": "tsx packages/examples/src/ilp-gated-relay-demo/index.ts"
+    "demo:ilp-gated-relay": "tsx packages/examples/src/ilp-gated-relay-demo/index.ts",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "changeset publish"
   },
   "keywords": [
     "nostr",
@@ -45,8 +48,7 @@
       "serve-static": ">=1.16.0",
       "cookie": ">=0.7.0",
       "path-to-regexp": ">=0.1.10",
-      "express": ">=4.21.0",
-      "@toon-protocol/mina-zkapp": "workspace:*"
+      "express": ">=4.21.0"
     },
     "auditConfig": {
       "ignoreCves": [
@@ -56,9 +58,6 @@
         "GHSA-49q7-c7j4-3p7m",
         "GHSA-c2qf-rxjj-qqgw"
       ]
-    },
-    "patchedDependencies": {
-      "@toon-protocol/shared@1.2.0": "patches/@toon-protocol__shared@1.2.0.patch"
     }
   },
   "devDependencies": {
@@ -84,7 +83,8 @@
     "typescript-eslint": "^8.0.0",
     "vitest": "^1.0.0",
     "ws": "^8.19.0",
-    "zod": "^3.25.0"
+    "zod": "^3.25.0",
+    "@changesets/cli": "^2.27.9"
   },
   "dependencies": {
     "@ardrive/turbo-sdk": "^1.41.0",

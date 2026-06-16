@@ -69,11 +69,11 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "@toon-protocol/client": "workspace:^",
-    "@toon-protocol/core": "workspace:^",
-    "@toon-protocol/mill": "workspace:^",
-    "@toon-protocol/relay": "workspace:^",
-    "@toon-protocol/sdk": "workspace:^",
+    "@toon-protocol/client": "^0.9.1",
+    "@toon-protocol/core": "^1.4.1",
+    "@toon-protocol/mill": "^0.1.0",
+    "@toon-protocol/relay": "^1.3.1",
+    "@toon-protocol/sdk": "^0.5.0",
     "@types/dockerode": "^3.3.0",
     "@types/node": "^20.0.0",
     "@types/react": "^18.3.3",
