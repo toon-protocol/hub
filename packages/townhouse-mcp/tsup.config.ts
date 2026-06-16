@@ -11,7 +11,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   outDir: 'dist',
-  // We import ONLY types from @toon-protocol/townhouse (erased at build), so no
+  // We import ONLY types from @toon-protocol/hub (erased at build), so no
   // workspace runtime deps to inline. The single runtime dep
   // (@modelcontextprotocol/sdk) is declared and stays external.
 });

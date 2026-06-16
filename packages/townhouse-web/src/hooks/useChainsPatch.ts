@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ChainProviderEntry } from '@toon-protocol/townhouse';
+import type { ChainProviderEntry } from '@toon-protocol/hub';
 
 export interface UseChainsPatchResult {
   patch: (

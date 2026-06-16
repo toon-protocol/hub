@@ -19,10 +19,10 @@ from a Townhouse node.
 | Manifest | `.claude-plugin/plugin.json` | Plugin name/version/metadata |
 | Marketplace entry | `<repo-root>/.claude-plugin/marketplace.json` | Lets the `toon-protocol/town` repo act as a marketplace (lists this plugin with `source: ./townhouse-plugin`). A GitHub-repo marketplace is discovered at the **repo root**, not in the plugin subdir. |
 | Skill | `skills/townhouse-operator/SKILL.md` (+ `references/`, `evals/`) | Teaches lifecycle / nodes / fees / chains / earnings / telemetry |
-| MCP server | `.mcp.json` | Declares the `townhouse` MCP server, run via `npx @toon-protocol/townhouse-mcp` |
+| MCP server | `.mcp.json` | Declares the `townhouse` MCP server, run via `npx @toon-protocol/hub-mcp` |
 
 The MCP server is published separately to npm as
-[`@toon-protocol/townhouse-mcp`](https://www.npmjs.com/package/@toon-protocol/townhouse-mcp)
+[`@toon-protocol/hub-mcp`](https://www.npmjs.com/package/@toon-protocol/hub-mcp)
 (bin `townhouse-mcp`); this plugin just declares it, so the plugin stays tiny and
 the heavy code is versioned on npm. There is **no second daemon** — the apex
 (connector + Fastify API, started by `townhouse up`) is the long-lived layer.
@@ -45,13 +45,13 @@ claude --plugin-dir /path/to/town/townhouse-plugin
 ## Prerequisites
 
 - Docker & Docker Compose (the apex + nodes run as containers).
-- Node ≥ 20 (`npx` fetches `@toon-protocol/townhouse-mcp` on first run) and the
+- Node ≥ 20 (`npx` fetches `@toon-protocol/hub-mcp` on first run) and the
   `townhouse` CLI on PATH (or set `TOWNHOUSE_BIN`).
 - An operator wallet seed via `TOWNHOUSE_MNEMONIC` (no password). On a cold start
   `townhouse_init` generates and returns one for you to custody.
 
 Configure the MCP server via env (see the
-[`@toon-protocol/townhouse-mcp` README](https://www.npmjs.com/package/@toon-protocol/townhouse-mcp)
+[`@toon-protocol/hub-mcp` README](https://www.npmjs.com/package/@toon-protocol/hub-mcp)
 for the full contract):
 
 | Var | Default | Role |

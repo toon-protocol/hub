@@ -3,8 +3,8 @@ import { isAddress } from 'viem';
 import { Button } from '@/components/primitives/Button';
 import { Input } from '@/components/primitives/Input';
 import { useWalletWithdraw } from '@/hooks/useWalletWithdraw';
-import type { WalletBalanceEntry, WithdrawRequest, TransactionReceiptPayload } from '@toon-protocol/townhouse';
-import type { NodeType } from '@toon-protocol/townhouse';
+import type { WalletBalanceEntry, WithdrawRequest, TransactionReceiptPayload } from '@toon-protocol/hub';
+import type { NodeType } from '@toon-protocol/hub';
 
 export interface WithdrawModalProps {
   nodeType: NodeType;

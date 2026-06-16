@@ -1,7 +1,7 @@
 /**
  * Property-based tests for snapshot-reader via fast-check (Story 47.3).
  *
- * This is the FIRST fast-check usage in the @toon-protocol/townhouse package.
+ * This is the FIRST fast-check usage in the @toon-protocol/hub package.
  * Scope: correctness invariants for arbitrary claim sequences across DST
  * transitions, year boundaries, month boundaries, corruption, and clock skew.
  *

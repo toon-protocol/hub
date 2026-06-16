@@ -26,7 +26,7 @@ import type {
   NostrEventPayload,
   BandwidthPayload,
   TimeseriesBucket,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 import { colors } from '@/theme/tokens';
 
 // ── Constants ─────────────────────────────────────────────────────────────────

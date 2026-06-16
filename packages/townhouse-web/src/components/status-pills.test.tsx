@@ -6,7 +6,7 @@ import {
   resolveTransportPill,
   PILL_ORDER,
 } from './status-pills';
-import type { TransportStatusPayload } from '@toon-protocol/townhouse';
+import type { TransportStatusPayload } from '@toon-protocol/hub';
 
 const TRANSPORT_DIRECT_OK: {
   status: TransportStatusPayload;

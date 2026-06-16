@@ -13,13 +13,13 @@ import type { StreamConnectionStatus } from '@/hooks/useNodeStatusStream';
 import { mapToStatusDot, formatUptime } from '@/lib/node-status';
 import { useWizardState } from '@/hooks/useWizardState';
 import { useTransportStatus } from '@/hooks/useTransportStatus';
-import type { TransportStatusPayload } from '@toon-protocol/townhouse';
+import type { TransportStatusPayload } from '@toon-protocol/hub';
 import type { TransportStatusKind } from '@/hooks/useTransportStatus';
 import type {
   NodeInfo,
   NodeType,
   MetricsPayload,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 
 const NODE_LABELS: Record<NodeType, string> = {
   town: 'town',

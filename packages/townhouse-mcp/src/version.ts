@@ -3,7 +3,7 @@
  * `townhouse` CLI is versioned over the wire, so this MCP package resolves skew
  * two ways:
  *
- *   1. A declarative pin — `peerDependencies["@toon-protocol/townhouse"]` in
+ *   1. A declarative pin — `peerDependencies["@toon-protocol/hub"]` in
  *      package.json — that npm/pnpm warn on at install time.
  *   2. A runtime probe — the `townhouse_version` tool shells `townhouse version`
  *      and compares the detected CLI version against that pinned range, so an
@@ -19,7 +19,7 @@ import { createRequire } from 'node:module';
 /** This package's own version + the townhouse range it expects. */
 export interface SelfPackage {
   version: string;
-  /** The `peerDependencies["@toon-protocol/townhouse"]` range, e.g. `>=0.26.0`. */
+  /** The `peerDependencies["@toon-protocol/hub"]` range, e.g. `>=0.26.0`. */
   peerRange: string;
 }
 
@@ -51,7 +51,7 @@ export function readSelfPackage(
     };
     return {
       version: pkg.version ?? '0.0.0',
-      peerRange: pkg.peerDependencies?.['@toon-protocol/townhouse'] ?? '*',
+      peerRange: pkg.peerDependencies?.['@toon-protocol/hub'] ?? '*',
     };
   } catch {
     return { version: '0.0.0', peerRange: '*' };
@@ -129,6 +129,6 @@ export async function computeVersionInfo(
     note: satisfies
       ? `townhouse CLI ${cli} satisfies ${self.peerRange}.`
       : `townhouse CLI ${cli} is older than the pinned floor ${self.peerRange} ` +
-        '— tools may misbehave; upgrade @toon-protocol/townhouse.',
+        '— tools may misbehave; upgrade @toon-protocol/hub.',
   };
 }

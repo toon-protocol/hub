@@ -10,11 +10,11 @@ import { WizardStepLaunch } from '@/components/wizard/WizardStepLaunch';
 import { WizardStepLaunching } from '@/components/wizard/WizardStepLaunching';
 import { useWizardSubmit } from '@/hooks/useWizardSubmit';
 import type { WizardError } from '@/hooks/useWizardSubmit';
-import type { NodeType } from '@toon-protocol/townhouse';
+import type { NodeType } from '@toon-protocol/hub';
 import type {
   WizardInitRequest,
   ChainProviderEntry,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 
 type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 'launching' | 'cancelled';
 

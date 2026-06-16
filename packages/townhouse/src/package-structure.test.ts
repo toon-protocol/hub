@@ -70,7 +70,7 @@ describe('package.json structure', () => {
   it('has NO @toon-protocol/* runtime dependencies (they ship as Docker images / are inlined)', () => {
     // town/mill/dvm are Docker-image node types, not npm packages; sdk/core are
     // inlined where needed. A runtime dep on any of them would (a) bloat the
-    // install and (b) 404 at `npx @toon-protocol/townhouse` if that package was
+    // install and (b) 404 at `npx @toon-protocol/hub` if that package was
     // never published to npm — exactly the v0.1.0 mill regression this guards.
     const deps = pkg['dependencies'] as Record<string, string> | undefined;
     const toonRuntimeDeps = Object.keys(deps ?? {}).filter((name) =>

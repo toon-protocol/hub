@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 import { axe } from '../test-setup';
 import { PullProgressList } from './PullProgressList';
-import type { WizardProgressMessage } from '@toon-protocol/townhouse';
+import type { WizardProgressMessage } from '@toon-protocol/hub';
 
 describe('PullProgressList', () => {
   it('renders empty state when messages are empty', () => {

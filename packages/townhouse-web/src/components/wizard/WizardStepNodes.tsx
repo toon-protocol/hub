@@ -1,6 +1,6 @@
 import { TypeChip } from '@/components/primitives/TypeChip';
 import { Button } from '@/components/primitives/Button';
-import type { NodeType } from '@toon-protocol/townhouse';
+import type { NodeType } from '@toon-protocol/hub';
 
 const NODE_INFO: Record<NodeType, { description: string; bestFor: string }> = {
   town: {

@@ -11,7 +11,7 @@
  * Skipped entirely when DOCKER_AVAILABLE is set to anything other than '1'.
  *
  * The test reads from packages/townhouse/dist/compose/townhouse-hs.yml —
- * run `pnpm --filter @toon-protocol/townhouse build` and then place
+ * run `pnpm --filter @toon-protocol/hub build` and then place
  * dist/image-manifest.json (from CI artifact or scripts/build-image-manifest.mjs)
  * before running this test to get a fully-substituted template.
  */

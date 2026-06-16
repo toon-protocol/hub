@@ -33,7 +33,7 @@
  *   SKIP_DOCKER unset or falsy          — sandbox environments skip automatically
  *   dist/image-manifest.json present    — from latest publish CI run:
  *       gh run download <id> --name image-manifest -D packages/townhouse/dist/
- *   pnpm --filter @toon-protocol/townhouse build  — dist/cli.js must exist
+ *   pnpm --filter @toon-protocol/hub build  — dist/cli.js must exist
  *   pnpm --filter @toon-protocol/client build     — workspace dep for ToonClient
  *   bash scripts/townhouse-test-infra.sh up       — warms Docker image cache
  *   ports 9401 (connector admin) + 28090 (townhouse-api) free
@@ -650,7 +650,7 @@ describe.skipIf(!shouldRun)(
       if (!existsSync(expectedCliBin)) {
         throw new Error(
           `dist/cli.js not found at ${expectedCliBin}. ` +
-            `Run \`pnpm --filter @toon-protocol/townhouse build\` before this test.`
+            `Run \`pnpm --filter @toon-protocol/hub build\` before this test.`
         );
       }
 

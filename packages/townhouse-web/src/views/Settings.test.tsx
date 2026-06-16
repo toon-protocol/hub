@@ -3,7 +3,7 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { SettingsView } from './Settings';
-import type { TransportStatusPayload } from '@toon-protocol/townhouse';
+import type { TransportStatusPayload } from '@toon-protocol/hub';
 
 const DIRECT_STATUS: TransportStatusPayload = {
   mode: 'direct',

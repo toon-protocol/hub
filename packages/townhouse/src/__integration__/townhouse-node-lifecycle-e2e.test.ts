@@ -17,7 +17,7 @@
  *   SKIP_DOCKER unset or falsy          — sandbox environments set this to skip
  *   dist/image-manifest.json present    — downloaded from the latest publish CI run:
  *       gh run download <id> --name image-manifest -D packages/townhouse/dist/
- *   pnpm --filter @toon-protocol/townhouse build  — dist/cli.js must exist
+ *   pnpm --filter @toon-protocol/hub build  — dist/cli.js must exist
  *
  * Wall-clock budget: ~8–12 min (cold image pull on first `hs up`, then ~30–60 s
  * per add, ~5–10 s per other step).

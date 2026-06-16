@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useWizardSubmit } from './useWizardSubmit';
-import type { WizardInitRequest } from '@toon-protocol/townhouse';
+import type { WizardInitRequest } from '@toon-protocol/hub';
 
 const VALID_REQ: WizardInitRequest = {
   password: 'test-pw',

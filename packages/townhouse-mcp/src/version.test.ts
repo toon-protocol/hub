@@ -94,7 +94,7 @@ describe('readSelfPackage', () => {
       expect(id).toBe('../package.json');
       return {
         version: '9.9.9',
-        peerDependencies: { '@toon-protocol/townhouse': '>=1.2.3' },
+        peerDependencies: { '@toon-protocol/hub': '>=1.2.3' },
       };
     }) as unknown as NodeRequire;
     expect(readSelfPackage(fake)).toEqual({

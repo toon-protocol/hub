@@ -40,7 +40,7 @@ import {
   DEFAULT_ATOR_PROXY,
   DockerOrchestrator,
   createApiServer,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 
 import { readFileSync, existsSync } from 'node:fs';
 

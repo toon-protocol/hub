@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NostrEventPayload } from '@toon-protocol/townhouse';
+import type { NostrEventPayload } from '@toon-protocol/hub';
 
 export type RelayStreamStatus = 'connecting' | 'open' | 'degraded' | 'closed';
 

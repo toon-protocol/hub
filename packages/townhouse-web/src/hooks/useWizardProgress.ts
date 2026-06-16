@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { WizardProgressMessage } from '@toon-protocol/townhouse';
+import type { WizardProgressMessage } from '@toon-protocol/hub';
 
 export type WizardProgressStatus = 'connecting' | 'open' | 'closed';
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { useTransportStatus } from './useTransportStatus';
-import type { TransportStatusPayload } from '@toon-protocol/townhouse';
+import type { TransportStatusPayload } from '@toon-protocol/hub';
 
 const DIRECT_STATUS: TransportStatusPayload = {
   mode: 'direct',

@@ -12,7 +12,7 @@ import type {
   AggregatedEarnings,
   TransportStatusPayload,
   TransportPatchRequest,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 
 /** Error thrown when the apex API returns a non-2xx response. */
 export class ApiError extends Error {

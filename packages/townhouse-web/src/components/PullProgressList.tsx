@@ -1,6 +1,6 @@
 import { StatusDot } from '@/components/primitives/StatusDot';
 import type { StatusDotProps } from '@/components/primitives/StatusDot';
-import type { WizardProgressMessage } from '@toon-protocol/townhouse';
+import type { WizardProgressMessage } from '@toon-protocol/hub';
 
 export interface PullProgressListProps {
   messages: WizardProgressMessage[];

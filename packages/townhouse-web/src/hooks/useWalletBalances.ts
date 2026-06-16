@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   WalletBalanceEntry,
   WalletBalancesPayload,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 
 export type WalletBalancesStatus = 'loading' | 'ready' | 'error';
 

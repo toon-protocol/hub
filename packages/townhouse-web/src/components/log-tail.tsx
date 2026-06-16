@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type { LogEvent, LogService, LogLevel } from '@toon-protocol/townhouse';
+import type { LogEvent, LogService, LogLevel } from '@toon-protocol/hub';
 import {
   LogFilterChips,
   LOG_SERVICES,

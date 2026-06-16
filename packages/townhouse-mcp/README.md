@@ -1,4 +1,4 @@
-# @toon-protocol/townhouse-mcp
+# @toon-protocol/hub-mcp
 
 Let a Claude agent — **Claude Desktop or Claude Code** — act as a full **Townhouse operator**: `init`/`up`, provision town/mill/dvm nodes, tune fees, manage settlement chains and Arweave credits, inspect earnings/balances/logs, and withdraw.
 
@@ -8,7 +8,7 @@ Unlike [`@toon-protocol/client-mcp`](../client-mcp) there is **no second daemon*
 
 |                             | Name                           |
 | --------------------------- | ------------------------------ |
-| npm package                 | `@toon-protocol/townhouse-mcp` |
+| npm package                 | `@toon-protocol/hub-mcp` |
 | MCP server name (handshake) | `townhouse-operator`           |
 | MCP server bin              | `townhouse-mcp`                |
 
@@ -17,7 +17,7 @@ Unlike [`@toon-protocol/client-mcp`](../client-mcp) there is **no second daemon*
 ## Install
 
 ```bash
-pnpm add -g @toon-protocol/townhouse-mcp   # or use npx / pnpm dlx
+pnpm add -g @toon-protocol/hub-mcp   # or use npx / pnpm dlx
 ```
 
 Requires the `townhouse` CLI on `PATH` (or set `TOWNHOUSE_BIN`) and Docker.
@@ -57,7 +57,7 @@ Add to `claude_desktop_config.json`, then restart:
 | `TOWNHOUSE_CONFIG_DIR`     | `~/.townhouse`          | Config + wallet + boot log (`up.log`).                                                                        |
 | `TOWNHOUSE_AUTOUP`         | `1`                     | Auto-`up` the apex on demand; tools report "booting — retry" while it boots. `0` to disable.                  |
 | `TOWNHOUSE_TRANSPORT_MODE` | `direct`                | Default boot transport (`direct` \| `hs`).                                                                    |
-| `TOWNHOUSE_BIN`            | `townhouse`             | Path to the CLI. **Required for CLI-backed tools** (see below) when `townhouse` isn't on `PATH` — e.g. `node_modules/@toon-protocol/townhouse/dist/cli.js`. |
+| `TOWNHOUSE_BIN`            | `townhouse`             | Path to the CLI. **Required for CLI-backed tools** (see below) when `townhouse` isn't on `PATH` — e.g. `node_modules/@toon-protocol/hub/dist/cli.js`. |
 
 ## Tools
 
@@ -87,9 +87,9 @@ Code-complete; pending end-to-end live validation against a real apex (see issue
 
 - **P1/P1b** — `TOWNHOUSE_MNEMONIC` direct-load path (CLI + `townhouse-api` container), no encrypted-wallet password.
 - **P2/P2b** — `--json` / NDJSON across every command this server consumes (`init` / `up` / `hs up` / `hs enable` / `status` / `down` / `wallet seed` / `credits`).
-- Streams adapter (WS `/metrics` + SSE `/api/logs/stream`), MCP resources, and a `townhouse_version` skew probe (pinned via `peerDependencies` on `@toon-protocol/townhouse`).
+- Streams adapter (WS `/metrics` + SSE `/api/logs/stream`), MCP resources, and a `townhouse_version` skew probe (pinned via `peerDependencies` on `@toon-protocol/hub`).
 
-This package pins `@toon-protocol/townhouse` as an optional `peerDependency`; `townhouse_version` surfaces any skew at runtime.
+This package pins `@toon-protocol/hub` as an optional `peerDependency`; `townhouse_version` surfaces any skew at runtime.
 
 The companion **`townhouse-operator` skill** (mirroring client-mcp's `toon-client`) ships in `townhouse-plugin/` (and `.claude/skills/townhouse-operator/`), bundling this MCP server with an operator skill + evals. Remaining: end-to-end live validation against a real apex (issue #232).
 
@@ -98,7 +98,7 @@ See `docs/townhouse-mcp-design.md` and `docs/townhouse-mcp-skeleton.md`.
 ## Develop
 
 ```bash
-pnpm --filter @toon-protocol/townhouse-mcp build
-pnpm --filter @toon-protocol/townhouse-mcp test
-RUN_LIVE_OPERATOR_E2E=1 pnpm --filter @toon-protocol/townhouse-mcp test:integration
+pnpm --filter @toon-protocol/hub-mcp build
+pnpm --filter @toon-protocol/hub-mcp test
+RUN_LIVE_OPERATOR_E2E=1 pnpm --filter @toon-protocol/hub-mcp test:integration
 ```

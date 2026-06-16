@@ -1,4 +1,4 @@
-# Contributing to `@toon-protocol/townhouse` — Dev Stack & Internals
+# Contributing to `@toon-protocol/hub` — Dev Stack & Internals
 
 > This is the **contributor/maintainer** reference: the local dev stack, the E2E
 > harnesses, the Compose-template internals, the orchestrator profiles, and the
@@ -150,7 +150,7 @@ See "Local Dev Loop" above.
 
 ```bash
 ./scripts/townhouse-dev-infra.sh up
-pnpm --filter @toon-protocol/townhouse test:integration -- dev-stack-smoke
+pnpm --filter @toon-protocol/hub test:integration -- dev-stack-smoke
 ```
 
 ### 2. Real-CLI E2E (operator-facing lifecycle — Story 21.16)
@@ -162,10 +162,10 @@ Uses `townhouse-test-infra.sh` (image pre-warm only; tests run the real CLI).
 bash scripts/townhouse-test-infra.sh up
 
 # Run the integration suite (CLI lifecycle + config propagation)
-RUN_DOCKER_INTEGRATION=1 pnpm --filter @toon-protocol/townhouse test:integration
+RUN_DOCKER_INTEGRATION=1 pnpm --filter @toon-protocol/hub test:integration
 
 # Or: combined script (up + test + down)
-pnpm --filter @toon-protocol/townhouse test:e2e:docker
+pnpm --filter @toon-protocol/hub test:e2e:docker
 ```
 
 **Key differences from the dev stack:**
@@ -184,15 +184,15 @@ pnpm --filter @toon-protocol/townhouse test:e2e:docker
 
 ```bash
 # Mock-driven specs (transport flip, config change) — no real stack needed
-pnpm --filter @toon-protocol/townhouse-web e2e
+pnpm --filter @toon-protocol/hub-web e2e
 
 # Real-stack lifecycle spec — requires townhouse up to be running
-TOWNHOUSE_E2E_REAL_STACK=1 pnpm --filter @toon-protocol/townhouse-web e2e:real
+TOWNHOUSE_E2E_REAL_STACK=1 pnpm --filter @toon-protocol/hub-web e2e:real
 ```
 
 ## Compose Templates (npm tarball, Story 45.2)
 
-The published `@toon-protocol/townhouse` package ships three Docker Compose templates:
+The published `@toon-protocol/hub` package ships three Docker Compose templates:
 
 | Profile  | File in tarball                      | Purpose                                                                          |
 | -------- | ------------------------------------ | -------------------------------------------------------------------------------- |
@@ -223,7 +223,7 @@ so it can't be confused with an HS stack, but it shares the canonical host ports
 import {
   loadComposeTemplate,
   materializeComposeTemplate,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 
 // Read the rendered YAML for a profile (read-only, returns a string).
 const yaml = loadComposeTemplate('hs');
@@ -312,7 +312,7 @@ Example (HS-mode caller, as Story 45.4's `townhouse hs up` will use):
 import {
   materializeComposeTemplate,
   DockerOrchestrator,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 import Docker from 'dockerode';
 
 const { composePath } = materializeComposeTemplate('hs');
@@ -463,7 +463,7 @@ Akash devnet; harmless against testnets/mainnet (transactions just fail).
 NOT yet handle Solana. Two paths until that gap closes:
 
 1. **Dashboard panel**: the townhouse host API (`pnpm --filter
-@toon-protocol/townhouse-web dev` + the host-side townhouse API)
+@toon-protocol/hub-web dev` + the host-side townhouse API)
    exposes a Faucet panel that does both EVM and Solana drips through
    `POST /api/faucet`. Best for live operator use.
 2. **Script**: `scripts/faucet-sol-usdc.mjs <recipient>` from the host —
@@ -501,7 +501,7 @@ hidden service.
 
 ## Package overview (public API)
 
-The `@toon-protocol/townhouse` package exports:
+The `@toon-protocol/hub` package exports:
 
 - **DockerOrchestrator** — manages container lifecycle for Town/Mill/DVM nodes
 - **ConnectorConfigGenerator** — generates connector peer config from node identities

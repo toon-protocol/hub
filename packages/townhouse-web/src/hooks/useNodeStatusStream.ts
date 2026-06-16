@@ -3,7 +3,7 @@ import type {
   NodeType,
   WsMessage,
   WsNodeStateMessage,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 
 export type StreamConnectionStatus =
   | 'connecting'

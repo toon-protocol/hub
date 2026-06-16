@@ -135,7 +135,7 @@ export function loadComposeTemplate(
   if (!existsSync(composePath)) {
     throw new ComposeLoaderError(
       `compose template not found: ${composePath}. ` +
-        `Did you run 'pnpm --filter @toon-protocol/townhouse build' first?`
+        `Did you run 'pnpm --filter @toon-protocol/hub build' first?`
     );
   }
   return readFileSync(composePath, 'utf-8');
@@ -167,7 +167,7 @@ export function materializeComposeTemplate(
     throw new ComposeLoaderError(
       `image-manifest.json not found at ${manifestSrc}. ` +
         `${profile === 'hs' ? 'HS' : 'Direct'} mode requires a digest-pinned image manifest. ` +
-        `Reinstall @toon-protocol/townhouse from npm to restore the manifest.`
+        `Reinstall @toon-protocol/hub from npm to restore the manifest.`
     );
   }
   // loadComposeTemplate also throws ENOENT if the source is missing — surface

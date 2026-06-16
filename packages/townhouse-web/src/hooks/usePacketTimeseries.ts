@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { TimeseriesBucket } from '@toon-protocol/townhouse';
+import type { TimeseriesBucket } from '@toon-protocol/hub';
 
 export interface UsePacketTimeseriesResult {
   buckets: TimeseriesBucket[];

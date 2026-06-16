@@ -19,7 +19,7 @@
  *
  * Gating:
  *   RUN_LOCAL_HS_E2E=1
- *   pnpm --filter @toon-protocol/townhouse build
+ *   pnpm --filter @toon-protocol/hub build
  *
  * Tear down with:
  *   bash scripts/townhouse-e2e-local-hs.sh down-v
@@ -82,7 +82,7 @@ if (!shouldRun) {
     '\n⚠️  Skipping local-Docker HS paid-earnings smoke.\n' +
       '   Bring the stack up: bash scripts/townhouse-e2e-local-hs.sh up\n' +
       '   Then run: RUN_LOCAL_HS_E2E=1 NODE_TLS_REJECT_UNAUTHORIZED=0 \\\n' +
-      '              pnpm --filter @toon-protocol/townhouse test:integration -- \\\n' +
+      '              pnpm --filter @toon-protocol/hub test:integration -- \\\n' +
       '              local-docker-hs-paid-earnings-smoke\n'
   );
 }

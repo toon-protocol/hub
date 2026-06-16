@@ -15,7 +15,7 @@
  * is "unavailable" and the caller degrades to the CLI. Both are dependency-free
  * and injectable for unit tests.
  */
-import type { MetricsPayload, WsMessage } from '@toon-protocol/townhouse';
+import type { MetricsPayload, WsMessage } from '@toon-protocol/hub';
 
 /**
  * One structured log line off the SSE stream. Mirrors the apex's internal

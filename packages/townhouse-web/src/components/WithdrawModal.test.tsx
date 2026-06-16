@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { axe } from '../test-setup';
 import { WithdrawModal } from './WithdrawModal';
-import type { WalletBalanceEntry } from '@toon-protocol/townhouse';
+import type { WalletBalanceEntry } from '@toon-protocol/hub';
 
 const MOCK_BALANCES: WalletBalanceEntry[] = [
   { nodeType: 'town', family: 'evm', token: 'ETH', address: '0x1111', balance: '1000000000000000000000', scale: 18, available: true },

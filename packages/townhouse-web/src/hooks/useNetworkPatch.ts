@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NetworkMode } from '@toon-protocol/townhouse';
+import type { NetworkMode } from '@toon-protocol/hub';
 import type { NetworkEndpoints } from './useNetwork';
 
 export interface UseNetworkPatchResult {

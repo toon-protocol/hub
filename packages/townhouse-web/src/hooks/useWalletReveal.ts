@@ -1,4 +1,4 @@
-import type { RevealResponse } from '@toon-protocol/townhouse';
+import type { RevealResponse } from '@toon-protocol/hub';
 
 /** Single-shot POST /api/wallet/reveal — never caches the mnemonic. */
 export function useWalletReveal(options: { url?: string } = {}): {

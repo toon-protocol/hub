@@ -5,7 +5,7 @@
  * per NFR6. Local dev runs it via:
  *
  *   RUN_AKASH_SMOKE=1 AKASH_FAUCET_URL=https://<lease> \
- *     pnpm --filter @toon-protocol/townhouse test:integration \
+ *     pnpm --filter @toon-protocol/hub test:integration \
  *     src/__integration__/akash-faucet-smoke.test.ts
  *
  * Mirrors the gate-pattern discipline from 49.1 (SKIP_DOCKER, shouldRun,

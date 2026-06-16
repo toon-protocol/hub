@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Home } from './Home';
-import type { NodeInfo, NodeDetail } from '@toon-protocol/townhouse';
+import type { NodeInfo, NodeDetail } from '@toon-protocol/hub';
 
 // Storybook is the only sanctioned consumer of fixture data.
 // `IS_STORYBOOK` is set in .storybook/main.ts → main.tsx guard.

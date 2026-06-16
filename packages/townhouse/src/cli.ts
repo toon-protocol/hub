@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * CLI entrypoint for `@toon-protocol/townhouse` (Story 21.1).
+ * CLI entrypoint for `@toon-protocol/hub` (Story 21.1).
  *
  * Subcommands: init, up, down, status, --help
  *
@@ -292,8 +292,8 @@ const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, 'config.yaml');
 function printInitNextStep(dir: string): void {
   const isDefaultDir = dir === resolve(DEFAULT_CONFIG_DIR);
   const cmd = isDefaultDir
-    ? 'npx @toon-protocol/townhouse hs up'
-    : `npx @toon-protocol/townhouse hs up -c ${join(dir, 'config.yaml')}`;
+    ? 'npx @toon-protocol/hub hs up'
+    : `npx @toon-protocol/hub hs up -c ${join(dir, 'config.yaml')}`;
   console.log('');
   console.log('Next — start your node:');
   console.log(`  ${cmd}`);
@@ -2169,7 +2169,7 @@ async function attachDashboard(hostname: string): Promise<void> {
         'issue, not a node issue. Your node keeps running.'
     );
     console.error(
-      'Stop it anytime with:  npx @toon-protocol/townhouse hs down'
+      'Stop it anytime with:  npx @toon-protocol/hub hs down'
     );
     // Leave process.exitCode at success — the node is live.
   }

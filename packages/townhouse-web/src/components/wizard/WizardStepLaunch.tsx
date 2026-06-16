@@ -1,6 +1,6 @@
 import { TypeChip } from '@/components/primitives/TypeChip';
 import { Button } from '@/components/primitives/Button';
-import type { NodeType } from '@toon-protocol/townhouse';
+import type { NodeType } from '@toon-protocol/hub';
 import type { WizardError } from '@/hooks/useWizardSubmit';
 
 const ERROR_MESSAGES: Record<string, string> = {

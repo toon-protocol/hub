@@ -1,4 +1,4 @@
-import type { NetworkMode } from '@toon-protocol/townhouse';
+import type { NetworkMode } from '@toon-protocol/hub';
 import type { NetworkFamilyStatus, NetworkNodeEnv } from '@/hooks/useNetwork';
 
 export interface NetworkSelectorProps {

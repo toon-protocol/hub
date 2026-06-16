@@ -13,7 +13,7 @@ import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom';
 import { TownView } from './Town';
 import { axe } from '../test-setup';
-import type { NodeInfo } from '@toon-protocol/townhouse';
+import type { NodeInfo } from '@toon-protocol/hub';
 
 // ── MockWebSocket ─────────────────────────────────────────────────────────────
 

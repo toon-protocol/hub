@@ -1,6 +1,8 @@
 # hub
 
-The TOON Protocol **operator product** (the deployment operators run): `@toon-protocol/townhouse` (the apex orchestrator — connector with nodeId `g.townhouse` + child relay/swap/store containers, Docker orchestration, wallet manager, Fastify control API), `townhouse-web` (dashboard), and `townhouse-mcp` (agent control). Ships the `townhouse-plugin/`. The repo is named `hub`; the npm packages keep the `townhouse` names pending the rename (which needs a deprecate-and-redirect since `@toon-protocol/townhouse` is published).
+The TOON Protocol **operator product** (the deployment operators run): `@toon-protocol/hub` (the apex orchestrator — connector with nodeId `g.townhouse` + child relay/swap/store containers, Docker orchestration, wallet manager, Fastify control API), `@toon-protocol/hub-web` (dashboard), and `@toon-protocol/hub-mcp` (agent control). Ships the `townhouse-plugin/`.
+
+> **Renamed from `townhouse`.** The npm packages were `@toon-protocol/{townhouse,townhouse-mcp,townhouse-web}` → now `@toon-protocol/{hub,hub-mcp,hub-web}`; CLIs keep deprecated `townhouse`/`townhouse-mcp` bin aliases alongside `hub`/`hub-mcp`. Follow-up at publish time: `npm deprecate @toon-protocol/townhouse "renamed to @toon-protocol/hub"`. **The `g.townhouse` on-wire nodeId and `TOWNHOUSE_*` env vars are deliberately UNCHANGED** — the rename touched only the `@toon-protocol/*` package identifiers, never the wire protocol or operator config.
 
 Part of the **TOON Protocol** — pay-to-write Nostr over Interledger (ILP), split into per-team repos. The hub is the apex: clients pay it over BTP; it validates the claim, takes a fee, and free-forwards to its child nodes.
 

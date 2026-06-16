@@ -1,5 +1,5 @@
 /**
- * `@toon-protocol/townhouse-mcp` — library surface.
+ * `@toon-protocol/hub-mcp` — library surface.
  *
  * The package ships one bin (`townhouse-mcp`, the stdio server); this entry
  * exposes the reusable pieces for embedding / testing: config resolution, the

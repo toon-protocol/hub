@@ -19,7 +19,7 @@ import type {
   AggregatedEarnings,
   NodeEarnings,
   PerAsset,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 import { MetricBlock } from './primitives/MetricBlock';
 
 const POLL_INTERVAL_MS = 5_000;

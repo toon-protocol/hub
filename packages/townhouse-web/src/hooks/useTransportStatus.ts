@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { TransportStatusPayload } from '@toon-protocol/townhouse';
+import type { TransportStatusPayload } from '@toon-protocol/hub';
 
 export type TransportStatusKind = 'loading' | 'ready' | 'error';
 

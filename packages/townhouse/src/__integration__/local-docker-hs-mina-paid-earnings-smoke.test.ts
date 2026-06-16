@@ -55,7 +55,7 @@
  * Live-loop gating (FULFILL milestone; on-chain settle is #88-gated):
  *   E2E_MINA=1 RUN_LOCAL_HS_E2E=1 bash scripts/townhouse-e2e-local-hs.sh up --local
  *   RUN_LOCAL_HS_E2E=1 RUN_MINA_LOOP=1 NODE_TLS_REJECT_UNAUTHORIZED=0 \
- *     pnpm --filter @toon-protocol/townhouse test:integration -- \
+ *     pnpm --filter @toon-protocol/hub test:integration -- \
  *     local-docker-hs-mina-paid-earnings-smoke
  */
 

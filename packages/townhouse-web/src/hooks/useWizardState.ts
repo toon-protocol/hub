@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { WizardStatePayload } from '@toon-protocol/townhouse';
+import type { WizardStatePayload } from '@toon-protocol/hub';
 
 export type WizardStateStatus = 'loading' | 'ready' | 'error';
 

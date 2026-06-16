@@ -675,7 +675,7 @@ describe.skipIf(!shouldRun)(
       );
       if (!existsSync(cliBin))
         throw new Error(
-          `dist/cli.js not found. Run: pnpm --filter @toon-protocol/townhouse build`
+          `dist/cli.js not found. Run: pnpm --filter @toon-protocol/hub build`
         );
 
       // ── Port pre-flight + B keypair ─────────────────────────────────────────

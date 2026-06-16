@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { NodeKeyInfo } from '@toon-protocol/townhouse';
+import type { NodeKeyInfo } from '@toon-protocol/hub';
 
 export type UseWalletKeysStatus = 'loading' | 'ready' | 'error';
 

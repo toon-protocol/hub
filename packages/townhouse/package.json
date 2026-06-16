@@ -1,5 +1,5 @@
 {
-  "name": "@toon-protocol/townhouse",
+  "name": "@toon-protocol/hub",
   "version": "0.34.3",
   "description": "TOON Townhouse — host-native orchestrator + dashboard for Docker-containerized TOON nodes",
   "type": "module",
@@ -7,6 +7,7 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "hub": "./dist/cli.js",
     "townhouse": "./dist/cli.js"
   },
   "exports": {
@@ -71,7 +72,7 @@
   "devDependencies": {
     "@toon-protocol/client": "^0.9.1",
     "@toon-protocol/core": "^1.4.1",
-    "@toon-protocol/mill": "^0.1.0",
+    "@toon-protocol/swap": "^0.1.0",
     "@toon-protocol/relay": "^1.3.1",
     "@toon-protocol/sdk": "^0.5.0",
     "@types/dockerode": "^3.3.0",

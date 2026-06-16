@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { useWizardState } from './useWizardState';
-import type { WizardStatePayload } from '@toon-protocol/townhouse';
+import type { WizardStatePayload } from '@toon-protocol/hub';
 
 const MOCK_STATE: WizardStatePayload = {
   config_exists: false,

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   TransportPatchRequest,
   TransportPatchResponse,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 
 export interface UseTransportPatchResult {
   patch: (

@@ -1,7 +1,7 @@
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useWizardProgress } from './useWizardProgress';
-import type { WizardProgressMessage } from '@toon-protocol/townhouse';
+import type { WizardProgressMessage } from '@toon-protocol/hub';
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];

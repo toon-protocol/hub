@@ -13,7 +13,7 @@
  *                                   -D packages/townhouse/dist/
  *
  * Typical CI invocation:
- *   RUN_DOCKER_INTEGRATION=1 pnpm --filter @toon-protocol/townhouse test:integration
+ *   RUN_DOCKER_INTEGRATION=1 pnpm --filter @toon-protocol/hub test:integration
  *     -- orchestrator-hs
  *
  * First run pulls connector + townhouse-api images (~2-3 min cold cache).

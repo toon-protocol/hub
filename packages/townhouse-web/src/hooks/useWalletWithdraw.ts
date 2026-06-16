@@ -2,7 +2,7 @@ import type {
   WithdrawRequest,
   WithdrawResponse,
   TransactionReceiptPayload,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 
 export interface WithdrawErrorResponse {
   error: string;

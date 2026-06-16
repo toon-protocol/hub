@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type { LogService, LogLevel } from '@toon-protocol/townhouse';
+import type { LogService, LogLevel } from '@toon-protocol/hub';
 import { tokens, colors } from '@/theme/tokens';
 
 export const LOG_SERVICES: readonly LogService[] = [

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LogTail } from './log-tail';
-import type { LogEvent } from '@toon-protocol/townhouse';
+import type { LogEvent } from '@toon-protocol/hub';
 
 const SAMPLE: LogEvent[] = [
   {

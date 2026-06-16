@@ -28,7 +28,7 @@
  *   SKIP_DOCKER unset or falsy          — sandbox environments set this
  *   dist/image-manifest.json present    — from latest publish CI run:
  *       gh run download <id> --name image-manifest -D packages/townhouse/dist/
- *   pnpm --filter @toon-protocol/townhouse build  — dist/cli.js must exist
+ *   pnpm --filter @toon-protocol/hub build  — dist/cli.js must exist
  *   ports 9401 (connector admin) + 28090 (townhouse-api) free
  *     — stop any concurrent townhouse stack before running
  *

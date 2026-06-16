@@ -1,5 +1,5 @@
 /**
- * @toon-protocol/townhouse — public API.
+ * @toon-protocol/hub — public API.
  */
 
 export type {

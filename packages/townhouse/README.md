@@ -1,16 +1,16 @@
-# @toon-protocol/townhouse
+# @toon-protocol/hub
 
 **The operator CLI for running a TOON Protocol node stack on your own machine.**
 
 TOON Protocol is a **pay-to-write, free-to-read** [Nostr](https://nostr.com) network over [Interledger](https://interledger.org): writers attach a tiny signed payment to publish an event, and anyone reads for free. `townhouse` is the command-line tool an **operator** uses to stand up and run that infrastructure — it generates your keys and boots the stack in Docker so paying clients can reach you over BTP.
 
 ```bash
-npx @toon-protocol/townhouse init     # 1. create your config + wallet (one time)
-npx @toon-protocol/townhouse up       # 2. boot your apex (direct BTP, default) + children
-npx @toon-protocol/townhouse node add # 3. add a service node that earns fees (default: a town relay)
+npx @toon-protocol/hub init     # 1. create your config + wallet (one time)
+npx @toon-protocol/hub up       # 2. boot your apex (direct BTP, default) + children
+npx @toon-protocol/hub node add # 3. add a service node that earns fees (default: a town relay)
 ```
 
-`up` boots a **direct-BTP apex** by default and prints `Apex live (direct BTP) at ws://127.0.0.1:3000/btp` once reachable. Clients dial that BTP endpoint directly. Want anonymity instead? `npx @toon-protocol/townhouse hs up` is the privacy opt-in: it boots the same apex behind an `.anon` hidden service (no public host port) and prints `Apex live at <your-address>.anon`. Either way, share the address with clients; they pay you over it.
+`up` boots a **direct-BTP apex** by default and prints `Apex live (direct BTP) at ws://127.0.0.1:3000/btp` once reachable. Clients dial that BTP endpoint directly. Want anonymity instead? `npx @toon-protocol/hub hs up` is the privacy opt-in: it boots the same apex behind an `.anon` hidden service (no public host port) and prints `Apex live at <your-address>.anon`. Either way, share the address with clients; they pay you over it.
 
 > **Are you trying to _publish_ events, not run a node?** You want [`@toon-protocol/client`](https://www.npmjs.com/package/@toon-protocol/client) instead — the client library that pays a townhouse apex and publishes to it. `townhouse` (this package) is the **operator** side; `@toon-protocol/client` is the **client** side.
 
@@ -52,7 +52,7 @@ You'll need:
 ### 1. Initialize — `init`
 
 ```bash
-npx @toon-protocol/townhouse init
+npx @toon-protocol/hub init
 ```
 
 This creates `~/.townhouse/config.yaml` and an encrypted wallet, then **shows your seed phrase once**:
@@ -77,7 +77,7 @@ Derived Node Addresses:
   dvm    Nostr: 1b52a745...   EVM: 0x18Ac7427...
 
 Next — start your node:
-  npx @toon-protocol/townhouse up
+  npx @toon-protocol/hub up
 ```
 
 **Write the seed phrase down.** It is shown only once and is the only way to recover your keys.
@@ -85,14 +85,14 @@ Next — start your node:
 `init` needs a password to encrypt the wallet. Provide it with the `--password` flag or the `TOWNHOUSE_WALLET_PASSWORD` env var:
 
 ```bash
-npx @toon-protocol/townhouse init --password "<your-password>"
+npx @toon-protocol/hub init --password "<your-password>"
 # or: export TOWNHOUSE_WALLET_PASSWORD=...  then run init
 ```
 
 ### 2. Boot your apex — `up` (direct BTP, default)
 
 ```bash
-npx @toon-protocol/townhouse up
+npx @toon-protocol/hub up
 ```
 
 This starts the **apex** (the ILP connector + the townhouse API) — the front door that clients pay — with the connector's BTP port exposed directly to the host. The first run pulls images and narrates each stage:
@@ -111,7 +111,7 @@ The final line is **your apex's BTP dial address** — share it with clients, wh
 Prefer to stay off the public internet entirely? `hs up` boots the same apex behind an **`.anon` v3 hidden service** (no host port exposed) and bootstraps the hidden service, narrating each stage:
 
 ```bash
-npx @toon-protocol/townhouse hs up
+npx @toon-protocol/hub hs up
 ```
 
 ```text
@@ -126,9 +126,9 @@ Clients pay you over BTP at `wss://<your-address>.anon/btp` (through a SOCKS5h p
 The apex on its own only routes and takes a fee. To actually **earn**, attach a service node (a *child* of the apex). The default is a `town` Nostr relay:
 
 ```bash
-npx @toon-protocol/townhouse node add        # provision a town relay (default)
-npx @toon-protocol/townhouse node add mill --relays wss://relay.damus.io,wss://nos.lol   # multi-chain swap node
-npx @toon-protocol/townhouse node add dvm --turbo-token "$(cat arweave.json)"            # NIP-90 compute / Arweave node
+npx @toon-protocol/hub node add        # provision a town relay (default)
+npx @toon-protocol/hub node add mill --relays wss://relay.damus.io,wss://nos.lol   # multi-chain swap node
+npx @toon-protocol/hub node add dvm --turbo-token "$(cat arweave.json)"            # NIP-90 compute / Arweave node
 ```
 
 `node add` provisions the container, registers it as a child of your apex, and routes paid client traffic to it for free. List and remove nodes with `node list` and `node remove <id>`.
@@ -150,14 +150,14 @@ Prefer the flags — they travel with the `node add` request, so you don't have 
 ### 4. Stop your apex — `hs down`
 
 ```bash
-npx @toon-protocol/townhouse hs down
+npx @toon-protocol/hub hs down
 ```
 
 ```text
 Apex stopped. Volumes preserved — your .anyone address is stable.
 ```
 
-Your hidden-service address stays the same across stop/start. To deliberately rotate to a brand-new address, use `npx @toon-protocol/townhouse hs down --rotate-keys` (this **deletes** the current keypair, so the next `hs up` publishes a different address).
+Your hidden-service address stays the same across stop/start. To deliberately rotate to a brand-new address, use `npx @toon-protocol/hub hs down --rotate-keys` (this **deletes** the current keypair, so the next `hs up` publishes a different address).
 
 ---
 
@@ -180,7 +180,7 @@ Your hidden-service address stays the same across stop/start. To deliberately ro
 | `townhouse credits buy` / `credits balance`        | Fund / check Arweave upload credits (for the DVM node)       |
 | `townhouse --help`                                 | Full command list                                            |
 
-(Prefix each with `npx @toon-protocol/townhouse`, or install once and call `townhouse` directly.)
+(Prefix each with `npx @toon-protocol/hub`, or install once and call `townhouse` directly.)
 
 > Running with a config outside the default `~/.townhouse`? Pass `-c <path-to-config.yaml>` (the path to the **config file**, not its directory) on any command. When you initialize with `init --config-dir <dir>`, `init`'s printed next-step already includes the matching `-c` flag.
 
@@ -212,7 +212,7 @@ The package also exports its building blocks for programmatic use — `DockerOrc
 import {
   materializeComposeTemplate,
   DockerOrchestrator,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 ```
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the full API surface and internals.

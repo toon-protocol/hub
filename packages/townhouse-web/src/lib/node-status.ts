@@ -1,4 +1,4 @@
-import type { NodeState } from '@toon-protocol/townhouse';
+import type { NodeState } from '@toon-protocol/hub';
 
 export type StatusDotState = 'ok' | 'degraded' | 'down' | 'unknown';
 

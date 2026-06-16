@@ -17,7 +17,7 @@ import { chainFamilyOf } from '@/lib/chain';
 import { formatVolume } from '@/lib/format-volume';
 import { ThroughputChart } from '@/components/charts/ThroughputChart';
 import { AddFunds } from '@/components/AddFunds';
-import type { NodeInfo } from '@toon-protocol/townhouse';
+import type { NodeInfo } from '@toon-protocol/hub';
 import { colors } from '@/theme/tokens';
 
 // ── Types ────────────────────────────────────────────────────────────────────

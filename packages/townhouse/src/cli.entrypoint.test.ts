@@ -2,12 +2,12 @@
  * Regression test for the entrypoint self-invoke guard.
  *
  * npm/npx install the `townhouse` bin as a SYMLINK
- * (node_modules/.bin/townhouse -> ../@toon-protocol/townhouse/dist/cli.js).
+ * (node_modules/.bin/townhouse -> ../@toon-protocol/hub/dist/cli.js).
  * When launched, process.argv[1] is the symlink path while import.meta.url is
  * the realpath of dist/cli.js. If the guard compares them without resolving
  * symlinks, `invokedDirectly` is false under npx / an installed bin, main()
  * never runs, and EVERY command silently no-ops with exit 0 — i.e. the
- * published package does nothing for the primary `npx @toon-protocol/townhouse`
+ * published package does nothing for the primary `npx @toon-protocol/hub`
  * use case. This reproduces the symlink launch and asserts main() executes.
  *
  * Requires a built dist/cli.js (skipped otherwise). Runs no Docker.

@@ -33,9 +33,9 @@ export class CliNotFoundError extends Error {
   constructor(readonly bin: string) {
     super(
       `townhouse CLI not found (tried to spawn "${bin}"). Set TOWNHOUSE_BIN to ` +
-        `the CLI entry point (e.g. node_modules/@toon-protocol/townhouse/dist/cli.js ` +
+        `the CLI entry point (e.g. node_modules/@toon-protocol/hub/dist/cli.js ` +
         `or packages/townhouse/dist/cli.js in a checkout), or install ` +
-        `@toon-protocol/townhouse so the \`townhouse\` command is on PATH. ` +
+        `@toon-protocol/hub so the \`townhouse\` command is on PATH. ` +
         `CLI-backed tools (health, channels, chains, set_node_fees, withdraw, ` +
         `seed, credits, lifecycle) need it.`
     );

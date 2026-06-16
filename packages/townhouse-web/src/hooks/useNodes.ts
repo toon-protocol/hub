@@ -4,7 +4,7 @@ import type {
   NodeDetail,
   MetricsPayload,
   NodeType,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 
 export type UseNodesStatus = 'loading' | 'ready' | 'error';
 

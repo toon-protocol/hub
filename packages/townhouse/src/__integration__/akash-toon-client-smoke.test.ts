@@ -18,7 +18,7 @@
  *   AKASH_TOON_CLIENT_URL=https://…         — pod ingress (e.g. https://*.ingress.boogle.cloud)
  *   SKIP_DOCKER unset or falsy              — local townhouse hs up needs Docker
  *   dist/image-manifest.json present        — for the local apex stack
- *   pnpm --filter @toon-protocol/townhouse build
+ *   pnpm --filter @toon-protocol/hub build
  *   bash scripts/townhouse-test-infra.sh up — warms Docker image cache
  *   ports 9401 + 28090 free                 — local apex bindings
  *
@@ -227,7 +227,7 @@ describe.skipIf(!shouldRun)(
       const cliBin = join(dirname(thisFile), '..', '..', 'dist', 'cli.js');
       if (!existsSync(cliBin)) {
         throw new Error(
-          `dist/cli.js not found. Run \`pnpm --filter @toon-protocol/townhouse build\` first.`
+          `dist/cli.js not found. Run \`pnpm --filter @toon-protocol/hub build\` first.`
         );
       }
 

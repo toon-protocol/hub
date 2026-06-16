@@ -56,7 +56,7 @@ describe.skipIf(skipPackTest)('tarball-contents', () => {
         `tarball-contents test requires built dist/compose/. Missing:\n` +
           `  ${DIST_COMPOSE_HS} ${existsSync(DIST_COMPOSE_HS) ? '✓' : '✗'}\n` +
           `  ${DIST_COMPOSE_DEV} ${existsSync(DIST_COMPOSE_DEV) ? '✓' : '✗'}\n` +
-          `Run 'pnpm --filter @toon-protocol/townhouse build' first ` +
+          `Run 'pnpm --filter @toon-protocol/hub build' first ` +
           `(or set SKIP_PACK_TEST=1 to skip this test).`
       );
     }
@@ -180,8 +180,8 @@ describe.skipIf(skipPackTest)('tarball-contents', () => {
     );
     const readme = readFileSync(readmePath, 'utf-8');
     // It is the operator quickstart...
-    expect(readme).toContain('npx @toon-protocol/townhouse init');
-    expect(readme).toContain('npx @toon-protocol/townhouse hs up');
+    expect(readme).toContain('npx @toon-protocol/hub init');
+    expect(readme).toContain('npx @toon-protocol/hub hs up');
     // ...not the contributor doc. A published-package user has no monorepo, no
     // sibling repos, and no dev-stack script — those instructions would only
     // confuse them, so they must not leak back into the published README.

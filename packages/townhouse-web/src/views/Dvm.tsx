@@ -15,7 +15,7 @@ import { usePacketTimeseries } from '@/hooks/usePacketTimeseries';
 import { useNodeHealth } from '@/hooks/useNodeHealth';
 import { useDvmJobsRecent } from '@/hooks/useDvmJobsRecent';
 import { formatVolume } from '@/lib/format-volume';
-import type { NodeInfo } from '@toon-protocol/townhouse';
+import type { NodeInfo } from '@toon-protocol/hub';
 import type { DvmHealthResponse } from '@toon-protocol/sdk';
 import { colors } from '@/theme/tokens';
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ChainProviderEntry, NetworkMode } from '@toon-protocol/townhouse';
+import type { ChainProviderEntry, NetworkMode } from '@toon-protocol/hub';
 import { Button } from './primitives/Button';
 import { ChainAddForm } from './ChainAddForm';
 import { NetworkSelector } from './NetworkSelector';

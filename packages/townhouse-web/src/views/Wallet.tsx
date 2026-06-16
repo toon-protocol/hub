@@ -12,7 +12,7 @@ import { RevealSeedModal } from '@/components/RevealSeedModal';
 import { useWalletKeys } from '@/hooks/useWalletKeys';
 import { useWalletBalances } from '@/hooks/useWalletBalances';
 import { formatVolume } from '@/lib/format-volume';
-import type { NodeType, NodeKeyInfo, WalletBalanceEntry } from '@toon-protocol/townhouse';
+import type { NodeType, NodeKeyInfo, WalletBalanceEntry } from '@toon-protocol/hub';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

@@ -20,7 +20,7 @@ import { BreakdownPill } from '@/components/primitives/BreakdownPill';
 import { AddressBlock } from '@/components/AddressBlock';
 import { WithdrawModal } from '@/components/WithdrawModal';
 import { RevealSeedModal } from '@/components/RevealSeedModal';
-import type { WalletBalanceEntry } from '@toon-protocol/townhouse';
+import type { WalletBalanceEntry } from '@toon-protocol/hub';
 
 // Mock qrcode.react for baseline tests
 vi.mock('qrcode.react', () => ({

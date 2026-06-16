@@ -18,7 +18,7 @@ import {
   tailLogsViaSse,
 } from './streams.js';
 import { computeVersionInfo, readSelfPackage } from './version.js';
-import type { WithdrawRequest } from '@toon-protocol/townhouse';
+import type { WithdrawRequest } from '@toon-protocol/hub';
 
 /** A JSON-Schema-described MCP tool. */
 export interface ToolDefinition {

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { StatusDot } from '@/components/primitives/StatusDot';
 import { Button } from '@/components/primitives/Button';
-import type { TransportStatusPayload } from '@toon-protocol/townhouse';
+import type { TransportStatusPayload } from '@toon-protocol/hub';
 import type { TransportStatusKind } from '@/hooks/useTransportStatus';
 
 function relativeTime(ms: number): string {

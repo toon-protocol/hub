@@ -8,7 +8,7 @@
  * Story 49.2 Task 6 instructs the file path to be under __integration__
  * but the test ITSELF is a pure unit test (no I/O, no Docker, no live
  * faucet). Placed here in `src/contracts/` so it runs under
- * `pnpm --filter @toon-protocol/townhouse test` (default vitest config)
+ * `pnpm --filter @toon-protocol/hub test` (default vitest config)
  * rather than only under `test:integration`. See § "Project Structure
  * Notes" in 49-2-akash-devnet-faucets-and-ui.md for rationale.
  */

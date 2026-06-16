@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { useNodes } from './useNodes';
-import type { NodeInfo, NodeDetail } from '@toon-protocol/townhouse';
+import type { NodeInfo, NodeDetail } from '@toon-protocol/hub';
 
 const baseList: NodeInfo[] = [
   {

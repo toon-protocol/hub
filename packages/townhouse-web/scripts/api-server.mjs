@@ -14,7 +14,7 @@ import {
   TransportProbe,
   DEFAULT_ATOR_PROXY,
   createApiServer,
-} from '@toon-protocol/townhouse';
+} from '@toon-protocol/hub';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -87,7 +87,7 @@ if (devMnemonic) {
         const { existsSync, mkdirSync, writeFileSync } =
           await import('node:fs');
         const { dirname } = await import('node:path');
-        const { encryptWallet } = await import('@toon-protocol/townhouse');
+        const { encryptWallet } = await import('@toon-protocol/hub');
         if (!existsSync(walletPath)) {
           mkdirSync(dirname(walletPath), { recursive: true });
           const encrypted = await encryptWallet(

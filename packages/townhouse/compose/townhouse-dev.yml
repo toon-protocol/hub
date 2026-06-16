@@ -9,7 +9,7 @@
 # See story 21.8.0 Dev Notes for the full rationale.
 #
 # Canonical path (npm tarball): packages/townhouse/compose/townhouse-dev.yml
-#   Ships verbatim inside @toon-protocol/townhouse dist/compose/townhouse-dev.yml
+#   Ships verbatim inside @toon-protocol/hub dist/compose/townhouse-dev.yml
 #   (Story 45.2 — no digest substitution; uses local toon:* image tags).
 #
 # Legacy path (backward-compat): docker-compose-townhouse-dev.yml (repo root)

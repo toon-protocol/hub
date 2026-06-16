@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ChainProviderEntry, ChainType } from '@toon-protocol/townhouse';
+import type { ChainProviderEntry, ChainType } from '@toon-protocol/hub';
 import { Button } from './primitives/Button';
 
 const inputClass =

@@ -1,5 +1,5 @@
 {
-  "name": "@toon-protocol/townhouse-mcp",
+  "name": "@toon-protocol/hub-mcp",
   "version": "0.1.0",
   "description": "MCP server letting a Claude agent (Desktop or Code) act as a full Townhouse operator: init/up, node provisioning, fee tuning, chains, credits, earnings, withdraw, plus read/telemetry.",
   "license": "MIT",
@@ -8,6 +8,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "hub-mcp": "./dist/mcp.js",
     "townhouse-mcp": "./dist/mcp.js"
   },
   "files": [
@@ -33,15 +34,15 @@
     "@modelcontextprotocol/sdk": "^1.12.0"
   },
   "peerDependencies": {
-    "@toon-protocol/townhouse": ">=0.26.0"
+    "@toon-protocol/hub": ">=0.26.0"
   },
   "peerDependenciesMeta": {
-    "@toon-protocol/townhouse": {
+    "@toon-protocol/hub": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@toon-protocol/townhouse": "workspace:*",
+    "@toon-protocol/hub": "workspace:*",
     "@types/node": "^20.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.3.0",

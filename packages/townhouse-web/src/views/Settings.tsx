@@ -6,7 +6,7 @@ import { TransportStatusPanel } from '@/components/TransportStatusPanel';
 import { ChainsPanel } from '@/components/ChainsPanel';
 import { useTransportStatus } from '@/hooks/useTransportStatus';
 import { useTransportPatch } from '@/hooks/useTransportPatch';
-import type { TransportPatchRequest } from '@toon-protocol/townhouse';
+import type { TransportPatchRequest } from '@toon-protocol/hub';
 
 export function SettingsView() {
   const { status, statusKind, refetch } = useTransportStatus();

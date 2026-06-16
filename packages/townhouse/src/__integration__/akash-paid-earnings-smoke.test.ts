@@ -36,7 +36,7 @@
  *   RUN_AKASH_SMOKE=1
  *   AKASH_TOON_CLIENT_URL=https://<pod-ingress>
  *   SKIP_DOCKER unset or falsy
- *   pnpm --filter @toon-protocol/townhouse build
+ *   pnpm --filter @toon-protocol/hub build
  *   Pod MUST be deployed with TOON_FEE_PER_EVENT=1000000:
  *     sed -i 's/TOON_FEE_PER_EVENT=0/TOON_FEE_PER_EVENT=1000000/' deploy/akash/toon-client.sdl.yaml
  *     bash scripts/akash-deploy.sh toon-client
@@ -121,7 +121,7 @@ if (!shouldRun) {
   console.warn(
     '\n⚠️  Skipping Akash paid-earnings smoke (Story 49.4).\n' +
       '   Set RUN_AKASH_SMOKE=1 and AKASH_TOON_CLIENT_URL=https://<pod-ingress>.\n' +
-      '   Ensure SKIP_DOCKER is unset and pnpm --filter @toon-protocol/townhouse build.\n' +
+      '   Ensure SKIP_DOCKER is unset and pnpm --filter @toon-protocol/hub build.\n' +
       '   Pod must be deployed with TOON_FEE_PER_EVENT=1000000\n' +
       '   (sed + scripts/akash-deploy.sh toon-client — see story Task 4.1).\n'
   );
@@ -658,7 +658,7 @@ describe.skipIf(!shouldRun)(
       const cliBin = join(dirname(thisFile), '..', '..', 'dist', 'cli.js');
       if (!existsSync(cliBin)) {
         throw new Error(
-          `dist/cli.js not found — run pnpm --filter @toon-protocol/townhouse build`
+          `dist/cli.js not found — run pnpm --filter @toon-protocol/hub build`
         );
       }
 

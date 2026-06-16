@@ -24,7 +24,7 @@
 import * as React from 'react';
 import { StatusDot } from '@/components/primitives/StatusDot';
 import { mapToStatusDot, type StatusDotState } from '@/lib/node-status';
-import type { TransportStatusPayload } from '@toon-protocol/townhouse';
+import type { TransportStatusPayload } from '@toon-protocol/hub';
 import type { TransportStatusKind } from '@/hooks/useTransportStatus';
 
 /** The four services the demo audience watches. */

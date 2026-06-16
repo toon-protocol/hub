@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { WizardInitRequest } from '@toon-protocol/townhouse';
+import type { WizardInitRequest } from '@toon-protocol/hub';
 
 export interface WizardError {
   code: string;

@@ -3,7 +3,7 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { Home } from './Home';
 import { axe } from '../test-setup';
-import type { NodeInfo, NodeDetail } from '@toon-protocol/townhouse';
+import type { NodeInfo, NodeDetail } from '@toon-protocol/hub';
 
 // Mock useWizardState to return config_exists: true by default (normal mode)
 vi.mock('@/hooks/useWizardState', () => ({

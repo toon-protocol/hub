@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useTransportPatch } from './useTransportPatch';
-import type { TransportPatchResponse } from '@toon-protocol/townhouse';
+import type { TransportPatchResponse } from '@toon-protocol/hub';
 
 const SUCCESS_RESPONSE: TransportPatchResponse = {
   mode: 'ator',
