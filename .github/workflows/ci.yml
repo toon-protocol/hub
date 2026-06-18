@@ -13,7 +13,7 @@ jobs:
 
       - uses: jetify-com/devbox-install-action@v0.12.0
         with:
-          enable-cache: "true"
+          enable-cache: true
 
       - name: Cache pnpm store
         uses: actions/cache@v4
@@ -46,6 +46,7 @@ jobs:
       - name: Resolve and pin devbox.lock
         run: devbox install
       - name: Commit devbox.lock if it changed
+        if: github.event.pull_request.head.repo.full_name == github.repository
         run: |
           if ! git diff --quiet -- devbox.lock; then
             git config user.name  "github-actions[bot]"

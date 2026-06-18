@@ -5,7 +5,7 @@
   ],
   "shell": {
     "init_hook": [
-      "corepack enable",
+      "(cd /tmp && corepack enable)",
       "corepack prepare pnpm@8.15.0 --activate"
     ],
     "scripts": {
