@@ -6,14 +6,14 @@ TOON Protocol operator product — @toon-protocol/hub (apex orchestrator: connec
 
 ## Getting started with Devbox
 
-This repo ships a [Devbox](https://www.jetify.com/devbox/) environment that pins Node.js 20 and pnpm 8.15.0 to the exact versions used in CI.
+This repo ships a [Devbox](https://www.jetify.com/devbox/) environment that pins Node.js 20 and pnpm 8.15.0 to match the versions used in CI.
 
 **Prerequisites:** [Install Devbox](https://www.jetify.com/devbox/docs/installing_devbox/) (Nix is installed automatically by the Devbox installer).
 
 ```sh
-devbox shell        # drops you into a reproducible shell with Node 20 + pnpm 8.15.0
+devbox shell        # drops you into a shell with Node 20 + pnpm 8.15.0
 pnpm install
 pnpm -r build
 ```
 
-CI uses the same toolchain via `jetify-com/devbox-install-action`. After running `devbox shell` for the first time locally, commit the generated `devbox.lock` to pin the exact nixpkgs revision.
+CI uses the same toolchain via `jetify-com/devbox-install-action`. For full nixpkgs-revision pinning, run `devbox shell` locally once and commit the generated `devbox.lock` (follow-up).
