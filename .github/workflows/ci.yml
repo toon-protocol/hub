@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: jetify-com/devbox-install-action@v0.11.0
+      - uses: jetify-com/devbox-install-action@v0.12.0
         with:
           enable-cache: "true"
 
@@ -32,6 +32,7 @@ jobs:
       - run: pnpm -r test --if-present
 
   devbox-validate:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write          # commit devbox.lock back to the PR branch
