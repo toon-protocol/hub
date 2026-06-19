@@ -3,7 +3,7 @@ import type { ChainProviderEntry, ChainType } from '@toon-protocol/hub';
 import { Button } from './primitives/Button';
 
 const inputClass =
-  'w-full rounded-md border border-ink/15 bg-canvas px-2 py-1 font-geist-sans text-sm text-ink placeholder:text-ink/40 focus:outline-none focus:ring-2 focus:ring-ink/20';
+  'w-full rounded-md shadow-border bg-canvas px-2 py-1 font-geist-sans text-sm text-ink placeholder:text-ink/40 focus:outline-none focus:ring-2 focus:ring-ink/20';
 
 export interface NewChainForm {
   chainType: ChainType;
@@ -107,7 +107,7 @@ export function ChainAddForm({ onAdd }: ChainAddFormProps): JSX.Element {
   }
 
   return (
-    <div className="rounded-md border border-ink/10 p-3 flex flex-col gap-2">
+    <div className="rounded-md shadow-border p-3 flex flex-col gap-2">
       <span className="font-geist-sans text-sm font-medium text-ink">
         Add a chain
       </span>
