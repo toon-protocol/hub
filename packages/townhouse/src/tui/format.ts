@@ -1,6 +1,8 @@
 const DECIMAL_RE = /^-?\d+$/;
 const MICRO_FRACTIONAL_DIGITS = 4;
 
+export const USDC_MICRO_FALLBACK = '$?.????';
+
 export function formatRelativeTime(
   iso: string | null,
   now: Date = new Date()
@@ -28,7 +30,7 @@ export function formatUsdcMicro(decimalString: string, scale: number): string {
         `formatUsdcMicro: invalid decimal string: ${JSON.stringify(decimalString)}`
       );
     }
-    return '$?.????';
+    return USDC_MICRO_FALLBACK;
   }
 
   const negative = decimalString.startsWith('-');

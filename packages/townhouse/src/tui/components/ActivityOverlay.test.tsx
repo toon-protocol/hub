@@ -190,6 +190,19 @@ describe('ActivityOverlay', () => {
     expect(frame).not.toContain('→');
   });
 
+  it('malformed amount renders USDC_MICRO_FALLBACK (no crash)', () => {
+    const claim = makeClaim({ amount: 'bad' });
+    const { lastFrame } = render(
+      React.createElement(ActivityOverlay, {
+        claims: [claim],
+        onClose: () => {},
+        columns: 80,
+        rows: 24,
+      })
+    );
+    expect(lastFrame() ?? '').toContain('$?.????');
+  });
+
   it('title clamps to MAX_BUFFER_SIZE even if claims.length exceeds it (P3 — defensive cap)', () => {
     // useActivityBuffer clamps upstream, but the overlay must defensively cap N in the title too.
     const claims = makeClaims(250);

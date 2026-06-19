@@ -1,7 +1,7 @@
 import { Text } from 'ink';
 import type { ReactElement } from 'react';
 import type { RecentClaim } from '../types.js';
-import { formatUsdcMicro, formatRelativeTime } from '../format.js';
+import { formatUsdcMicro, formatRelativeTime, USDC_MICRO_FALLBACK } from '../format.js';
 import { COPY } from '../copy.js';
 
 export interface ActivityTickerProps {
@@ -33,7 +33,7 @@ export function ActivityTicker({ recentClaims, now = new Date() }: ActivityTicke
   try {
     amount = formatUsdcMicro(claim.amount, claim.assetScale);
   } catch {
-    amount = '$?.????';
+    amount = USDC_MICRO_FALLBACK;
   }
   const rel = formatRelativeTime(claim.at, now);
   return (

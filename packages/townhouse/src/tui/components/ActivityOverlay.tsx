@@ -1,7 +1,7 @@
 import { Box, Text, useStdout, useInput } from 'ink';
 import { useEffect, useState, type ReactElement } from 'react';
 import type { RecentClaim } from '../types.js';
-import { formatUsdcMicro } from '../format.js';
+import { formatUsdcMicro, USDC_MICRO_FALLBACK } from '../format.js';
 import { COPY } from '../copy.js';
 
 const MIN_OVERLAY_WIDTH = 40;
@@ -38,7 +38,12 @@ function formatRow(claim: RecentClaim): string {
   const time = formatTime(claim.at);
   const peer = truncatePeerId(claim.peerId);
   const arrow = arrowFor(claim.direction);
-  const amount = formatUsdcMicro(claim.amount, claim.assetScale);
+  let amount: string;
+  try {
+    amount = formatUsdcMicro(claim.amount, claim.assetScale);
+  } catch {
+    amount = USDC_MICRO_FALLBACK;
+  }
   const dir = directionLabel(claim.direction);
   return `${time} · ${peer} · ${arrow} ${amount} ${claim.assetCode} · ${dir}`;
 }
