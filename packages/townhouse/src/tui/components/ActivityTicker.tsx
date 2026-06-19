@@ -29,7 +29,12 @@ export function ActivityTicker({ recentClaims, now = new Date() }: ActivityTicke
     return <Text dimColor>{COPY.activityTicker.empty}</Text>;
   }
   const arrow = arrowFor(claim.direction);
-  const amount = formatUsdcMicro(claim.amount, claim.assetScale);
+  let amount: string;
+  try {
+    amount = formatUsdcMicro(claim.amount, claim.assetScale);
+  } catch {
+    amount = '$?.????';
+  }
   const rel = formatRelativeTime(claim.at, now);
   return (
     <Text dimColor>
