@@ -1,7 +1,7 @@
 import { Box, Text, useStdout } from 'ink';
 import type { ReactElement } from 'react';
 import type { AggregatedEarnings } from '../types.js';
-import { formatUsdc } from '../format.js';
+import { formatUsdc, USDC_FALLBACK } from '../format.js';
 import { Sparkline } from './Sparkline.js';
 import { Qualifier } from './Qualifier.js';
 
@@ -84,10 +84,23 @@ export function HeroBand({ apex, peers, eventsRelayed }: HeroBandProps): ReactEl
   const scalars = computeScalars(apex, peers);
   const showQualifier = isEmptyState(apex, peers);
 
-  const todayFmt = formatUsdc(scalars.today, USDC_SCALE);
-  const monthFmt = formatUsdc(scalars.month, USDC_SCALE);
-  const yearFmt = formatUsdc(scalars.year, USDC_SCALE);
-  const lifetimeFmt = formatUsdc(scalars.lifetime, USDC_SCALE);
+  // computeScalars always produces valid decimal strings (BigInt arithmetic, starting at zero),
+  // but guard defensively for forward-compatibility.
+  let todayFmt: string;
+  let monthFmt: string;
+  let yearFmt: string;
+  let lifetimeFmt: string;
+  try {
+    todayFmt = formatUsdc(scalars.today, USDC_SCALE);
+    monthFmt = formatUsdc(scalars.month, USDC_SCALE);
+    yearFmt = formatUsdc(scalars.year, USDC_SCALE);
+    lifetimeFmt = formatUsdc(scalars.lifetime, USDC_SCALE);
+  } catch {
+    todayFmt = USDC_FALLBACK;
+    monthFmt = USDC_FALLBACK;
+    yearFmt = USDC_FALLBACK;
+    lifetimeFmt = USDC_FALLBACK;
+  }
 
   const shortLabels = columns < 70;
   const labelLifetime = shortLabels ? 'LIFE' : 'LIFETIME';

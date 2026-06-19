@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
 import React from 'react';
 import { ApexStrip } from './ApexStrip.js';
+import { USDC_FALLBACK } from '../format.js';
 import type { AggregatedEarnings } from '../types.js';
 
 const EMPTY_PEERS: AggregatedEarnings['peers'] = [];
@@ -80,24 +81,16 @@ describe('ApexStrip component', () => {
     expect(frame).not.toContain('%');
   });
 
-  it('renders no upsell and no percentage when apex.month is malformed (production fallback)', () => {
-    // In NODE_ENV=production, formatUsdc returns '$?.??' for malformed input. The apex
-    // strip should NOT mix this wire-anomaly signal with the Mill upsell.
-    const origEnv = process.env['NODE_ENV'];
-    process.env['NODE_ENV'] = 'production';
-    try {
-      const apex: AggregatedEarnings['apex'] = {
-        routingFees: { USDC: { lifetime: '0', today: '0', month: 'not-a-number', year: '0' } },
-      };
-      const { lastFrame } = render(React.createElement(ApexStrip, { apex, peers: EMPTY_PEERS }));
-      const frame = lastFrame() ?? '';
-      expect(frame).toContain('↳ apex routing:');
-      expect(frame).not.toContain('(enable mill to route)');
-      expect(frame).not.toContain('%');
-    } finally {
-      if (origEnv === undefined) delete process.env['NODE_ENV'];
-      else process.env['NODE_ENV'] = origEnv;
-    }
+  it('renders USDC_FALLBACK with no upsell and no percentage when apex.month is malformed', () => {
+    const apex: AggregatedEarnings['apex'] = {
+      routingFees: { USDC: { lifetime: '0', today: '0', month: 'not-a-number', year: '0' } },
+    };
+    const { lastFrame } = render(React.createElement(ApexStrip, { apex, peers: EMPTY_PEERS }));
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('↳ apex routing:');
+    expect(frame).toContain(USDC_FALLBACK);
+    expect(frame).not.toContain('(enable mill to route)');
+    expect(frame).not.toContain('%');
   });
 
   it('USDC-only filter: non-USDC peer assets do not contribute to percentage denominator', () => {
