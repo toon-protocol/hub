@@ -5,11 +5,20 @@
 # seed) and runs `townhouse up`. A timer pushes `townhouse status --json` to Object
 # Storage so health + funding addresses are readable without touching the box.
 #
-# There is no 'deploy' user and no authorized_keys: the box is provisioned and operated
-# entirely through cloud-init + the status sink. Break-glass is the Linode LISH console.
+# Normal operation: no 'deploy' user and no authorized_keys. For a CI debug run only, an
+# ephemeral key is trusted for root (installed early, in the init stage, so it survives a
+# later runcmd failure) and the workflow opens port 22 to read the cloud-init log.
 
 package_update: true
 package_upgrade: false
+%{ if debug_ssh_pubkey != "" ~}
+
+# --- CI debug run: ephemeral root key (removed on the next non-debug deploy) ---
+users:
+  - name: root
+    ssh_authorized_keys:
+      - ${debug_ssh_pubkey}
+%{ endif ~}
 
 write_files:
   # Runtime env injected into the systemd services (NOT sourced by bash — values like the

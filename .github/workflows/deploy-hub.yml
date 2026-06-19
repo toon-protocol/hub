@@ -26,6 +26,10 @@ on:
         description: 'Run `terraform apply` (provision/update the box + firewall)'
         type: boolean
         default: false
+      debug:
+        description: 'Diagnostic run: trust an ephemeral CI key, open SSH, dump the cloud-init log'
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-hub
@@ -126,8 +130,15 @@ jobs:
           terraform fmt -check
           terraform validate
 
+      - name: Prepare debug SSH key
+        if: github.event_name == 'workflow_dispatch' && inputs.debug
+        run: |
+          ssh-keygen -t ed25519 -f "$RUNNER_TEMP/dbg" -N "" -q
+          echo "TF_VAR_debug_ssh_pubkey=$(cat "$RUNNER_TEMP/dbg.pub")" >> "$GITHUB_ENV"
+          echo "::notice::debug run — ephemeral SSH key trusted for root, port 22 opened"
+
       - name: Terraform apply
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply_infra)
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.apply_infra || inputs.debug))
         run: terraform apply -auto-approve -input=false
 
       - uses: actions/setup-node@v4
@@ -143,7 +154,29 @@ jobs:
           npm --prefix infra/topup install --no-audit --no-fund
           node infra/topup/topup.mjs
 
+      - name: Collect cloud-init log (debug)
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.debug
+        run: |
+          IP=$(terraform output -raw instance_ip 2>/dev/null || echo '')
+          if [ -z "$IP" ]; then echo "no instance IP"; exit 1; fi
+          chmod 600 "$RUNNER_TEMP/dbg"
+          mkdir -p ~/.ssh
+          for i in $(seq 1 12); do
+            ssh-keyscan -T 10 "$IP" >> ~/.ssh/known_hosts 2>/dev/null && break || sleep 8
+          done
+          echo "SSHing to root@$IP to collect diagnostics ..."
+          ssh -i "$RUNNER_TEMP/dbg" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=25 "root@$IP" '
+            echo "===== cloud-init status ====="; cloud-init status --long 2>&1 || true
+            echo "(waiting for cloud-init to finish) ..."; cloud-init status --wait 2>&1 | tail -1 || true
+            echo "===== /var/log/cloud-init-output.log (tail 250) ====="; tail -250 /var/log/cloud-init-output.log 2>&1 || true
+            echo "===== townhouse.service ====="; systemctl status townhouse --no-pager 2>&1 | tail -30 || true
+            echo "===== townhouse journal (tail 80) ====="; journalctl -u townhouse --no-pager 2>&1 | tail -80 || true
+            echo "===== docker ps -a ====="; docker ps -a 2>&1 || true
+            echo "===== /etc/townhouse.env (mnemonic redacted) ====="; sed "s/MNEMONIC=.*/MNEMONIC=<redacted>/" /etc/townhouse.env 2>&1 || true
+          '
+
       - name: Wait for the box to self-report (status object)
+        if: ${{ !inputs.debug }}
         run: |
           IP=$(terraform output -raw instance_ip 2>/dev/null || echo '?')
           echo "Apex provisioning at $IP — it self-configures via cloud-init (a few minutes for image pulls)."
