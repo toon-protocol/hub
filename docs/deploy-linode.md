@@ -48,8 +48,10 @@ Storage, so you observe the box without ever opening a shell.
 ## 2. Provision (one step)
 
 Run the **Deploy Hub (Linode)** workflow with `apply_infra = true` (or `terraform apply`
-locally — see [`infra/terraform/README.md`](../infra/terraform/README.md)). Terraform
-creates the instance + volume + firewall and hands the seed + config to cloud-init. The
+locally — see [`infra/terraform/README.md`](../infra/terraform/README.md)). The workflow
+**creates the Object Storage state bucket if it doesn't exist** (idempotent, using the OBJ
+keys), then Terraform creates the instance + volume + firewall and hands the seed + config
+to cloud-init. The
 box then self-installs, self-initializes (mnemonic mode), and starts the apex via the
 `townhouse.service` systemd unit. The workflow polls `hub/status.json` and prints it when
 the apex reports in (cloud-init takes a few minutes for image pulls).

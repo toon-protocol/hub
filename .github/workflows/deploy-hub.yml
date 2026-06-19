@@ -69,6 +69,21 @@ jobs:
         with:
           terraform_version: 1.9.8
 
+      - name: Ensure Object Storage bucket exists
+        # The TF state backend (and the status sink) need this bucket to pre-exist —
+        # Terraform can't manage the bucket that holds its own state. CI creates it with
+        # the OBJ keys it already has. Idempotent: skip if it's already there.
+        run: |
+          if aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET }}" \
+               --endpoint-url "${{ vars.TF_STATE_ENDPOINT }}" 2>/dev/null; then
+            echo "bucket ${{ vars.TF_STATE_BUCKET }} exists"
+          else
+            echo "creating bucket ${{ vars.TF_STATE_BUCKET }}"
+            aws s3 mb "s3://${{ vars.TF_STATE_BUCKET }}" \
+              --region "${{ vars.TF_STATE_REGION }}" \
+              --endpoint-url "${{ vars.TF_STATE_ENDPOINT }}"
+          fi
+
       - name: Terraform init
         run: |
           terraform init \
