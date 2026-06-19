@@ -54,6 +54,15 @@ jobs:
       TF_VAR_status_endpoint: ${{ vars.TF_STATE_ENDPOINT }}
       TF_VAR_status_access_key: ${{ secrets.LINODE_OBJ_ACCESS_KEY }}
       TF_VAR_status_secret_key: ${{ secrets.LINODE_OBJ_SECRET_KEY }}
+      # Apex settlement top-up (Base Sepolia): fund apex[3] from treasury[0] post-apply
+      # so the apex has gas to settle channels on-chain. Same seed, different account.
+      TREASURY_MNEMONIC: ${{ secrets.TREASURY_MNEMONIC }}
+      TREASURY_ACCOUNT_INDEX: ${{ vars.TREASURY_ACCOUNT_INDEX || '0' }}
+      APEX_ACCOUNT_INDEX: ${{ vars.APEX_ACCOUNT_INDEX || '3' }}
+      BASE_SEPOLIA_RPC: ${{ vars.BASE_SEPOLIA_RPC }}
+      USDC_ADDRESS: ${{ vars.USDC_ADDRESS }}
+      MIN_ETH: ${{ vars.APEX_MIN_ETH || '0.003' }}
+      TOPUP_ETH: ${{ vars.APEX_TOPUP_ETH || '0.01' }}
     defaults:
       run:
         working-directory: infra/terraform
@@ -100,6 +109,19 @@ jobs:
       - name: Terraform apply
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply_infra)
         run: terraform apply -auto-approve -input=false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Top up apex settlement account (Base Sepolia)
+        # The apex address is deterministic from the seed, so this runs on the runner —
+        # no box access. Idempotent: only sends when the apex is under the gas floor.
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply_infra)
+        working-directory: .
+        run: |
+          npm --prefix infra/topup install --no-audit --no-fund
+          node infra/topup/topup.mjs
 
       - name: Wait for the box to self-report (status object)
         run: |

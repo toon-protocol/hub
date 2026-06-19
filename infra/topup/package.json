@@ -1,0 +1,10 @@
+{
+  "name": "townhouse-apex-topup",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Post-apply treasury -> apex settlement-account top-up (Base Sepolia).",
+  "dependencies": {
+    "viem": "^2.52.0"
+  }
+}
