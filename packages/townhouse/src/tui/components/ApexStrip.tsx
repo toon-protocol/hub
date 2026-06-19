@@ -1,7 +1,7 @@
 import { Text } from 'ink';
 import type { ReactElement } from 'react';
 import type { AggregatedEarnings } from '../types.js';
-import { formatUsdc } from '../format.js';
+import { formatUsdc, USDC_FALLBACK } from '../format.js';
 import { COPY } from '../copy.js';
 
 const USDC_SCALE = 6;
@@ -34,7 +34,12 @@ export function ApexStrip({ apex, peers }: ApexStripProps): ReactElement {
     totalMonth = BigInt(addDecimalStrings(totalMonth.toString(), peerMonth));
   }
 
-  const apexFmt = formatUsdc(apexMonth, USDC_SCALE);
+  let apexFmt: string;
+  try {
+    apexFmt = formatUsdc(apexMonth, USDC_SCALE);
+  } catch {
+    apexFmt = USDC_FALLBACK;
+  }
   const hasMillPeer = peers.some((p) => p.type === 'mill');
 
   // Malformed apex.month: render the formatUsdc fallback alone — adding the Mill upsell

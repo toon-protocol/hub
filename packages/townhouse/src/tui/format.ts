@@ -51,6 +51,8 @@ export function formatUsdcMicro(decimalString: string, scale: number): string {
   return negative && value !== 0n ? `-${formatted}` : formatted;
 }
 
+export const USDC_FALLBACK = '$?.??';
+
 export function formatUsdc(decimalString: string, scale: number): string {
   if (!DECIMAL_RE.test(decimalString)) {
     const env = process.env['NODE_ENV'];
@@ -59,7 +61,7 @@ export function formatUsdc(decimalString: string, scale: number): string {
         `formatUsdc: invalid decimal string: ${JSON.stringify(decimalString)}`
       );
     }
-    return '$?.??';
+    return USDC_FALLBACK;
   }
 
   const negative = decimalString.startsWith('-');

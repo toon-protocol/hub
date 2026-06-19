@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
 import React from 'react';
 import { ActivityOverlay } from './ActivityOverlay.js';
+import { USDC_MICRO_FALLBACK } from '../format.js';
 import { COPY } from '../copy.js';
 import type { RecentClaim } from '../types.js';
 
@@ -200,7 +201,7 @@ describe('ActivityOverlay', () => {
         rows: 24,
       })
     );
-    expect(lastFrame() ?? '').toContain('$?.????');
+    expect(lastFrame() ?? '').toContain(USDC_MICRO_FALLBACK);
   });
 
   it('title clamps to MAX_BUFFER_SIZE even if claims.length exceeds it (P3 — defensive cap)', () => {

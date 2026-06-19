@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
 import React from 'react';
 import { PeerTable } from './PeerTable.js';
+import { USDC_FALLBACK } from '../format.js';
 import { COPY } from '../copy.js';
 import type { AggregatedEarnings } from '../types.js';
 
@@ -102,6 +103,14 @@ describe('PeerTable component', () => {
     // 5m ago → 5m (ago suffix dropped)
     expect(frame).toContain('5m');
     expect(frame).not.toContain('5m ago');
+  });
+
+  it('malformed month renders USDC_FALLBACK (no crash)', () => {
+    const peers = [makePeer('bad-peer', 'town', { USDC: 'not-a-number' })];
+    const { lastFrame } = render(React.createElement(PeerTable, { peers, now: FIXED_NOW }));
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain(USDC_FALLBACK);
+    expect(frame).toContain('bad-peer');
   });
 
   it('width 55: LAST CLAIM column dropped entirely', () => {

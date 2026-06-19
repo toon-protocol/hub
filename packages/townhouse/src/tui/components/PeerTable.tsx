@@ -1,7 +1,7 @@
 import { Box, Text, useStdout } from 'ink';
 import type { ReactElement } from 'react';
 import type { AggregatedEarnings, NodeEarnings, PerAsset } from '../types.js';
-import { formatUsdc, formatRelativeTime } from '../format.js';
+import { formatUsdc, formatRelativeTime, USDC_FALLBACK } from '../format.js';
 import { COPY } from '../copy.js';
 
 const USDC_SCALE = 6;
@@ -83,7 +83,12 @@ export function PeerTable({ peers, now = new Date(), columns: columnsProp }: Pee
         const peerCell = row.isFirstRowOfPeer ? row.peerId : '';
         const typeRaw = row.isFirstRowOfPeer ? row.type : '';
         const typeCell = shortType && typeRaw.length > 0 ? typeRaw.slice(0, 3) : typeRaw;
-        const netFmt = formatUsdc(row.perAsset.month, USDC_SCALE);
+        let netFmt: string;
+        try {
+          netFmt = formatUsdc(row.perAsset.month, USDC_SCALE);
+        } catch {
+          netFmt = USDC_FALLBACK;
+        }
         let lastClaim = formatRelativeTime(row.lastClaimAt, now);
         if (dropAgoSuffix && lastClaim.endsWith(' ago')) {
           lastClaim = lastClaim.slice(0, -' ago'.length);
