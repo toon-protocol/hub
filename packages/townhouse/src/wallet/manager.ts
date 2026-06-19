@@ -56,7 +56,7 @@ import type {
 // mill is a build-only (dev) dependency — it ships as a Docker image, never an
 // npm runtime dep of townhouse. The `noExternal` rule in tsup.config.ts bundles
 // this into dist so the published package has zero @toon-protocol/* runtime deps.
-import { deriveMillKeys } from '@toon-protocol/mill/wallet';
+import { deriveMillKeys } from '@toon-protocol/swap/wallet';
 import {
   base58Encode as coreBase58Encode,
   hexToMinaBase58PrivateKey,
