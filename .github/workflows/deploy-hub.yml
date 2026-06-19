@@ -2,7 +2,7 @@ name: Deploy Hub (Linode)
 
 # Provisions the apex host with Terraform. The box brings ITSELF up via cloud-init (no
 # SSH): it installs the pinned hub CLI, initializes in mnemonic mode (seed from
-# TREASURY_MNEMONIC, no wallet file / no password), and runs `townhouse up`. Health +
+# E2E_DEV_MNEMONIC, no wallet file / no password), and runs `townhouse up`. Health +
 # funding addresses are read from the status object the box pushes to Object Storage —
 # this workflow never opens a shell on the box.
 #
@@ -38,15 +38,17 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
+      # The Terraform linode provider reads the LINODE_TOKEN env var; source it from the
+      # org secret named LINODE_CLI_TOKEN.
+      LINODE_TOKEN: ${{ secrets.LINODE_CLI_TOKEN }}
       # Linode Object Storage creds — used both for the Terraform S3 state backend and,
       # passed through to the box, for the status push.
       AWS_ACCESS_KEY_ID: ${{ secrets.LINODE_OBJ_ACCESS_KEY }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.LINODE_OBJ_SECRET_KEY }}
       # Apex identity derives from the treasury seed (mnemonic mode). Same org secret the
       # client journey uses — different derivation account, so no collision.
-      TF_VAR_operator_mnemonic: ${{ secrets.TREASURY_MNEMONIC }}
-      TF_VAR_allowed_client_cidr: ${{ vars.ALLOWED_CLIENT_CIDR }}
+      TF_VAR_operator_mnemonic: ${{ secrets.E2E_DEV_MNEMONIC }}
+      TF_VAR_allowed_client_cidr: ${{ vars.ALLOWED_CLIENT_CIDR || '0.0.0.0/0' }}
       TF_VAR_region: ${{ vars.LINODE_REGION }}
       TF_VAR_transport: ${{ inputs.transport || 'direct' }}
       # Status sink (no-SSH observability) — reuse the state bucket + OBJ creds.
@@ -56,7 +58,7 @@ jobs:
       TF_VAR_status_secret_key: ${{ secrets.LINODE_OBJ_SECRET_KEY }}
       # Apex settlement top-up (Base Sepolia): fund apex[3] from treasury[0] post-apply
       # so the apex has gas to settle channels on-chain. Same seed, different account.
-      TREASURY_MNEMONIC: ${{ secrets.TREASURY_MNEMONIC }}
+      TREASURY_MNEMONIC: ${{ secrets.E2E_DEV_MNEMONIC }}
       TREASURY_ACCOUNT_INDEX: ${{ vars.TREASURY_ACCOUNT_INDEX || '0' }}
       APEX_ACCOUNT_INDEX: ${{ vars.APEX_ACCOUNT_INDEX || '3' }}
       BASE_SEPOLIA_RPC: ${{ vars.BASE_SEPOLIA_RPC }}
@@ -69,6 +71,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Preflight — required config present
+        working-directory: .
+        run: |
+          missing=()
+          [ -n "${{ secrets.LINODE_CLI_TOKEN }}" ]    || missing+=("secret:LINODE_CLI_TOKEN")
+          [ -n "${{ secrets.E2E_DEV_MNEMONIC }}" ]   || missing+=("secret:E2E_DEV_MNEMONIC")
+          [ -n "${{ secrets.LINODE_OBJ_ACCESS_KEY }}" ] || missing+=("secret:LINODE_OBJ_ACCESS_KEY")
+          [ -n "${{ secrets.LINODE_OBJ_SECRET_KEY }}" ] || missing+=("secret:LINODE_OBJ_SECRET_KEY")
+          [ -n "${{ vars.TF_STATE_BUCKET }}" ]   || missing+=("var:TF_STATE_BUCKET")
+          [ -n "${{ vars.TF_STATE_REGION }}" ]   || missing+=("var:TF_STATE_REGION")
+          [ -n "${{ vars.TF_STATE_ENDPOINT }}" ] || missing+=("var:TF_STATE_ENDPOINT")
+          [ -n "${{ vars.LINODE_REGION }}" ]     || missing+=("var:LINODE_REGION")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::missing required config (set with visibility to this public repo): ${missing[*]}"
+            exit 1
+          fi
+          echo "all required secrets/variables present"
 
       - name: Pin hub version from infra/hub-version.txt
         working-directory: .
