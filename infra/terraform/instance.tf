@@ -1,22 +1,26 @@
-# The apex host. Ubuntu 24.04 + cloud-init that installs Docker, Node 20, and the
-# pinned hub CLI, then mounts the persistent volume at /mnt/townhouse. The wallet is
-# NOT initialized here — an operator runs `townhouse init` once, out of band, so the
-# treasury seed never lives in Terraform state or CI (see docs/deploy-linode.md).
+# The apex host. Ubuntu 24.04 + cloud-init that installs Docker, Node 20, and the pinned
+# hub CLI, mounts the persistent volume at /mnt/townhouse, then initializes (mnemonic
+# mode) and starts the apex via a systemd unit — entirely at first boot, no SSH. There
+# is no authorized_keys: the box is config-driven and observed via the status push.
 
 resource "linode_instance" "hub" {
-  label           = var.label
-  region          = var.region
-  type            = var.instance_type
-  image           = "linode/ubuntu24.04"
-  root_pass       = random_password.root.result
-  authorized_keys = [trimspace(var.ssh_pubkey)]
-  tags            = ["toon", "hub", "apex"]
+  label     = var.label
+  region    = var.region
+  type      = var.instance_type
+  image     = "linode/ubuntu24.04"
+  root_pass = random_password.root.result
+  tags      = ["toon", "hub", "apex"]
 
   metadata {
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
-      ssh_pubkey   = trimspace(var.ssh_pubkey)
-      hub_version  = var.hub_version
-      volume_label = local.volume_label
+      hub_version       = var.hub_version
+      volume_label      = local.volume_label
+      network           = var.network
+      operator_mnemonic = var.operator_mnemonic
+      status_bucket     = var.status_bucket
+      status_endpoint   = var.status_endpoint
+      status_access_key = var.status_access_key
+      status_secret_key = var.status_secret_key
     }))
   }
 }

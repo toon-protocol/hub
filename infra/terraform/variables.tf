@@ -17,7 +17,7 @@ variable "instance_type" {
 }
 
 variable "volume_size" {
-  description = "Persistent Block Storage volume size in GiB (holds TOWNHOUSE_HOME: config.yaml, wallet.enc, the .anon identity, and the SQLite settlement DB)."
+  description = "Persistent Block Storage volume size in GiB (holds TOWNHOUSE_HOME: config.yaml, the .anon identity, and the SQLite settlement DB)."
   type        = number
   default     = 30
 }
@@ -28,14 +28,16 @@ variable "hub_version" {
   default     = "0.34.3"
 }
 
-variable "ssh_pubkey" {
-  description = "Public half of the CI deploy key (HUB_SSH_KEY). Installed for the 'deploy' user via cloud-init."
+variable "network" {
+  description = "Network tier the apex initializes with (testnet | devnet | mainnet | custom)."
   type        = string
+  default     = "testnet"
 }
 
-variable "allowed_ssh_cidr" {
-  description = "CIDR allowed to reach SSH (port 22). Restrict to the CI egress / operator IP — never 0.0.0.0/0 in production."
+variable "operator_mnemonic" {
+  description = "Operator/treasury seed phrase. Runs the apex in mnemonic mode (no wallet file, no password) — the identity + settlement keys derive deterministically from it. Travels via cloud-init user-data (API-token-gated); lands in TF state, so the state bucket must stay private. Testnet/tiny-funds only."
   type        = string
+  sensitive   = true
 }
 
 variable "allowed_client_cidr" {
@@ -53,4 +55,35 @@ variable "transport" {
     condition     = contains(["direct", "hs"], var.transport)
     error_message = "transport must be 'direct' or 'hs'."
   }
+}
+
+# --- Status sink (no-SSH observability) -------------------------------------------
+# The control API is loopback-only by design, so instead of exposing it the box pushes
+# `townhouse status --json` to Object Storage on a timer. Read the object to see health
+# + funding addresses without ever touching the box. Leave the keys blank to disable.
+
+variable "status_bucket" {
+  description = "Object Storage bucket the box pushes status JSON to (e.g. the TF state bucket). Empty disables the status push."
+  type        = string
+  default     = ""
+}
+
+variable "status_endpoint" {
+  description = "Object Storage S3 endpoint (e.g. https://us-ord-1.linodeobjects.com)."
+  type        = string
+  default     = ""
+}
+
+variable "status_access_key" {
+  description = "Object Storage access key for the status push (write-only use)."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "status_secret_key" {
+  description = "Object Storage secret key for the status push."
+  type        = string
+  default     = ""
+  sensitive   = true
 }

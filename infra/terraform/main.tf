@@ -42,8 +42,9 @@ provider "linode" {
   # token sourced from LINODE_TOKEN
 }
 
-# Linode requires a root password even when SSH keys are the only intended access.
-# Generate a strong random one we never print or reuse (login is key-only).
+# Linode requires a root password. We set a strong random one we never print or use —
+# no SSH access is configured at all (the box is operated via cloud-init + the status
+# push). Break-glass is the Linode LISH console with an API-driven password reset.
 resource "random_password" "root" {
   length  = 32
   special = true

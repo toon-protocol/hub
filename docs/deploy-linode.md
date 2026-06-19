@@ -1,103 +1,97 @@
 # Deploying the TOON apex hub to Linode
 
 Stands the operator hub up on a Linode (Akamai Connected Cloud) VPS with reproducible
-Terraform infra and a GitHub Actions deploy pipeline. The box runs the
-`@toon-protocol/hub` CLI (`townhouse up`), which pulls the pinned GHCR node images
-(`connector`, `townhouse-api`, `town`, `mill`, `dvm` — all public) and orchestrates the
-apex stack.
+Terraform infra. **There is no SSH.** Terraform creates the box; the box brings *itself*
+up via cloud-init: it installs the `@toon-protocol/hub` CLI, initializes in **mnemonic
+mode** (identity derives from the treasury seed — no wallet file, no password), and runs
+`townhouse up` (which pulls the pinned, public GHCR node images: `connector`,
+`townhouse-api`, `town`, `mill`, `dvm`). Health + funding addresses are pushed to Object
+Storage, so you observe the box without ever opening a shell.
 
-- **Phase 1 — direct BTP:** the apex exposes BTP `3000` (pay-to-write) and the Nostr
-  relay WS `7100` (free reads); a client dials them directly.
-- **Phase 2 — anyone proxy (HS):** the apex is reached over its `.anon` hidden service;
-  no protocol inbound is open.
+- **Phase 1 — direct BTP:** the apex exposes BTP `3000` (pay-to-write) and the relay WS
+  `7100` (reads); clients dial them directly.
+- **Phase 2 — anyone proxy (HS):** reached over the `.anon` hidden service; no inbound.
 
 ## What lives where
 
 | Concern | Location |
 | --- | --- |
 | Infra (instance, volume, firewall, cloud-init) | [`infra/terraform/`](../infra/terraform/) |
-| Deploy pipeline | [`.github/workflows/deploy-hub.yml`](../.github/workflows/deploy-hub.yml) |
+| Provision pipeline | [`.github/workflows/deploy-hub.yml`](../.github/workflows/deploy-hub.yml) |
 | Pinned hub version | [`infra/hub-version.txt`](../infra/hub-version.txt) |
-| Durable state (config, `wallet.enc`, `.anon`, settlement DB) | Block Storage volume → `/mnt/townhouse` |
+| Durable state (config, `.anon` identity, settlement DB) | Block Storage volume → `/mnt/townhouse` |
+| Health + funding addresses (no SSH) | `s3://<state-bucket>/hub/status.json` |
 
 ## 1. Org secrets & variables (one-time)
-
-Create these in **org → Settings → Secrets and variables → Actions** (or repo-scoped).
 
 **Secrets**
 
 | Name | Purpose |
 | --- | --- |
 | `LINODE_TOKEN` | Linode API token (Linodes / Volumes / Firewalls R/W). |
-| `LINODE_OBJ_ACCESS_KEY` / `LINODE_OBJ_SECRET_KEY` | Linode Object Storage keys for Terraform S3 state. |
-| `HUB_SSH_KEY` | **Private** half of the CI deploy key. |
-| `TOWNHOUSE_WALLET_PASSWORD` | Unlocks `wallet.enc` at `townhouse up`. |
+| `LINODE_OBJ_ACCESS_KEY` / `LINODE_OBJ_SECRET_KEY` | Object Storage keys — Terraform state **and** the box's status push. |
+| `TREASURY_MNEMONIC` | Seed the apex derives its identity + settlement keys from (mnemonic mode). The same org secret the client journey uses (different derivation account). |
 
 **Variables**
 
 | Name | Example | Purpose |
 | --- | --- | --- |
-| `HUB_SSH_PUBKEY` | `ssh-ed25519 AAAA...` | Public half of `HUB_SSH_KEY` → cloud-init. |
-| `ALLOWED_SSH_CIDR` | `203.0.113.4/32` | Who may SSH. |
-| `ALLOWED_CLIENT_CIDR` | `203.0.113.4/32` | Phase 1 BTP/relay source CIDR. |
+| `ALLOWED_CLIENT_CIDR` | `0.0.0.0/0` | Phase 1 BTP/relay source CIDR (restrict if you can). |
 | `LINODE_REGION` | `us-ord` | Region. |
-| `TF_STATE_BUCKET` | `toon-tfstate` | Object Storage bucket for TF state. |
+| `TF_STATE_BUCKET` | `toon-tfstate` | Object Storage bucket (TF state + the status object). |
 | `TF_STATE_REGION` | `us-ord-1` | Object Storage region. |
 | `TF_STATE_ENDPOINT` | `https://us-ord-1.linodeobjects.com` | Object Storage S3 endpoint. |
 
-Generate the deploy key with `ssh-keygen -t ed25519 -f hub_deploy -N ''` → private into
-`HUB_SSH_KEY`, public into `HUB_SSH_PUBKEY`. Create the Object Storage bucket once
-(Cloud Manager or `linode-cli obj mb`).
+> No SSH key, no `ALLOWED_SSH_CIDR`, no wallet password — the box is config-driven and
+> never shelled into.
 
-## 2. Provision the box
+## 2. Provision (one step)
 
 Run the **Deploy Hub (Linode)** workflow with `apply_infra = true` (or `terraform apply`
-locally — see [`infra/terraform/README.md`](../infra/terraform/README.md)). This creates
-the instance, attaches the volume (mounted at `/mnt/townhouse`), and applies the
-firewall. Grab the IP from the run logs or `terraform output -raw instance_ip`.
+locally — see [`infra/terraform/README.md`](../infra/terraform/README.md)). Terraform
+creates the instance + volume + firewall and hands the seed + config to cloud-init. The
+box then self-installs, self-initializes (mnemonic mode), and starts the apex via the
+`townhouse.service` systemd unit. The workflow polls `hub/status.json` and prints it when
+the apex reports in (cloud-init takes a few minutes for image pulls).
 
-## 3. One-time wallet bootstrap (seed stays off CI)
+## 3. Fund the apex (no box access)
 
-SSH in as `deploy` and initialize the wallet **once**, interactively. The seed and
-`wallet.enc` live only on the volume — never in CI or Terraform state.
+The apex identity is **deterministic** from `TREASURY_MNEMONIC` (settlement keys at
+account index 3), so you can derive the funding addresses off-box — or just read them
+from the pushed status object:
 
 ```bash
-ssh deploy@<IP>
-townhouse init --preset demo        # generates/loads the mnemonic; set the wallet password
-                                     #   (must equal the TOWNHOUSE_WALLET_PASSWORD secret)
-townhouse seed                       # record the mnemonic offline; back it up
-townhouse balances                   # print the EVM/Solana/Mina + Arweave addresses
+aws s3 cp "s3://<state-bucket>/hub/status.json" - \
+  --endpoint-url "https://<region>.linodeobjects.com" | jq .
 ```
 
-Fund the printed treasury addresses with **small** testnet/devnet amounts only
-(Base Sepolia USDC + a little ETH for gas; Solana devnet SOL; Mina devnet MINA). Keep
-balances tiny so a mistake can't drain real value.
+Fund the EVM/Solana/Mina addresses with **small** testnet/devnet amounts only (Base
+Sepolia USDC + a little gas; Solana devnet SOL; Mina devnet MINA). Keep balances tiny.
 
-## 4. Deploy
+## 4. Observe / redeploy
 
-- **Automatic:** pushing changes under `infra/**` (or bumping `infra/hub-version.txt`)
-  triggers the pipeline → `townhouse up` over SSH → health gate.
-- **Manual:** run the workflow with `transport = direct` (Phase 1). The deploy step
-  refuses to run if `wallet.enc` is missing (forces step 3 first).
-
-The deploy is idempotent: re-running re-pulls the pinned images and recreates the stack;
-the volume preserves identity and channel state.
+- **Logs & health:** read `s3://<state-bucket>/hub/status.json` (refreshed every ~5 min
+  by the box). No SSH, no exposed control API (it stays loopback-only by design).
+- **Update the pinned version / config:** bump `infra/hub-version.txt` (or edit the
+  Terraform) and re-run the workflow. cloud-init re-runs on a fresh instance; the volume
+  preserves the identity + settlement state. (Immutable-style: replace the box, keep the
+  volume.)
 
 ## 5. Phase 2 — behind the anyone proxy
 
-Once the direct demo passes, re-run the workflow with `apply_infra = true` and
-`transport = hs`. Terraform closes inbound `3000`/`7100` (HS rendezvous needs no inbound)
-and `townhouse up --transport hs` brings up the `anon` sidecar. Confirm a stable `.anon`
-hostname with `townhouse status --json`, and hand that endpoint to the client.
+Re-run with `apply_infra = true`, `transport = hs`. Terraform closes inbound `3000`/`7100`
+and the boot brings up the `anon` sidecar; the `.anon` hostname appears in the status
+object. Hand that endpoint to the client.
 
-> Requires the hub-side ATOR plumbing (epic `toon-protocol/toon-meta#22`, WS1 / hub
-> ATOR ticket). Until that lands, `--transport hs` is provisioned-for but not functional.
+> Requires the hub-side ATOR plumbing (epic `toon-protocol/toon-meta#22`, WS1). Until that
+> lands, `--transport hs` is provisioned-for but not functional.
 
 ## 6. Teardown & safety
 
-- **The Block Storage volume is the durable root of the wallet + `.anon` identity.**
-  Snapshot it (Cloud Manager → Volumes → clone, or an image) before `terraform destroy`.
-- `terraform destroy` removes the instance + firewall; detach (don't delete) the volume
-  if you intend to redeploy onto the same identity.
-- Rotate `HUB_SSH_KEY` and `TOWNHOUSE_WALLET_PASSWORD` per the org's secret-rotation
-  policy.
+- **The Block Storage volume is the durable root of the apex identity.** Snapshot it
+  before `terraform destroy`; detach (don't delete) it to redeploy onto the same identity.
+- The treasury seed travels via cloud-init user-data and lands in Terraform state — keep
+  the **state bucket private**, and use this for **testnet/tiny-funds only**. Rotate the
+  seed if the bucket is ever exposed.
+- Break-glass (rare): the Linode **LISH console** (Cloud Manager / API) gives serial
+  access with no open port — reset the root password via the API if you ever need in.
