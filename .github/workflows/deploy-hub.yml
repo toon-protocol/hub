@@ -1,0 +1,138 @@
+name: Deploy Hub (Linode)
+
+# Provisions the apex host with Terraform. The box brings ITSELF up via cloud-init (no
+# SSH): it installs the pinned hub CLI, initializes in mnemonic mode (seed from
+# TREASURY_MNEMONIC, no wallet file / no password), and runs `townhouse up`. Health +
+# funding addresses are read from the status object the box pushes to Object Storage —
+# this workflow never opens a shell on the box.
+#
+# Push to main runs only when infra/the workflow change (paths filter). Use the manual
+# dispatch to apply infra changes or to flip transport (direct <-> hs).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/deploy-hub.yml'
+  workflow_dispatch:
+    inputs:
+      transport:
+        description: 'BTP transport the firewall is provisioned for'
+        type: choice
+        options: [direct, hs]
+        default: direct
+      apply_infra:
+        description: 'Run `terraform apply` (provision/update the box + firewall)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-hub
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
+      # Linode Object Storage creds — used both for the Terraform S3 state backend and,
+      # passed through to the box, for the status push.
+      AWS_ACCESS_KEY_ID: ${{ secrets.LINODE_OBJ_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.LINODE_OBJ_SECRET_KEY }}
+      # Apex identity derives from the treasury seed (mnemonic mode). Same org secret the
+      # client journey uses — different derivation account, so no collision.
+      TF_VAR_operator_mnemonic: ${{ secrets.TREASURY_MNEMONIC }}
+      TF_VAR_allowed_client_cidr: ${{ vars.ALLOWED_CLIENT_CIDR }}
+      TF_VAR_region: ${{ vars.LINODE_REGION }}
+      TF_VAR_transport: ${{ inputs.transport || 'direct' }}
+      # Status sink (no-SSH observability) — reuse the state bucket + OBJ creds.
+      TF_VAR_status_bucket: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_status_endpoint: ${{ vars.TF_STATE_ENDPOINT }}
+      TF_VAR_status_access_key: ${{ secrets.LINODE_OBJ_ACCESS_KEY }}
+      TF_VAR_status_secret_key: ${{ secrets.LINODE_OBJ_SECRET_KEY }}
+      # Apex settlement top-up (Base Sepolia): fund apex[3] from treasury[0] post-apply
+      # so the apex has gas to settle channels on-chain. Same seed, different account.
+      TREASURY_MNEMONIC: ${{ secrets.TREASURY_MNEMONIC }}
+      TREASURY_ACCOUNT_INDEX: ${{ vars.TREASURY_ACCOUNT_INDEX || '0' }}
+      APEX_ACCOUNT_INDEX: ${{ vars.APEX_ACCOUNT_INDEX || '3' }}
+      BASE_SEPOLIA_RPC: ${{ vars.BASE_SEPOLIA_RPC }}
+      USDC_ADDRESS: ${{ vars.USDC_ADDRESS }}
+      MIN_ETH: ${{ vars.APEX_MIN_ETH || '0.003' }}
+      TOPUP_ETH: ${{ vars.APEX_TOPUP_ETH || '0.01' }}
+    defaults:
+      run:
+        working-directory: infra/terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin hub version from infra/hub-version.txt
+        working-directory: .
+        run: echo "TF_VAR_hub_version=$(tr -d '[:space:]' < infra/hub-version.txt)" >> "$GITHUB_ENV"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Ensure Object Storage bucket exists
+        # The TF state backend (and the status sink) need this bucket to pre-exist —
+        # Terraform can't manage the bucket that holds its own state. CI creates it with
+        # the OBJ keys it already has. Idempotent: skip if it's already there.
+        run: |
+          if aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET }}" \
+               --endpoint-url "${{ vars.TF_STATE_ENDPOINT }}" 2>/dev/null; then
+            echo "bucket ${{ vars.TF_STATE_BUCKET }} exists"
+          else
+            echo "creating bucket ${{ vars.TF_STATE_BUCKET }}"
+            aws s3 mb "s3://${{ vars.TF_STATE_BUCKET }}" \
+              --region "${{ vars.TF_STATE_REGION }}" \
+              --endpoint-url "${{ vars.TF_STATE_ENDPOINT }}"
+          fi
+
+      - name: Terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=hub/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_STATE_REGION }}" \
+            -backend-config="endpoints={s3=\"${{ vars.TF_STATE_ENDPOINT }}\"}"
+
+      - name: Terraform fmt + validate
+        run: |
+          terraform fmt -check
+          terraform validate
+
+      - name: Terraform apply
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply_infra)
+        run: terraform apply -auto-approve -input=false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Top up apex settlement account (Base Sepolia)
+        # The apex address is deterministic from the seed, so this runs on the runner —
+        # no box access. Idempotent: only sends when the apex is under the gas floor.
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply_infra)
+        working-directory: .
+        run: |
+          npm --prefix infra/topup install --no-audit --no-fund
+          node infra/topup/topup.mjs
+
+      - name: Wait for the box to self-report (status object)
+        run: |
+          IP=$(terraform output -raw instance_ip 2>/dev/null || echo '?')
+          echo "Apex provisioning at $IP — it self-configures via cloud-init (a few minutes for image pulls)."
+          echo "Polling s3://${{ vars.TF_STATE_BUCKET }}/hub/status.json ..."
+          for i in $(seq 1 20); do
+            if aws s3 cp "s3://${{ vars.TF_STATE_BUCKET }}/hub/status.json" - \
+                 --endpoint-url "${{ vars.TF_STATE_ENDPOINT }}" 2>/dev/null; then
+              echo "::notice::apex reported status."; exit 0
+            fi
+            sleep 30
+          done
+          echo "::warning::no status object yet — cloud-init may still be running. Re-check the object shortly."

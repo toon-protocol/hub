@@ -29,7 +29,14 @@ export function ActivityTicker({ recentClaims, now = new Date() }: ActivityTicke
     return <Text dimColor>{COPY.activityTicker.empty}</Text>;
   }
   const arrow = arrowFor(claim.direction);
-  const amount = formatUsdcMicro(claim.amount, claim.assetScale);
+  // formatUsdcMicro throws on a malformed amount; render the placeholder rather than
+  // blanking the whole ticker (fixes #12).
+  let amount: string;
+  try {
+    amount = formatUsdcMicro(claim.amount, claim.assetScale);
+  } catch {
+    amount = '$?.????';
+  }
   const rel = formatRelativeTime(claim.at, now);
   return (
     <Text dimColor>
