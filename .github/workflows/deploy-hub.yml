@@ -38,7 +38,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
+      # The Terraform linode provider reads the LINODE_TOKEN env var; source it from the
+      # org secret named LINODE_CLI_TOKEN.
+      LINODE_TOKEN: ${{ secrets.LINODE_CLI_TOKEN }}
       # Linode Object Storage creds — used both for the Terraform S3 state backend and,
       # passed through to the box, for the status push.
       AWS_ACCESS_KEY_ID: ${{ secrets.LINODE_OBJ_ACCESS_KEY }}
@@ -46,7 +48,7 @@ jobs:
       # Apex identity derives from the treasury seed (mnemonic mode). Same org secret the
       # client journey uses — different derivation account, so no collision.
       TF_VAR_operator_mnemonic: ${{ secrets.TREASURY_MNEMONIC }}
-      TF_VAR_allowed_client_cidr: ${{ vars.ALLOWED_CLIENT_CIDR }}
+      TF_VAR_allowed_client_cidr: ${{ vars.ALLOWED_CLIENT_CIDR || '0.0.0.0/0' }}
       TF_VAR_region: ${{ vars.LINODE_REGION }}
       TF_VAR_transport: ${{ inputs.transport || 'direct' }}
       # Status sink (no-SSH observability) — reuse the state bucket + OBJ creds.
@@ -69,6 +71,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Preflight — required config present
+        working-directory: .
+        run: |
+          missing=()
+          [ -n "${{ secrets.LINODE_CLI_TOKEN }}" ]    || missing+=("secret:LINODE_CLI_TOKEN")
+          [ -n "${{ secrets.TREASURY_MNEMONIC }}" ]   || missing+=("secret:TREASURY_MNEMONIC")
+          [ -n "${{ secrets.LINODE_OBJ_ACCESS_KEY }}" ] || missing+=("secret:LINODE_OBJ_ACCESS_KEY")
+          [ -n "${{ secrets.LINODE_OBJ_SECRET_KEY }}" ] || missing+=("secret:LINODE_OBJ_SECRET_KEY")
+          [ -n "${{ vars.TF_STATE_BUCKET }}" ]   || missing+=("var:TF_STATE_BUCKET")
+          [ -n "${{ vars.TF_STATE_REGION }}" ]   || missing+=("var:TF_STATE_REGION")
+          [ -n "${{ vars.TF_STATE_ENDPOINT }}" ] || missing+=("var:TF_STATE_ENDPOINT")
+          [ -n "${{ vars.LINODE_REGION }}" ]     || missing+=("var:LINODE_REGION")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::missing required config (set with visibility to this public repo): ${missing[*]}"
+            exit 1
+          fi
+          echo "all required secrets/variables present"
 
       - name: Pin hub version from infra/hub-version.txt
         working-directory: .
