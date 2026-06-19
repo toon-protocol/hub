@@ -1,0 +1,119 @@
+name: Deploy Hub (Linode)
+
+# Provisions/updates the apex host with Terraform, then deploys by SSHing in and
+# running `townhouse up` (which pulls the pinned GHCR node images). The treasury seed
+# is never handled here — the wallet is initialized once on the box (see
+# docs/deploy-linode.md); CI only passes the unlock password.
+#
+# Push to main runs only when infra/the workflow change (paths filter). Use the manual
+# dispatch to apply infra changes deliberately or to flip transport (direct <-> hs).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/deploy-hub.yml'
+  workflow_dispatch:
+    inputs:
+      transport:
+        description: 'BTP transport for `townhouse up`'
+        type: choice
+        options: [direct, hs]
+        default: direct
+      apply_infra:
+        description: 'Run `terraform apply` (provision/update the box + firewall)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-hub
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      LINODE_TOKEN: ${{ secrets.LINODE_TOKEN }}
+      # Linode Object Storage creds for the Terraform S3 state backend.
+      AWS_ACCESS_KEY_ID: ${{ secrets.LINODE_OBJ_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.LINODE_OBJ_SECRET_KEY }}
+      TF_VAR_ssh_pubkey: ${{ vars.HUB_SSH_PUBKEY }}
+      TF_VAR_allowed_ssh_cidr: ${{ vars.ALLOWED_SSH_CIDR }}
+      TF_VAR_allowed_client_cidr: ${{ vars.ALLOWED_CLIENT_CIDR }}
+      TF_VAR_region: ${{ vars.LINODE_REGION }}
+      TF_VAR_transport: ${{ inputs.transport || 'direct' }}
+      TRANSPORT: ${{ inputs.transport || 'direct' }}
+    defaults:
+      run:
+        working-directory: infra/terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin hub version from infra/hub-version.txt
+        working-directory: .
+        run: echo "HUB_VERSION=$(tr -d '[:space:]' < infra/hub-version.txt)" >> "$GITHUB_ENV"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=hub/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_STATE_REGION }}" \
+            -backend-config="endpoints={s3=\"${{ vars.TF_STATE_ENDPOINT }}\"}"
+
+      - name: Terraform fmt + validate
+        run: |
+          terraform fmt -check
+          terraform validate
+
+      - name: Terraform apply
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply_infra)
+        env:
+          TF_VAR_hub_version: ${{ env.HUB_VERSION }}
+        run: terraform apply -auto-approve -input=false
+
+      - name: Resolve instance IP
+        id: ip
+        run: echo "ip=$(terraform output -raw instance_ip)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure SSH
+        working-directory: .
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.HUB_SSH_KEY }}" > ~/.ssh/hub_deploy
+          chmod 600 ~/.ssh/hub_deploy
+          for i in $(seq 1 10); do
+            ssh-keyscan -T 10 "${{ steps.ip.outputs.ip }}" >> ~/.ssh/known_hosts 2>/dev/null && break || sleep 6
+          done
+
+      - name: Deploy (townhouse up)
+        working-directory: .
+        env:
+          WALLET_PW: ${{ secrets.TOWNHOUSE_WALLET_PASSWORD }}
+        run: |
+          ssh -i ~/.ssh/hub_deploy "deploy@${{ steps.ip.outputs.ip }}" 'bash -s' <<EOF
+          set -euo pipefail
+          sudo npm install -g @toon-protocol/hub@${HUB_VERSION}
+          set -a; . /etc/townhouse.env; set +a
+          export TOWNHOUSE_WALLET_PASSWORD='${WALLET_PW}'
+          if [ ! -f "\$TOWNHOUSE_HOME/wallet.enc" ]; then
+            echo "::error::wallet.enc not found at \$TOWNHOUSE_HOME — run the one-time bootstrap (docs/deploy-linode.md) before deploying." >&2
+            exit 1
+          fi
+          townhouse up --transport ${TRANSPORT} --json
+          EOF
+
+      - name: Health gate (townhouse status)
+        working-directory: .
+        run: |
+          ssh -i ~/.ssh/hub_deploy "deploy@${{ steps.ip.outputs.ip }}" \
+            'set -a; . /etc/townhouse.env; set +a; townhouse status --json'

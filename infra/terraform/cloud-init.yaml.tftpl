@@ -1,0 +1,63 @@
+#cloud-config
+# Apex host bootstrap. Installs Docker + Node 20 + the pinned hub CLI, provisions the
+# 'deploy' user the CI workflow SSHes in as, and mounts the persistent volume at
+# /mnt/townhouse. Deliberately does NOT initialize the wallet — an operator runs
+# `townhouse init` once, interactively, so the treasury seed never touches CI or state.
+
+package_update: true
+package_upgrade: false
+
+users:
+  - default
+  - name: deploy
+    groups: [docker]
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    ssh_authorized_keys:
+      - ${ssh_pubkey}
+
+write_files:
+  # Environment the CI deploy step (and interactive operator) source before townhouse.
+  # TOWNHOUSE_HOME lives on the persistent volume. The *_BIND vars expose the two
+  # client-facing ports in Phase 1 direct mode; in Phase 2 (hs) they are ignored.
+  - path: /etc/townhouse.env
+    permissions: '0644'
+    content: |
+      TOWNHOUSE_HOME=/mnt/townhouse/.townhouse
+      TOWNHOUSE_WALLET_DIR=/mnt/townhouse/.townhouse
+      TOWNHOUSE_BTP_BIND=0.0.0.0
+      TOWNHOUSE_RELAY_BIND=0.0.0.0
+
+  # First-boot mount helper: wait for the Linode volume, format only if blank, mount,
+  # and persist in fstab. Idempotent across reboots and re-attaches.
+  - path: /usr/local/sbin/townhouse-mount-volume.sh
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      DEV="/dev/disk/by-id/scsi-0Linode_Volume_${volume_label}"
+      MNT="/mnt/townhouse"
+      for i in $(seq 1 30); do [ -e "$DEV" ] && break; sleep 2; done
+      if [ ! -e "$DEV" ]; then echo "volume $DEV not found" >&2; exit 1; fi
+      if ! blkid "$DEV" >/dev/null 2>&1; then
+        mkfs.ext4 -m 0 -L townhouse "$DEV"
+      fi
+      mkdir -p "$MNT"
+      grep -q "$MNT" /etc/fstab || echo "$DEV $MNT ext4 defaults,noatime,nofail 0 2" >> /etc/fstab
+      mount -a
+      mkdir -p "$MNT/.townhouse"
+      chown -R deploy:deploy "$MNT"
+
+runcmd:
+  # Mount the persistent volume first.
+  - [ bash, /usr/local/sbin/townhouse-mount-volume.sh ]
+  # Docker engine + compose plugin (townhouse orchestrates containers via the socket).
+  - [ bash, -c, "curl -fsSL https://get.docker.com | sh" ]
+  - [ systemctl, enable, --now, docker ]
+  - [ usermod, -aG, docker, deploy ]
+  # Node 20 + the pinned hub CLI (provides the `townhouse`/`hub` bins).
+  - [ bash, -c, "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -" ]
+  - [ bash, -c, "apt-get install -y nodejs" ]
+  - [ bash, -c, "npm install -g @toon-protocol/hub@${hub_version}" ]
+  # Convenience: auto-source the env for interactive operator sessions.
+  - [ bash, -c, "echo 'set -a; . /etc/townhouse.env; set +a' > /etc/profile.d/townhouse.sh" ]
