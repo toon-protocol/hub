@@ -2,8 +2,8 @@
 # Config-driven apex bootstrap — NO SSH. At first boot this installs Docker + Node 20 +
 # the pinned hub CLI, mounts the persistent volume, then a systemd unit (running as the
 # uid-1000 `townhouse` host user so generated configs match the container users)
-# initializes the apex in MNEMONIC MODE (no wallet file, no password — the identity
-# derives from the seed) and runs `townhouse up`. A timer pushes `townhouse status --json`
+# generates + persists its own encrypted wallet on the volume (no seed/password ever
+# transits CI) and runs `townhouse up`. A timer pushes `townhouse status --json`
 # to Object Storage so health + funding addresses are readable without touching the box.
 #
 # Normal operation: no 'deploy' user and no authorized_keys. For a CI debug run only, an
@@ -22,14 +22,14 @@ users:
 %{ endif ~}
 
 write_files:
-  # Runtime env injected into the systemd services (NOT sourced by bash — values like the
-  # mnemonic contain spaces). 0600; holds the seed + the status-sink credentials.
+  # Runtime env injected into the systemd services. 0600; holds the status-sink
+  # credentials. No wallet seed/password here — the box self-generates its wallet
+  # and persists it (+ password) on the volume (see townhouse-boot.sh).
   - path: /etc/townhouse.env
     permissions: '0600'
     content: |
       TOWNHOUSE_HOME=/mnt/townhouse/.townhouse
       TOWNHOUSE_WALLET_DIR=/mnt/townhouse/.townhouse
-      TOWNHOUSE_MNEMONIC=${operator_mnemonic}
       TOWNHOUSE_BTP_BIND=0.0.0.0
       TOWNHOUSE_RELAY_BIND=0.0.0.0
       # NB: do not pin TOWNHOUSE_UID/TOWNHOUSE_DOCKER_GID here — `townhouse up`
@@ -58,21 +58,46 @@ write_files:
       mount -a
       mkdir -p "$MNT/.townhouse"
 
-  # Initialize (mnemonic mode) if needed, then bring the apex up. Idempotent across
-  # reboots: config persists on the volume, so init only runs once.
+  # Generate the wallet + config if needed, then bring the apex up. Idempotent across
+  # reboots: wallet + config persist on the volume, so init only runs once.
   - path: /usr/local/sbin/townhouse-boot.sh
     permissions: '0755'
     content: |
       #!/usr/bin/env bash
       set -euo pipefail
-      : "$${TOWNHOUSE_MNEMONIC:?mnemonic not set}"
-      if [ ! -f "$TOWNHOUSE_HOME/config.yaml" ]; then
+      # Self-custodied wallet: on first boot the CLI generates a fresh random
+      # wallet, encrypted to wallet.enc on the persistent volume. The encryption
+      # password is generated here and persisted next to it (wallet.pass, 0600),
+      # so NO seed or password ever transits CI or Terraform state — the treasury
+      # funds this box's own address with small testnet amounts instead.
+      PWFILE="$TOWNHOUSE_HOME/wallet.pass"
+      mkdir -p "$TOWNHOUSE_HOME"
+      if [ ! -s "$PWFILE" ]; then
+        ( umask 077; openssl rand -base64 32 | tr -d '\n' > "$PWFILE" )
+      fi
+      export TOWNHOUSE_WALLET_PASSWORD="$(cat "$PWFILE")"
+      # Gate on the WALLET, not config.yaml: a volume carried over from an older
+      # mnemonic-mode deploy has a config.yaml but no wallet.enc — gating on config
+      # would skip init and `up` would fail. Re-running init here regenerates the
+      # (deterministic) demo config and generates the missing wallet; on a healthy
+      # self-wallet box both files exist, so init is skipped.
+      if [ ! -f "$TOWNHOUSE_HOME/wallet.enc" ]; then
         # Prefer the demo preset (enables relay/swap/store children); fall back to a
         # plain network init if this CLI version doesn't know it yet (see hub#15).
-        townhouse init --config-dir "$TOWNHOUSE_HOME" --preset demo --network "$TOON_NETWORK" --yes --json \
-          || townhouse init --config-dir "$TOWNHOUSE_HOME" --network "$TOON_NETWORK" --yes --json
+        # Pass --password explicitly: under --preset demo --yes the CLI would
+        # otherwise substitute its hardcoded deterministic demo password.
+        townhouse init --config-dir "$TOWNHOUSE_HOME" --preset demo --network "$TOON_NETWORK" --password "$TOWNHOUSE_WALLET_PASSWORD" --yes --json \
+          || townhouse init --config-dir "$TOWNHOUSE_HOME" --network "$TOON_NETWORK" --password "$TOWNHOUSE_WALLET_PASSWORD" --yes --json
       fi
       townhouse up -c "$TOWNHOUSE_HOME/config.yaml" --transport direct --json
+      # Publish the apex's funding addresses (town.evm.address etc.) so the
+      # treasury top-up and operators can find this box's self-generated address.
+      # Best-effort; never fails the boot.
+      if [ -n "$${STATUS_BUCKET:-}" ]; then
+        townhouse wallet show -c "$TOWNHOUSE_HOME/config.yaml" --json > "$${TMPDIR:-/tmp}/hub-wallet.json" 2>/dev/null \
+          && aws s3 cp "$${TMPDIR:-/tmp}/hub-wallet.json" "s3://$STATUS_BUCKET/hub/wallet.json" \
+               --endpoint-url "$STATUS_ENDPOINT" >/dev/null 2>&1 || true
+      fi
 
   # Push status (health + funding addresses) to Object Storage. Best-effort; never fails.
   - path: /usr/local/sbin/townhouse-status-push.sh
