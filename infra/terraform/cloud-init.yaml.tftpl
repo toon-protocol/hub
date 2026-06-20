@@ -101,7 +101,7 @@ write_files:
       Type=oneshot
       RemainAfterExit=yes
       # Run as the uid-1000 host user (not root) so the generated connector.yaml
-      # (${TOWNHOUSE_HOME}/connector.yaml, bind-mounted :ro) is owned by uid 1000
+      # ($${TOWNHOUSE_HOME}/connector.yaml, bind-mounted :ro) is owned by uid 1000
       # and the connector container (image-default uid 1000) can read it. Group
       # docker grants host access to /var/run/docker.sock for `docker compose`.
       User=townhouse
