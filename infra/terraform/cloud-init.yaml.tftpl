@@ -63,10 +63,10 @@ write_files:
       if [ ! -f "$TOWNHOUSE_HOME/config.yaml" ]; then
         # Prefer the demo preset (enables relay/swap/store children); fall back to a
         # plain network init if this CLI version doesn't know it yet (see hub#15).
-        townhouse init --preset demo --network "$TOON_NETWORK" --yes --json \
-          || townhouse init --network "$TOON_NETWORK" --yes --json
+        townhouse init --config-dir "$TOWNHOUSE_HOME" --preset demo --network "$TOON_NETWORK" --yes --json \
+          || townhouse init --config-dir "$TOWNHOUSE_HOME" --network "$TOON_NETWORK" --yes --json
       fi
-      townhouse up --transport direct --json
+      townhouse up -c "$TOWNHOUSE_HOME" --transport direct --json
 
   # Push status (health + funding addresses) to Object Storage. Best-effort; never fails.
   - path: /usr/local/sbin/townhouse-status-push.sh
@@ -76,7 +76,7 @@ write_files:
       set -uo pipefail
       [ -n "$${STATUS_BUCKET:-}" ] || exit 0
       OUT="/run/townhouse-status.json"
-      townhouse status --json > "$OUT" 2>/dev/null || echo '{"error":"status unavailable"}' > "$OUT"
+      townhouse status -c "$TOWNHOUSE_HOME" --json > "$OUT" 2>/dev/null || echo '{"error":"status unavailable"}' > "$OUT"
       aws s3 cp "$OUT" "s3://$STATUS_BUCKET/hub/status.json" \
         --endpoint-url "$STATUS_ENDPOINT" >/dev/null 2>&1 || true
 
