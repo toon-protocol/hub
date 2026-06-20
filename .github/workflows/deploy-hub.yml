@@ -172,6 +172,9 @@ jobs:
             echo "===== townhouse.service ====="; systemctl status townhouse --no-pager 2>&1 | tail -30 || true
             echo "===== townhouse journal (tail 80) ====="; journalctl -u townhouse --no-pager 2>&1 | tail -80 || true
             echo "===== docker ps -a ====="; docker ps -a 2>&1 || true
+            echo "===== connector logs ====="; docker logs townhouse-direct-connector 2>&1 | tail -80 || true
+            echo "===== connector state/health ====="; docker inspect townhouse-direct-connector --format "{{json .State}}" 2>&1 || true
+            echo "===== api logs ====="; docker logs townhouse-direct-api 2>&1 | tail -30 || true
             echo "===== /etc/townhouse.env (mnemonic redacted) ====="; sed "s/MNEMONIC=.*/MNEMONIC=<redacted>/" /etc/townhouse.env 2>&1 || true
           '
 
