@@ -127,11 +127,9 @@ write_files:
 
 runcmd:
   - [ bash, /usr/local/sbin/townhouse-mount-volume.sh ]
-  - [ bash, -c, "curl -fsSL https://get.docker.com | sh" ]
-  - [ systemctl, enable, --now, docker ]
-  - [ bash, -c, "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -" ]
-  - [ bash, -c, "apt-get install -y nodejs awscli" ]
-  - [ bash, -c, "npm install -g @toon-protocol/hub@${hub_version}" ]
+  # Robust install: wait out the cloud-init apt lock, keep nodejs separate from the
+  # optional awscli, add build tools for native npm deps, and retry + verify the CLI.
+  - [ bash, -c, "set -eux; export DEBIAN_FRONTEND=noninteractive; APT='apt-get -o DPkg::Lock::Timeout=600 -y'; curl -fsSL https://get.docker.com | sh; systemctl enable --now docker; curl -fsSL https://deb.nodesource.com/setup_20.x | bash -; $APT install nodejs build-essential python3; node --version; npm --version; ($APT install awscli || true); for i in 1 2 3; do npm install -g @toon-protocol/hub@${hub_version} && break || sleep 10; done; command -v townhouse" ]
   - [ systemctl, daemon-reload ]
   - [ systemctl, enable, --now, townhouse.service ]
   - [ systemctl, enable, --now, townhouse-status.timer ]
