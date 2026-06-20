@@ -84,20 +84,24 @@ write_files:
       if [ ! -f "$TOWNHOUSE_HOME/wallet.enc" ]; then
         # Prefer the demo preset (enables relay/swap/store children); fall back to a
         # plain network init if this CLI version doesn't know it yet (see hub#15).
-        # Pass --password explicitly: under --preset demo --yes the CLI would
-        # otherwise substitute its hardcoded deterministic demo password.
-        townhouse init --config-dir "$TOWNHOUSE_HOME" --preset demo --network "$TOON_NETWORK" --password "$TOWNHOUSE_WALLET_PASSWORD" --yes --json \
-          || townhouse init --config-dir "$TOWNHOUSE_HOME" --network "$TOON_NETWORK" --password "$TOWNHOUSE_WALLET_PASSWORD" --yes --json
+        # --password explicitly: under --preset demo --yes the CLI would otherwise
+        # substitute its hardcoded deterministic demo password.
+        # --force: the volume may carry a stale config.yaml from an older mnemonic
+        # deploy, and `init` refuses to overwrite an existing config without it.
+        # Safe here — this branch only runs when wallet.enc is absent (no wallet to
+        # clobber); --force just regenerates the deterministic demo config.
+        townhouse init --config-dir "$TOWNHOUSE_HOME" --preset demo --network "$TOON_NETWORK" --password "$TOWNHOUSE_WALLET_PASSWORD" --force --yes --json \
+          || townhouse init --config-dir "$TOWNHOUSE_HOME" --network "$TOON_NETWORK" --password "$TOWNHOUSE_WALLET_PASSWORD" --force --yes --json
       fi
-      townhouse up -c "$TOWNHOUSE_HOME/config.yaml" --transport direct --json
-      # Publish the apex's funding addresses (town.evm.address etc.) so the
-      # treasury top-up and operators can find this box's self-generated address.
-      # Best-effort; never fails the boot.
+      # Publish the apex's funding addresses (town.evm.address etc.) BEFORE the slow
+      # `up`: the wallet already exists and its address is stable, so the treasury
+      # top-up can proceed without waiting on image pulls. Best-effort; never fails.
       if [ -n "$${STATUS_BUCKET:-}" ]; then
         townhouse wallet show -c "$TOWNHOUSE_HOME/config.yaml" --json > "$${TMPDIR:-/tmp}/hub-wallet.json" 2>/dev/null \
           && aws s3 cp "$${TMPDIR:-/tmp}/hub-wallet.json" "s3://$STATUS_BUCKET/hub/wallet.json" \
                --endpoint-url "$STATUS_ENDPOINT" >/dev/null 2>&1 || true
       fi
+      townhouse up -c "$TOWNHOUSE_HOME/config.yaml" --transport direct --json
 
   # Push status (health + funding addresses) to Object Storage. Best-effort; never fails.
   - path: /usr/local/sbin/townhouse-status-push.sh

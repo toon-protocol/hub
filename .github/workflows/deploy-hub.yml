@@ -153,7 +153,9 @@ jobs:
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply_infra)
         run: |
           echo "Polling s3://${{ vars.TF_STATE_BUCKET }}/hub/wallet.json ..."
-          for i in $(seq 1 30); do
+          # The box publishes the address right after wallet init (before `up`), but a
+          # cold boot still needs ~5-8min of Docker/Node/CLI installs first — poll ~22min.
+          for i in $(seq 1 66); do
             if aws s3 cp "s3://${{ vars.TF_STATE_BUCKET }}/hub/wallet.json" /tmp/wallet.json \
                  --endpoint-url "${{ vars.TF_STATE_ENDPOINT }}" 2>/dev/null; then
               ADDR=$(jq -r '.town.evm.address // empty' /tmp/wallet.json)
@@ -165,7 +167,7 @@ jobs:
             fi
             sleep 20
           done
-          echo "::error::apex did not publish a funding address within ~10min (cloud-init still bootstrapping?)"
+          echo "::error::apex did not publish a funding address within ~22min (cloud-init still bootstrapping or boot failed?)"
           exit 1
 
       - name: Top up apex settlement account (Base Sepolia)
