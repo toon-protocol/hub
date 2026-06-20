@@ -17,6 +17,18 @@ resource "linode_firewall" "hub" {
   linodes         = [linode_instance.hub.id]
   tags            = ["toon", "hub"]
 
+  # CI debug run only — open SSH while an ephemeral debug key is trusted.
+  dynamic "inbound" {
+    for_each = var.debug_ssh_pubkey != "" ? [1] : []
+    content {
+      label    = "allow-ssh-debug"
+      action   = "ACCEPT"
+      protocol = "TCP"
+      ports    = "22"
+      ipv4     = [var.debug_ssh_cidr]
+    }
+  }
+
   # Direct-mode client-facing ports — only created when transport = "direct".
   dynamic "inbound" {
     for_each = var.transport == "direct" ? [1] : []

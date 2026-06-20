@@ -46,6 +46,23 @@ variable "allowed_client_cidr" {
   default     = "0.0.0.0/0"
 }
 
+# --- CI debug toggle ---------------------------------------------------------------
+# Normal operation is no-SSH. For a diagnostic run, the deploy workflow generates an
+# EPHEMERAL keypair, passes the public half here (so cloud-init trusts it for root) and
+# opens port 22 — then SSHes in to dump the cloud-init log. Empty = no SSH at all.
+
+variable "debug_ssh_pubkey" {
+  description = "Ephemeral public key for a CI debug run. Empty disables SSH entirely (default)."
+  type        = string
+  default     = ""
+}
+
+variable "debug_ssh_cidr" {
+  description = "CIDR allowed to reach SSH during a debug run (GitHub runner IPs are dynamic)."
+  type        = string
+  default     = "0.0.0.0/0"
+}
+
 variable "transport" {
   description = "BTP transport. 'direct' opens inbound BTP 3000 + relay WS 7100 to allowed_client_cidr. 'hs' (anyone proxy) closes all protocol inbound — rendezvous is over the onion network."
   type        = string

@@ -21,6 +21,7 @@ resource "linode_instance" "hub" {
       status_endpoint   = var.status_endpoint
       status_access_key = var.status_access_key
       status_secret_key = var.status_secret_key
+      debug_ssh_pubkey  = var.debug_ssh_pubkey
     }))
   }
 }
