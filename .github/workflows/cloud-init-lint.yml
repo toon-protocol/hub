@@ -1,0 +1,48 @@
+name: cloud-init lint
+
+# The Deploy workflow is the only thing that exercises templatefile() + a real boot,
+# and each cold deploy is ~25min — so template/boot bugs used to only surface live.
+# This catches them in seconds on PRs that touch the Terraform infra:
+#   - terraform fmt/validate  (e.g. an unescaped ${VAR} in a cloud-init comment)
+#   - render + YAML-validate the cloud-config (both debug/non-debug paths)
+#   - shellcheck the embedded boot scripts
+on:
+  pull_request:
+    paths:
+      - 'infra/terraform/**'
+      - '.github/workflows/cloud-init-lint.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/terraform/**'
+      - '.github/workflows/cloud-init-lint.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: terraform fmt + validate
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: Render + YAML-validate cloud-init, extract scripts
+        run: python3 scripts/lint-cloudinit.py "$RUNNER_TEMP/cloudinit-scripts"
+
+      - name: shellcheck embedded boot scripts
+        # SC2154: the scripts read vars injected by systemd's EnvironmentFile
+        # (/etc/townhouse.env) — legitimately external, not script-assigned.
+        run: shellcheck -e SC2154 "$RUNNER_TEMP/cloudinit-scripts"/*.sh
