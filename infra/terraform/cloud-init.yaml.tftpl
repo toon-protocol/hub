@@ -1,9 +1,10 @@
 #cloud-config
 # Config-driven apex bootstrap — NO SSH. At first boot this installs Docker + Node 20 +
-# the pinned hub CLI, mounts the persistent volume, then a systemd unit initializes the
-# apex in MNEMONIC MODE (no wallet file, no password — the identity derives from the
-# seed) and runs `townhouse up`. A timer pushes `townhouse status --json` to Object
-# Storage so health + funding addresses are readable without touching the box.
+# the pinned hub CLI, mounts the persistent volume, then a systemd unit (running as the
+# uid-1000 `townhouse` host user so generated configs match the container users)
+# initializes the apex in MNEMONIC MODE (no wallet file, no password — the identity
+# derives from the seed) and runs `townhouse up`. A timer pushes `townhouse status --json`
+# to Object Storage so health + funding addresses are readable without touching the box.
 #
 # Normal operation: no 'deploy' user and no authorized_keys. For a CI debug run only, an
 # ephemeral key is trusted for root (installed early, in the init stage, so it survives a
@@ -31,11 +32,11 @@ write_files:
       TOWNHOUSE_MNEMONIC=${operator_mnemonic}
       TOWNHOUSE_BTP_BIND=0.0.0.0
       TOWNHOUSE_RELAY_BIND=0.0.0.0
-      # The boot runs `townhouse up` as root, so the generated connector.yaml is
-      # root-owned 0600. Run the child containers as root too (compose defaults the
-      # connector to uid 1000) so they can read the bind-mounted config (EACCES otherwise).
-      TOWNHOUSE_UID=0
-      TOWNHOUSE_DOCKER_GID=0
+      # NB: do not pin TOWNHOUSE_UID/TOWNHOUSE_DOCKER_GID here — `townhouse up`
+      # derives them from the running process uid + the docker.sock group (see
+      # cli.ts), and the boot now runs as the uid-1000 `townhouse` user so the
+      # generated connector.yaml is owned by uid 1000 and the connector container
+      # (image-default uid 1000) can read it.
       TOON_NETWORK=${network}
       STATUS_BUCKET=${status_bucket}
       STATUS_ENDPOINT=${status_endpoint}
@@ -80,7 +81,9 @@ write_files:
       #!/usr/bin/env bash
       set -uo pipefail
       [ -n "$${STATUS_BUCKET:-}" ] || exit 0
-      OUT="/run/townhouse-status.json"
+      # /run is root-owned; this unit runs as the uid-1000 townhouse user, so
+      # stage the payload somewhere that user can write.
+      OUT="$${TMPDIR:-/tmp}/townhouse-status.json"
       townhouse status -c "$TOWNHOUSE_HOME/config.yaml" --json > "$OUT" 2>/dev/null || echo '{"error":"status unavailable"}' > "$OUT"
       aws s3 cp "$OUT" "s3://$STATUS_BUCKET/hub/status.json" \
         --endpoint-url "$STATUS_ENDPOINT" >/dev/null 2>&1 || true
@@ -97,6 +100,12 @@ write_files:
       [Service]
       Type=oneshot
       RemainAfterExit=yes
+      # Run as the uid-1000 host user (not root) so the generated connector.yaml
+      # (${TOWNHOUSE_HOME}/connector.yaml, bind-mounted :ro) is owned by uid 1000
+      # and the connector container (image-default uid 1000) can read it. Group
+      # docker grants host access to /var/run/docker.sock for `docker compose`.
+      User=townhouse
+      Group=docker
       EnvironmentFile=/etc/townhouse.env
       Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       ExecStart=/usr/local/sbin/townhouse-boot.sh
@@ -113,6 +122,10 @@ write_files:
 
       [Service]
       Type=oneshot
+      # Match townhouse.service: uid-1000 user owns the config/wallet on the
+      # volume, and docker group access is needed to read container state.
+      User=townhouse
+      Group=docker
       EnvironmentFile=/etc/townhouse.env
       Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       ExecStart=/usr/local/sbin/townhouse-status-push.sh
@@ -135,6 +148,10 @@ runcmd:
   # Robust install: wait out the cloud-init apt lock, keep nodejs separate from the
   # optional awscli, add build tools for native npm deps, and retry + verify the CLI.
   - [ bash, -c, "set -eux; export DEBIAN_FRONTEND=noninteractive; APT='apt-get -o DPkg::Lock::Timeout=600 -y'; curl -fsSL https://get.docker.com | sh; systemctl enable --now docker; curl -fsSL https://deb.nodesource.com/setup_20.x | bash -; $APT install nodejs build-essential python3; node --version; npm --version; ($APT install awscli || true); for i in 1 2 3; do npm install -g @toon-protocol/hub@${hub_version} && break || sleep 10; done; command -v townhouse" ]
+  # Create the uid-1000 `townhouse` user that owns the volume and runs the apex,
+  # so generated configs match the container users (uid 1000) — see hub#34. Must
+  # run after Docker (for the `docker` group) and after the volume mount.
+  - [ bash, -c, "set -eux; id -u townhouse >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash townhouse; usermod -aG docker townhouse; chown -R townhouse:townhouse /mnt/townhouse" ]
   - [ systemctl, daemon-reload ]
   - [ systemctl, enable, --now, townhouse.service ]
   - [ systemctl, enable, --now, townhouse-status.timer ]
