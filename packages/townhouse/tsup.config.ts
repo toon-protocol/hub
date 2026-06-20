@@ -18,6 +18,8 @@ import { join } from 'node:path';
 // Dockerfile.townhouse-api (a sibling-of-package path is not).
 // @ts-expect-error — JS module, no type declarations.
 import { getImageDigest } from './scripts/get-image-digest.mjs';
+// @ts-expect-error — JS module, no type declarations.
+import { generateImageManifest } from './scripts/generate-image-manifest.mjs';
 
 export default defineConfig({
   entry: ['src/index.ts', 'src/cli.ts'],
@@ -51,6 +53,20 @@ export default defineConfig({
     js: `import { createRequire } from 'module'; const require = createRequire(import.meta.url);`,
   },
   onSuccess: async () => {
+    // Produce the digest-pinned image manifest that direct mode requires. Best-effort:
+    // a release build (with GHCR network) ships a real manifest; local dev offline falls
+    // through to the unsubstituted-template warning below. This closes the publish gap
+    // where the manifest never reached dist/ (the build only ever READ it).
+    try {
+      const { version } = JSON.parse(await readFile('package.json', 'utf-8'));
+      await generateImageManifest('dist', version);
+    } catch (err) {
+      console.warn(
+        `[tsup] image-manifest generation skipped (${(err as Error).message}) — ` +
+          'fine for offline local dev, invalid for npm publish.'
+      );
+    }
+
     const composeDistDir = 'dist/compose';
     await mkdir(composeDistDir, { recursive: true });
 
