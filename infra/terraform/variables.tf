@@ -25,7 +25,7 @@ variable "volume_size" {
 variable "hub_version" {
   description = "Pinned @toon-protocol/hub npm version installed on the box. Keep in sync with infra/hub-version.txt."
   type        = string
-  default     = "0.34.3"
+  default     = "0.34.4"
 }
 
 variable "network" {
