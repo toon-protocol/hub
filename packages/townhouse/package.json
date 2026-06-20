@@ -1,6 +1,6 @@
 {
   "name": "@toon-protocol/hub",
-  "version": "0.34.3",
+  "version": "0.34.4",
   "description": "TOON Townhouse — host-native orchestrator + dashboard for Docker-containerized TOON nodes",
   "type": "module",
   "main": "./dist/index.js",
