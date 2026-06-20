@@ -31,6 +31,11 @@ write_files:
       TOWNHOUSE_MNEMONIC=${operator_mnemonic}
       TOWNHOUSE_BTP_BIND=0.0.0.0
       TOWNHOUSE_RELAY_BIND=0.0.0.0
+      # The boot runs `townhouse up` as root, so the generated connector.yaml is
+      # root-owned 0600. Run the child containers as root too (compose defaults the
+      # connector to uid 1000) so they can read the bind-mounted config (EACCES otherwise).
+      TOWNHOUSE_UID=0
+      TOWNHOUSE_DOCKER_GID=0
       TOON_NETWORK=${network}
       STATUS_BUCKET=${status_bucket}
       STATUS_ENDPOINT=${status_endpoint}
