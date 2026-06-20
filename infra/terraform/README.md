@@ -1,9 +1,10 @@
 # `infra/terraform` — TOON apex hub on Linode
 
 Provisions one Linode instance + a persistent Block Storage volume + a firewall, and
-hands the seed + config to cloud-init. The box then brings itself up — **no SSH**:
-installs Docker, Node 20, the pinned `@toon-protocol/hub` CLI, initializes in mnemonic
-mode, and runs `townhouse up` (pulling the public GHCR node images) via systemd.
+hands the (seed-free) config to cloud-init. The box then brings itself up — **no SSH**:
+installs Docker, Node 20, the pinned `@toon-protocol/hub` CLI, **generates + persists its
+own encrypted wallet on the volume**, and runs `townhouse up` (pulling the public GHCR node
+images) via systemd, then publishes its funding addresses to Object Storage.
 
 Normally driven by `.github/workflows/deploy-hub.yml`. The notes below are for local runs.
 
@@ -16,7 +17,6 @@ Normally driven by `.github/workflows/deploy-hub.yml`. The notes below are for l
 | `volume_size` | `30` | GiB; holds `TOWNHOUSE_HOME` (config, `.anon` identity, settlement DB). |
 | `hub_version` | `0.34.3` | Keep in sync with `infra/hub-version.txt`. |
 | `network` | `testnet` | Network tier the apex initializes with. |
-| `operator_mnemonic` | — | **Required, sensitive.** Treasury seed → mnemonic mode (no wallet file/password). |
 | `allowed_client_cidr` | `0.0.0.0/0` | Phase 1 BTP `3000` + relay WS `7100` source; restrict where possible. |
 | `transport` | `direct` | `direct` opens client ports; `hs` closes all protocol inbound. |
 | `status_bucket` / `status_endpoint` | `""` | Object Storage target for the status push (leave blank to disable). |
@@ -43,7 +43,6 @@ terraform init \
   -backend-config="endpoints={s3=\"https://us-ord-1.linodeobjects.com\"}"
 
 terraform apply \
-  -var="operator_mnemonic=$TREASURY_MNEMONIC" \
   -var="allowed_client_cidr=0.0.0.0/0" \
   -var="status_bucket=toon-tfstate" \
   -var="status_endpoint=https://us-ord-1.linodeobjects.com" \
@@ -53,9 +52,11 @@ terraform apply \
 
 ## After apply
 
-The box self-configures via cloud-init (a few minutes). Read health + funding addresses
-from `s3://<status_bucket>/hub/status.json` — see [`docs/deploy-linode.md`](../../docs/deploy-linode.md).
+The box self-configures via cloud-init (a few minutes). Read health from
+`s3://<status_bucket>/hub/status.json` and the self-generated funding addresses from
+`s3://<status_bucket>/hub/wallet.json` — see [`docs/deploy-linode.md`](../../docs/deploy-linode.md).
 
-> The seed travels via cloud-init user-data and lands in TF state — keep the state bucket
-> private; testnet/tiny-funds only. The Block Storage volume is the durable identity root
-> — **snapshot it before destroying anything.**
+> No seed or wallet password transits CI or lands in TF state — the box self-generates its
+> wallet and persists it (`wallet.enc` + `wallet.pass`) on the volume. The Block Storage
+> volume is therefore the durable root of **both** identity and keys — **snapshot it before
+> destroying anything**, and treat snapshots as secret. Testnet/tiny-funds only.

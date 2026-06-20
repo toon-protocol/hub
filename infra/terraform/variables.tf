@@ -34,12 +34,6 @@ variable "network" {
   default     = "testnet"
 }
 
-variable "operator_mnemonic" {
-  description = "Operator/treasury seed phrase. Runs the apex in mnemonic mode (no wallet file, no password) — the identity + settlement keys derive deterministically from it. Travels via cloud-init user-data (API-token-gated); lands in TF state, so the state bucket must stay private. Testnet/tiny-funds only."
-  type        = string
-  sensitive   = true
-}
-
 variable "allowed_client_cidr" {
   description = "CIDR allowed to reach the apex client-facing ports (BTP 3000 + relay WS 7100) in Phase 1 direct mode. Restrict to the demo client IP where possible."
   type        = string

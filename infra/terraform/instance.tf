@@ -16,7 +16,6 @@ resource "linode_instance" "hub" {
       hub_version       = var.hub_version
       volume_label      = local.volume_label
       network           = var.network
-      operator_mnemonic = var.operator_mnemonic
       status_bucket     = var.status_bucket
       status_endpoint   = var.status_endpoint
       status_access_key = var.status_access_key

@@ -49,9 +49,9 @@ jobs:
       # passed through to the box, for the status push.
       AWS_ACCESS_KEY_ID: ${{ secrets.LINODE_OBJ_ACCESS_KEY }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.LINODE_OBJ_SECRET_KEY }}
-      # Apex identity derives from the treasury seed (mnemonic mode). Same org secret the
-      # client journey uses — different derivation account, so no collision.
-      TF_VAR_operator_mnemonic: ${{ secrets.E2E_DEV_MNEMONIC }}
+      # No apex seed is injected: the box self-generates + persists its own wallet, and
+      # publishes the address. The treasury seed below is used ONLY on the runner to sign
+      # the funding transfer — it never reaches the box or Terraform state.
       TF_VAR_allowed_client_cidr: ${{ vars.ALLOWED_CLIENT_CIDR || '0.0.0.0/0' }}
       TF_VAR_region: ${{ vars.LINODE_REGION }}
       TF_VAR_transport: ${{ inputs.transport || 'direct' }}
@@ -60,8 +60,9 @@ jobs:
       TF_VAR_status_endpoint: ${{ vars.TF_STATE_ENDPOINT }}
       TF_VAR_status_access_key: ${{ secrets.LINODE_OBJ_ACCESS_KEY }}
       TF_VAR_status_secret_key: ${{ secrets.LINODE_OBJ_SECRET_KEY }}
-      # Apex settlement top-up (Base Sepolia): fund apex[3] from treasury[0] post-apply
-      # so the apex has gas to settle channels on-chain. Same seed, different account.
+      # Apex settlement top-up (Base Sepolia): fund the box's self-generated address
+      # (read from its published wallet.json into APEX_ADDRESS below) from treasury[0]
+      # post-apply, so the apex has gas to settle channels on-chain.
       TREASURY_MNEMONIC: ${{ secrets.E2E_DEV_MNEMONIC }}
       TREASURY_ACCOUNT_INDEX: ${{ vars.TREASURY_ACCOUNT_INDEX || '0' }}
       APEX_ACCOUNT_INDEX: ${{ vars.APEX_ACCOUNT_INDEX || '3' }}
@@ -145,8 +146,30 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Wait for apex to publish its funding address
+        # The box self-generates its wallet and publishes wallet.json after `townhouse up`
+        # (image pulls take a few minutes). Read the apex (town) EVM address from it so the
+        # treasury can fund the box's own address — no seed-derivation, no box access.
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply_infra)
+        run: |
+          echo "Polling s3://${{ vars.TF_STATE_BUCKET }}/hub/wallet.json ..."
+          for i in $(seq 1 30); do
+            if aws s3 cp "s3://${{ vars.TF_STATE_BUCKET }}/hub/wallet.json" /tmp/wallet.json \
+                 --endpoint-url "${{ vars.TF_STATE_ENDPOINT }}" 2>/dev/null; then
+              ADDR=$(jq -r '.town.evm.address // empty' /tmp/wallet.json)
+              if [ -n "$ADDR" ]; then
+                echo "::notice::apex funding address $ADDR"
+                echo "APEX_ADDRESS=$ADDR" >> "$GITHUB_ENV"
+                exit 0
+              fi
+            fi
+            sleep 20
+          done
+          echo "::error::apex did not publish a funding address within ~10min (cloud-init still bootstrapping?)"
+          exit 1
+
       - name: Top up apex settlement account (Base Sepolia)
-        # The apex address is deterministic from the seed, so this runs on the runner —
+        # Funds the box's published address (APEX_ADDRESS) from the treasury on the runner —
         # no box access. Idempotent: only sends when the apex is under the gas floor.
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply_infra)
         working-directory: .
@@ -181,7 +204,7 @@ jobs:
             echo "===== connector logs ====="; docker logs townhouse-direct-connector 2>&1 | tail -80 || true
             echo "===== connector state/health ====="; docker inspect townhouse-direct-connector --format "{{json .State}}" 2>&1 || true
             echo "===== api logs ====="; docker logs townhouse-direct-api 2>&1 | tail -30 || true
-            echo "===== /etc/townhouse.env (mnemonic redacted) ====="; sed "s/MNEMONIC=.*/MNEMONIC=<redacted>/" /etc/townhouse.env 2>&1 || true
+            echo "===== /etc/townhouse.env (secrets redacted) ====="; sed -E "s/(SECRET|KEY|PASSWORD|MNEMONIC)=.*/\1=<redacted>/" /etc/townhouse.env 2>&1 || true
           '
 
       - name: Wait for the box to self-report (status object)

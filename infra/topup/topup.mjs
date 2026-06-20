@@ -1,14 +1,17 @@
 // Apex top-up (Base Sepolia) — fund the apex's settlement account from the treasury so
-// it has gas (ETH) to open/settle payment channels on-chain. Both derive from the same
-// seed at different BIP-44 account indices, so this is a treasury -> apex transfer.
+// it has gas (ETH) to open/settle payment channels on-chain. Only the treasury is
+// seed-derived; the apex self-generates its wallet on the box and publishes the address.
 //
-// Runs on the CI runner after `terraform apply` (the apex address is deterministic from
-// the seed — no need to touch the box). EVM Base Sepolia only; Solana/Mina deferred (WS3).
+// Runs on the CI runner after `terraform apply`. The apex address comes from APEX_ADDRESS
+// (read from the box's published wallet.json — preferred). If APEX_ADDRESS is unset it
+// falls back to seed derivation at APEX_ACCOUNT_INDEX (legacy mnemonic-mode deploys).
+// EVM Base Sepolia only; Solana/Mina deferred (WS3).
 //
 // Env:
-//   TREASURY_MNEMONIC        (required) the seed
+//   TREASURY_MNEMONIC        (required) the treasury seed (signs the funding tx)
 //   TREASURY_ACCOUNT_INDEX   funded master account index (default 0)
-//   APEX_ACCOUNT_INDEX       apex settlement index (default 3; MUST differ from treasury)
+//   APEX_ADDRESS             apex settlement address (preferred; from the box's wallet.json)
+//   APEX_ACCOUNT_INDEX       legacy fallback derivation index (default 3; MUST differ from treasury)
 //   BASE_SEPOLIA_RPC         RPC URL (default https://sepolia.base.org)
 //   USDC_ADDRESS             token the apex settles in (optional)
 //   MIN_ETH / TOPUP_ETH      gas floor / top-up in ETH (default 0.003 / 0.01)
@@ -37,6 +40,7 @@ const env = (k, d) => process.env[k] ?? d
 const MNEMONIC = process.env.TREASURY_MNEMONIC
 const TREASURY_INDEX = Number(env('TREASURY_ACCOUNT_INDEX', '0'))
 const APEX_INDEX = Number(env('APEX_ACCOUNT_INDEX', '3'))
+const APEX_ADDRESS = process.env.APEX_ADDRESS?.trim()
 const RPC = env('BASE_SEPOLIA_RPC', 'https://sepolia.base.org')
 const USDC = process.env.USDC_ADDRESS
 const MIN_ETH = env('MIN_ETH', '0.003')
@@ -49,13 +53,26 @@ const log = (m) => console.log(`[apex-topup] ${m}`)
 
 async function main() {
   if (!MNEMONIC) throw new Error('TREASURY_MNEMONIC is required')
-  if (TREASURY_INDEX === APEX_INDEX) {
-    throw new Error(`TREASURY_ACCOUNT_INDEX (${TREASURY_INDEX}) must differ from APEX_ACCOUNT_INDEX (${APEX_INDEX})`)
-  }
 
   const treasury = mnemonicToAccount(MNEMONIC, { addressIndex: TREASURY_INDEX })
-  const apex = mnemonicToAccount(MNEMONIC, { addressIndex: APEX_INDEX }).address
-  log(`treasury[${TREASURY_INDEX}] ${treasury.address}  ->  apex[${APEX_INDEX}] ${apex}`)
+  let apex
+  if (APEX_ADDRESS) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(APEX_ADDRESS)) {
+      throw new Error(`APEX_ADDRESS is not a valid EVM address: ${APEX_ADDRESS}`)
+    }
+    apex = APEX_ADDRESS
+    log(`treasury[${TREASURY_INDEX}] ${treasury.address}  ->  apex (published) ${apex}`)
+  } else {
+    // Legacy mnemonic-mode fallback: derive the apex from the same seed.
+    if (TREASURY_INDEX === APEX_INDEX) {
+      throw new Error(`TREASURY_ACCOUNT_INDEX (${TREASURY_INDEX}) must differ from APEX_ACCOUNT_INDEX (${APEX_INDEX})`)
+    }
+    apex = mnemonicToAccount(MNEMONIC, { addressIndex: APEX_INDEX }).address
+    log(`treasury[${TREASURY_INDEX}] ${treasury.address}  ->  apex[${APEX_INDEX}] ${apex} (derived)`)
+  }
+  if (treasury.address.toLowerCase() === apex.toLowerCase()) {
+    throw new Error('treasury and apex addresses are identical — refusing to self-fund')
+  }
   if (DRY) log('DRY RUN — no transactions will be sent')
 
   const pub = createPublicClient({ chain: baseSepolia, transport: http(RPC) })
