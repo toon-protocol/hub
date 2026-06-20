@@ -50,7 +50,7 @@ write_files:
       set -euo pipefail
       DEV="/dev/disk/by-id/scsi-0Linode_Volume_${volume_label}"
       MNT="/mnt/townhouse"
-      for i in $(seq 1 30); do [ -e "$DEV" ] && break; sleep 2; done
+      for _ in $(seq 1 30); do [ -e "$DEV" ] && break; sleep 2; done
       if [ ! -e "$DEV" ]; then echo "volume $DEV not found" >&2; exit 1; fi
       if ! blkid "$DEV" >/dev/null 2>&1; then mkfs.ext4 -m 0 -L townhouse "$DEV"; fi
       mkdir -p "$MNT"
@@ -84,25 +84,27 @@ write_files:
       if [ ! -f "$READY" ]; then
         rm -f "$TOWNHOUSE_HOME/wallet.enc"
         ( umask 077; openssl rand -base64 32 | tr -d '\n' > "$PWFILE" )
-        export TOWNHOUSE_WALLET_PASSWORD="$(cat "$PWFILE")"
         # Prefer the demo preset (enables relay/swap/store children); fall back to a
         # plain network init if this CLI version doesn't know it yet (see hub#15).
         # --password: under --preset demo --yes the CLI would otherwise substitute its
         # hardcoded deterministic demo password. --force: overwrite any stale
         # config.yaml/wallet.enc from a prior deploy.
-        townhouse init --config-dir "$TOWNHOUSE_HOME" --preset demo --network "$TOON_NETWORK" --password "$TOWNHOUSE_WALLET_PASSWORD" --force --yes --json \
-          || townhouse init --config-dir "$TOWNHOUSE_HOME" --network "$TOON_NETWORK" --password "$TOWNHOUSE_WALLET_PASSWORD" --force --yes --json
+        townhouse init --config-dir "$TOWNHOUSE_HOME" --preset demo --network "$TOON_NETWORK" --password "$(cat "$PWFILE")" --force --yes --json \
+          || townhouse init --config-dir "$TOWNHOUSE_HOME" --network "$TOON_NETWORK" --password "$(cat "$PWFILE")" --force --yes --json
         touch "$READY"
-      else
-        export TOWNHOUSE_WALLET_PASSWORD="$(cat "$PWFILE")"
       fi
+      # `up` and `wallet show` read the password from the env. Assign then export
+      # (not `export X=$(...)`) so a failed read aborts under `set -e` (SC2155).
+      TOWNHOUSE_WALLET_PASSWORD="$(cat "$PWFILE")"
+      export TOWNHOUSE_WALLET_PASSWORD
       # Publish the apex's funding addresses (town.evm.address etc.) BEFORE the slow
       # `up`: the wallet already exists and its address is stable, so the treasury
       # top-up can proceed without waiting on image pulls. Best-effort; never fails.
       if [ -n "$${STATUS_BUCKET:-}" ]; then
-        townhouse wallet show -c "$TOWNHOUSE_HOME/config.yaml" --json > "$${TMPDIR:-/tmp}/hub-wallet.json" 2>/dev/null \
-          && aws s3 cp "$${TMPDIR:-/tmp}/hub-wallet.json" "s3://$STATUS_BUCKET/hub/wallet.json" \
-               --endpoint-url "$STATUS_ENDPOINT" >/dev/null 2>&1 || true
+        if townhouse wallet show -c "$TOWNHOUSE_HOME/config.yaml" --json > "$${TMPDIR:-/tmp}/hub-wallet.json" 2>/dev/null; then
+          aws s3 cp "$${TMPDIR:-/tmp}/hub-wallet.json" "s3://$STATUS_BUCKET/hub/wallet.json" \
+            --endpoint-url "$STATUS_ENDPOINT" >/dev/null 2>&1 || true
+        fi
       fi
       townhouse up -c "$TOWNHOUSE_HOME/config.yaml" --transport direct --json
 
