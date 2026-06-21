@@ -35,7 +35,7 @@
     "node": ">=22",
     "pnpm": ">=8"
   },
-  "packageManager": "pnpm@8.15.0",
+  "packageManager": "pnpm@8.15.9",
   "pnpm": {
     "neverBuiltDependencies": [
       "@anyone-protocol/anyone-client"
