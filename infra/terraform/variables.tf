@@ -1,7 +1,7 @@
 variable "label" {
   description = "Name prefix for the Linode instance, volume, and firewall."
   type        = string
-  default     = "townhouse-hub"
+  default     = "hub-hub"
 }
 
 variable "region" {
@@ -70,7 +70,7 @@ variable "transport" {
 
 # --- Status sink (no-SSH observability) -------------------------------------------
 # The control API is loopback-only by design, so instead of exposing it the box pushes
-# `townhouse status --json` to Object Storage on a timer. Read the object to see health
+# `hub status --json` to Object Storage on a timer. Read the object to see health
 # + funding addresses without ever touching the box. Leave the keys blank to disable.
 
 variable "status_bucket" {

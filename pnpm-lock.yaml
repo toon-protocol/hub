@@ -101,7 +101,7 @@ importers:
         specifier: ^3.25.0
         version: 3.25.76
 
-  packages/townhouse:
+  packages/hub:
     dependencies:
       '@ardrive/turbo-sdk':
         specifier: ^1.40.2
@@ -207,7 +207,7 @@ importers:
         specifier: ^1.0.0
         version: 1.6.1(@types/node@20.19.32)(jsdom@24.1.3)
 
-  packages/townhouse-mcp:
+  packages/hub-mcp:
     dependencies:
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.0
@@ -215,7 +215,7 @@ importers:
     devDependencies:
       '@toon-protocol/hub':
         specifier: workspace:*
-        version: link:../townhouse
+        version: link:../hub
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.32
@@ -229,7 +229,7 @@ importers:
         specifier: ^1.0.0
         version: 1.6.1(@types/node@20.19.32)(jsdom@24.1.3)
 
-  packages/townhouse-web:
+  packages/hub-web:
     dependencies:
       '@scure/bip39':
         specifier: ^2.0.0
@@ -309,7 +309,7 @@ importers:
         version: 14.5.2(@testing-library/dom@10.4.1)
       '@toon-protocol/hub':
         specifier: workspace:*
-        version: link:../townhouse
+        version: link:../hub
       '@types/jest-axe':
         specifier: ^3.5.9
         version: 3.5.9

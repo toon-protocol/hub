@@ -2,7 +2,7 @@ name: Deploy Hub (Linode)
 
 # Provisions the apex host with Terraform. The box brings ITSELF up via cloud-init (no
 # SSH): it installs the pinned hub CLI, initializes in mnemonic mode (seed from
-# E2E_DEV_MNEMONIC, no wallet file / no password), and runs `townhouse up`. Health +
+# E2E_DEV_MNEMONIC, no wallet file / no password), and runs `hub up`. Health +
 # funding addresses are read from the status object the box pushes to Object Storage —
 # this workflow never opens a shell on the box.
 #
@@ -147,7 +147,7 @@ jobs:
           node-version: '20'
 
       - name: Wait for apex to publish its funding address
-        # The box self-generates its wallet and publishes wallet.json after `townhouse up`
+        # The box self-generates its wallet and publishes wallet.json after `hub up`
         # (image pulls take a few minutes). Read the apex (town) EVM address from it so the
         # treasury can fund the box's own address — no seed-derivation, no box access.
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply_infra)
@@ -193,20 +193,20 @@ jobs:
           ssh -i "$RUNNER_TEMP/dbg" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=25 \
             -o ServerAliveInterval=15 -o ServerAliveCountMax=40 "root@$IP" '
             echo "===== cloud-init status ====="; cloud-init status --long 2>&1 || true
-            # Do NOT wait for cloud-init to finish — it blocks on the failing `townhouse up`.
+            # Do NOT wait for cloud-init to finish — it blocks on the failing `hub up`.
             # Instead wait for the connector container to appear (image pulls take minutes),
             # then a beat for it to crash-loop, so its logs are populated.
             echo "(waiting for connector container) ..."
-            for i in $(seq 1 36); do docker ps -a --format "{{.Names}}" 2>/dev/null | grep -q townhouse-direct-connector && break; sleep 10; done
+            for i in $(seq 1 36); do docker ps -a --format "{{.Names}}" 2>/dev/null | grep -q hub-direct-connector && break; sleep 10; done
             sleep 20
             echo "===== /var/log/cloud-init-output.log (tail 120) ====="; tail -120 /var/log/cloud-init-output.log 2>&1 || true
-            echo "===== townhouse.service ====="; systemctl status townhouse --no-pager 2>&1 | tail -30 || true
-            echo "===== townhouse journal (tail 80) ====="; journalctl -u townhouse --no-pager 2>&1 | tail -80 || true
+            echo "===== hub.service ====="; systemctl status hub --no-pager 2>&1 | tail -30 || true
+            echo "===== hub journal (tail 80) ====="; journalctl -u hub --no-pager 2>&1 | tail -80 || true
             echo "===== docker ps -a ====="; docker ps -a 2>&1 || true
-            echo "===== connector logs ====="; docker logs townhouse-direct-connector 2>&1 | tail -80 || true
-            echo "===== connector state/health ====="; docker inspect townhouse-direct-connector --format "{{json .State}}" 2>&1 || true
-            echo "===== api logs ====="; docker logs townhouse-direct-api 2>&1 | tail -30 || true
-            echo "===== /etc/townhouse.env (secrets redacted) ====="; sed -E "s/(SECRET|KEY|PASSWORD|MNEMONIC)=.*/\1=<redacted>/" /etc/townhouse.env 2>&1 || true
+            echo "===== connector logs ====="; docker logs hub-direct-connector 2>&1 | tail -80 || true
+            echo "===== connector state/health ====="; docker inspect hub-direct-connector --format "{{json .State}}" 2>&1 || true
+            echo "===== api logs ====="; docker logs hub-direct-api 2>&1 | tail -30 || true
+            echo "===== /etc/hub.env (secrets redacted) ====="; sed -E "s/(SECRET|KEY|PASSWORD|MNEMONIC)=.*/\1=<redacted>/" /etc/hub.env 2>&1 || true
           '
 
       - name: Wait for the box to self-report (status object)

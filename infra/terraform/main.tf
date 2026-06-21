@@ -1,7 +1,7 @@
 # TOON apex hub — Linode (Akamai Connected Cloud) infrastructure.
 #
 # Provisions one always-on VPS + a persistent Block Storage volume + an egress-only
-# firewall. The box runs the `@toon-protocol/hub` CLI (`townhouse up`), which pulls the
+# firewall. The box runs the `@toon-protocol/hub` CLI (`hub up`), which pulls the
 # pinned GHCR node images and orchestrates the apex stack. State for the wallet,
 # config, and (Phase 2) the `.anon` hidden-service identity lives on the volume.
 #

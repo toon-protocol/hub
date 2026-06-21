@@ -14,15 +14,15 @@ dist/
 deploy/akash/leases.json
 deploy/akash/denylist.json
 deploy/akash/ator-probe-keys/
-deploy/akash/townhouse-keys/
+deploy/akash/hub-keys/
 
-# Townhouse HS local state (Phase 4 sidecar pattern). The .anyone keypair
-# at infra/townhouse-hs-keys/hs/ contains the secret key — same sensitivity
+# Hub HS local state (Phase 4 sidecar pattern). The .anyone keypair
+# at infra/hub-hs-keys/hs/ contains the secret key — same sensitivity
 # as the deploy/akash/*-keys/ dirs above. Do NOT commit. The connector YAML
 # rendered with the concrete externalUrl is also operator-local state.
-infra/townhouse-hs-keys/
-infra/townhouse-hs-keys-relay/
-docker/configs/townhouse-hs-connector.local.yaml
+infra/hub-hs-keys/
+infra/hub-hs-keys-relay/
+docker/configs/hub-hs-connector.local.yaml
 
 # Vendored external sources cloned by build scripts (e.g. Town-Frontend)
 .cache/
@@ -45,17 +45,17 @@ Thumbs.db
 .env.oyster
 .env.oyster.runtime
 .env.sdk-e2e
-.env.townhouse-dev
+.env.hub-dev
 
 # Test
 coverage/
 **/data/*.db
 # Live-smoke failure-capture log dirs (Epic 49 stories)
-packages/townhouse/e2e-real-hs-logs/
-packages/townhouse/e2e-49-4-logs/
+packages/hub/e2e-real-hs-logs/
+packages/hub/e2e-49-4-logs/
 # Local-HS smoke failure-capture log dir (local-docker-hs-*-paid-earnings-smoke)
-packages/townhouse/e2e-local-hs-logs/
-# Root-level log dir for scripts/townhouse-e2e-real-hs.sh (NFR18)
+packages/hub/e2e-local-hs-logs/
+# Root-level log dir for scripts/hub-e2e-real-hs.sh (NFR18)
 e2e-real-hs-logs/
 
 # Logs
