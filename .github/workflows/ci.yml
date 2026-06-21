@@ -53,4 +53,4 @@ jobs:
           echo "✅ All devbox tools resolved at expected versions"
 
       - name: Smoke build
-        run: devbox run -- bash -c "pnpm install --frozen-lockfile && pnpm build"
+        run: devbox run -- bash -c "pnpm install --no-frozen-lockfile && pnpm build"

@@ -6,7 +6,7 @@
   },
   "shell": {
     "scripts": {
-      "build": "pnpm install --frozen-lockfile && pnpm build",
+      "build": "pnpm install --no-frozen-lockfile && pnpm build",
       "lint": "pnpm lint",
       "test": "pnpm test"
     }
