@@ -35,7 +35,7 @@
 #     logic is unchanged.
 #
 # Digest placeholders (substituted at build time from dist/image-manifest.json):
-#   ${TOON_TOWNHOUSE_API_DIGEST} → @sha256:<hex>
+#   ${TOON_HUB_API_DIGEST} → @sha256:<hex>
 #   ${TOON_TOWN_DIGEST}         → @sha256:<hex>
 #   ${TOON_MILL_DIGEST}         → @sha256:<hex>
 #   ${TOON_DVM_DIGEST}          → @sha256:<hex>
@@ -129,7 +129,7 @@ services:
   # the API re-parses THIS compose file for `node add`.
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   hub-api:
-    image: ghcr.io/toon-protocol/hub-api${TOON_TOWNHOUSE_API_DIGEST}
+    image: ghcr.io/toon-protocol/hub-api${TOON_HUB_API_DIGEST}
     container_name: hub-direct-api
     # Run as the operator's host UID so bind-mounted ~/.hub files
     # (rw------- 600) are readable. TOWNHOUSE_UID is injected by the CLI.

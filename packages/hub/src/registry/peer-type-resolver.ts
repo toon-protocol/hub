@@ -42,7 +42,7 @@ export interface ConnectorPeerLike {
  * 'g.townhouse.town'}]}`). We recover the type from either signal:
  *   1. the bare `id` (or its `<type>-NN` / `<type>_NN` form, matching the
  *      `node add` naming), or
- *   2. the node-type label immediately after the `…hub.` apex prefix in
+ *   2. the node-type label immediately after the `…townhouse.` apex prefix in
  *      any `g.townhouse.<type>[...]` ILP route prefix.
  * Returns `null` when neither signal matches a known node type — the caller
  * treats such peers as `'external'`.

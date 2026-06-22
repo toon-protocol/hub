@@ -112,7 +112,7 @@ export default defineConfig({
 
       const subs: [string, string][] = [
         [
-          '${TOON_TOWNHOUSE_API_DIGEST}',
+          '${TOON_HUB_API_DIGEST}',
           `@${getImageDigest(manifest, 'hub-api')}`,
         ],
         ['${TOON_TOWN_DIGEST}', `@${getImageDigest(manifest, 'town')}`],

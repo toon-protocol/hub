@@ -22,7 +22,7 @@
 #     Story 45.4 boots only connector + hub-api at apex install
 #
 # Digest placeholders (substituted at build time from dist/image-manifest.json):
-#   ${TOON_TOWNHOUSE_API_DIGEST} → @sha256:<hex>
+#   ${TOON_HUB_API_DIGEST} → @sha256:<hex>
 #   ${TOON_TOWN_DIGEST}         → @sha256:<hex>
 #   ${TOON_MILL_DIGEST}         → @sha256:<hex>
 #   ${TOON_DVM_DIGEST}          → @sha256:<hex>
@@ -157,7 +157,7 @@ services:
   # Port D21-008: Fastify host API on 127.0.0.1:28090.
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   hub-api:
-    image: ghcr.io/toon-protocol/hub-api${TOON_TOWNHOUSE_API_DIGEST}
+    image: ghcr.io/toon-protocol/hub-api${TOON_HUB_API_DIGEST}
     container_name: hub-hs-api
     # Run as the operator's host UID so bind-mounted ~/.hub files
     # (rw------- 600) are readable. TOWNHOUSE_UID is injected by `hub hs up`.

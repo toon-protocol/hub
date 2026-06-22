@@ -25,7 +25,7 @@ The product-specific **`hub-operator` skill ships in this repo's `hub-plugin/`**
 - Consumes `@toon-protocol/{core,sdk,client,relay,mill}` from **npm** (pinned semver) **and** pins the child node **Docker image digests** (`relay`/`swap`/`store`) — exactly as it already pins the connector image in `src/constants.ts`.
 - The ILP payment engine is the separate **[toon-protocol/connector](https://github.com/toon-protocol/connector)** repo. **All payment-claim validation lives ONLY in the connector — never re-implement it here.**
 
-> **Wire-id caveat:** `g.townhouse` is an on-wire ILP nodeId baked into the connector + every child's parent tag. The `hub → hub` *concept/package* rename must NOT change `g.townhouse`, or paid parent→child forwarding breaks (T00/F06).
+> **Wire-id caveat:** `g.townhouse` is an on-wire ILP nodeId baked into the connector + every child's parent tag. The `townhouse → hub` *concept/package* rename must NOT change `g.townhouse`, or paid parent→child forwarding breaks (T00/F06).
 
 ## Publishing
 CI publishes via **changesets + `pnpm`** using the org `NPM_TOKEN` secret. **Never run `npm publish`** (it ships unresolved `workspace:*`).
