@@ -1,0 +1,67 @@
+# Fixture: pre-rendered direct compose for unit tests.
+# Digest values match the fixture image-manifest.json (all-hex patterns).
+networks:
+  hub-direct-net:
+    driver: bridge
+volumes:
+  hub-direct-town-data:
+  hub-direct-mill-data:
+  hub-direct-dvm-data:
+services:
+  connector:
+    image: ghcr.io/toon-protocol/connector@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    container_name: hub-direct-connector
+    networks:
+      - hub-direct-net
+    ports:
+      - '127.0.0.1:3000:3000'
+      - '127.0.0.1:9401:9401'
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:9401/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+  hub-api:
+    image: ghcr.io/toon-protocol/hub-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    container_name: hub-direct-api
+    networks:
+      - hub-direct-net
+    depends_on:
+      connector:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:28090:28090'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ~/.hub:/.hub:rw
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:28090/api/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+  town:
+    image: ghcr.io/toon-protocol/town@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    profiles: [town]
+    networks:
+      - hub-direct-net
+    depends_on:
+      connector:
+        condition: service_healthy
+  mill:
+    image: ghcr.io/toon-protocol/mill@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    profiles: [mill]
+    networks:
+      - hub-direct-net
+    depends_on:
+      connector:
+        condition: service_healthy
+  dvm:
+    image: ghcr.io/toon-protocol/dvm@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+    profiles: [dvm]
+    networks:
+      - hub-direct-net
+    depends_on:
+      connector:
+        condition: service_healthy

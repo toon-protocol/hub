@@ -44,5 +44,5 @@ jobs:
 
       - name: shellcheck embedded boot scripts
         # SC2154: the scripts read vars injected by systemd's EnvironmentFile
-        # (/etc/townhouse.env) — legitimately external, not script-assigned.
+        # (/etc/hub.env) — legitimately external, not script-assigned.
         run: shellcheck -e SC2154 "$RUNNER_TEMP/cloudinit-scripts"/*.sh

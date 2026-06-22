@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "hubVersion": "0.0.1-fixture",
+  "builtAt": "2026-05-09T00:00:00.000Z",
+  "images": {
+    "hub-api": {
+      "name": "ghcr.io/toon-protocol/hub-api",
+      "tag": "0.0.1-fixture",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "town": {
+      "name": "ghcr.io/toon-protocol/town",
+      "tag": "0.0.1-fixture",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "mill": {
+      "name": "ghcr.io/toon-protocol/mill",
+      "tag": "0.0.1-fixture",
+      "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "dvm": {
+      "name": "ghcr.io/toon-protocol/dvm",
+      "tag": "0.0.1-fixture",
+      "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "connector": {
+      "name": "ghcr.io/toon-protocol/connector",
+      "tag": "3.4.1",
+      "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  }
+}

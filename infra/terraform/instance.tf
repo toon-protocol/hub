@@ -1,5 +1,5 @@
 # The apex host. Ubuntu 24.04 + cloud-init that installs Docker, Node 20, and the pinned
-# hub CLI, mounts the persistent volume at /mnt/townhouse, then initializes (mnemonic
+# hub CLI, mounts the persistent volume at /mnt/hub, then initializes (mnemonic
 # mode) and starts the apex via a systemd unit — entirely at first boot, no SSH. There
 # is no authorized_keys: the box is config-driven and observed via the status push.
 

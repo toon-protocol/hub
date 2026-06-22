@@ -7,7 +7,7 @@
 #   - Phase 1 (transport = direct): BTP 3000 (pay-to-write) + Nostr relay WS 7100 (reads),
 #     restricted to the demo client CIDR.
 #   - Phase 2 (transport = hs / anyone proxy): NO inbound at all — reached via .anon.
-# Loopback-only services (connector admin 9401, townhouse-api 28090, BLS health) are
+# Loopback-only services (connector admin 9401, hub-api 28090, BLS health) are
 # never exposed.
 
 resource "linode_firewall" "hub" {

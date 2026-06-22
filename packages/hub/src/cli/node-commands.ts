@@ -1,0 +1,636 @@
+/**
+ * CLI node lifecycle handlers: `hub node add` / `remove` / `list`.
+ *
+ * D4 DECISION (Story 46.3):
+ * In HS mode, `nodes.yaml` is the single source of truth for provisioned nodes.
+ * `hub node add <type>` ignores `config.nodes[type].enabled` entirely —
+ * the static flag is the source of truth for the `dev` profile (`hub up
+ * --town`) only. Epic 46 lazy provisioning and the static dev-profile config
+ * are orthogonal: lifecycle-managed nodes answer to nodes.yaml, not the flag.
+ */
+
+import * as readline from 'node:readline';
+import { renderFailure, useAscii } from './failure-copy.js';
+
+// Default Hub host API URL for HS mode.
+const DEFAULT_HS_API_URL = 'http://127.0.0.1:28090';
+
+// Maps server-side step identifiers to the user-visible stage labels.
+const STEP_TO_STAGE: Record<string, string> = {
+  preflight: 'Preflight',
+  'derive-key': 'Deriving wallet',
+  'pull-image': 'Pulling image',
+  'write-yaml': 'Deriving wallet', // same disk-class bucket from operator POV
+  'write-mill-config': 'Deriving wallet', // same disk-class bucket as write-yaml
+  'start-container': 'Registering with apex',
+  healthcheck: 'Registering with apex',
+  'register-peer': 'Live',
+};
+
+const STAGE_LABELS = [
+  'Pulling image',
+  'Deriving wallet',
+  'Registering with apex',
+  'Live',
+];
+
+/** Sub-help text printed by `hub node <verb> --help`. */
+export const NODE_ADD_HELP = `hub node add — Provision a child node
+
+Usage:
+  hub node add [<type>] [--relays <urls>] [--turbo-token <jwk>] [--json] [-c <path>]
+
+Arguments:
+  <type>          Node type to provision: town, mill, dvm (default: town)
+
+Flags:
+  --relays            mill only: comma-separated Nostr relay URLs (required for mill
+                      unless set in config.yaml or the MILL_RELAYS env var)
+  --turbo-token       dvm only: Arweave Turbo credential (JWK string) enabling
+                      larger/paid kind:5094 uploads (free-tier <100KB works without)
+  --settlement-chain  town only: settlement chain advertised in kind:10032; must be
+                      a supported chain (see 'hub chains supported')
+  --asset             town only: settlement token on that chain — USDC | ETH | SOL |
+                      MINA (default USDC where supported, else native)
+  --json              Machine-readable JSON output
+  -c                  Path to config file
+
+Examples:
+  hub node add                                          # provision a Town relay (default)
+  hub node add town --settlement-chain evm:base:8453 --asset USDC   # price publishes in USDC on Base
+  hub node add mill --relays wss://relay.damus.io,wss://nos.lol   # chain-swap node
+  hub node add dvm --turbo-token "$(cat arweave.json)"  # DVM compute / Arweave node`;
+
+export const NODE_REMOVE_HELP = `hub node remove — Deprovision a child node
+
+Usage:
+  hub node remove <id> [--yes] [--json] [-c <path>]
+
+Arguments:
+  <id>     Node ID to remove (use 'hub node list' to find IDs)
+
+Flags:
+  --yes    Skip confirmation prompt (required in non-interactive mode)
+  --json   Machine-readable JSON output; implies non-interactive (no prompt)
+  -c       Path to config file`;
+
+export const NODE_LIST_HELP = `hub node list — List provisioned nodes
+
+Usage:
+  hub node list [--json] [-c <path>]
+
+Flags:
+  --json   Machine-readable JSON output (emits API response verbatim)
+  -c       Path to config file`;
+
+export const NODE_HELP = `hub node — Manage child nodes
+
+Usage:
+  hub node add [<type>] [--relays <urls>] [--turbo-token <jwk>] [--json] [-c <path>]   Provision a child node (default: town)
+  hub node remove <id> [--yes] [--json] [-c <path>]   Deprovision a child node
+  hub node list [--json] [-c <path>]            List provisioned nodes
+
+Run 'hub node <verb> --help' for details on each verb.
+
+Tip:
+  hub node add mill   # earn from chain swaps (5x earnings unlock)`;
+
+// ── Shared helpers ─────────────────────────────────────────────────────────────
+
+type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+
+function resolveApiUrl(apiUrl?: string): string {
+  return apiUrl ?? DEFAULT_HS_API_URL;
+}
+
+function formatRelativeTime(iso: string): string {
+  const ts = new Date(iso).getTime();
+  if (Number.isNaN(ts)) return '—';
+  const diffMs = Date.now() - ts;
+  if (diffMs < 0) return 'just now';
+  const secs = Math.floor(diffMs / 1000);
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+async function confirmInteractive(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  try {
+    const answer = await new Promise<string>((resolve) =>
+      rl.question(question, resolve)
+    );
+    return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
+}
+
+function emitJsonError(obj: Record<string, unknown>, exitCode = 1): void {
+  process.stdout.write(JSON.stringify(obj) + '\n');
+  process.exitCode = exitCode;
+}
+
+// ── handleNodeAdd ──────────────────────────────────────────────────────────────
+
+export interface NodeAddOptions {
+  json: boolean;
+  apiUrl?: string;
+  fetch?: FetchFn;
+  confirm?: (question: string) => Promise<boolean>;
+  /**
+   * mill only: comma-separated Nostr relay URLs (`--relays`). Split + trimmed
+   * into an array and sent in the request body, so the API resolves relays from
+   * the request rather than its frozen process.env — no MILL_RELAYS export
+   * before `hs up` required.
+   */
+  relays?: string;
+  /** dvm only: Arweave Turbo credential JWK string (`--turbo-token`). */
+  turboToken?: string;
+  /** town only: settlement chain id to advertise (`--settlement-chain`), e.g. evm:base:8453. */
+  settlementChain?: string;
+  /** town only: settlement token on that chain (`--asset`): USDC | ETH | SOL | MINA. */
+  asset?: string;
+}
+
+export async function handleNodeAdd(
+  type: string,
+  options: NodeAddOptions
+): Promise<void> {
+  const ascii = useAscii();
+  const check = ascii ? '[OK]' : '✓';
+  const xMark = ascii ? '[X]' : '✕';
+  const dot = ascii ? '.' : '·';
+
+  if (type !== 'town' && type !== 'mill' && type !== 'dvm') {
+    const msg = `Unknown type: '${type}'. Supported: town, mill, dvm`;
+    if (options.json) {
+      emitJsonError({ ok: false, error: 'invalid_type', message: msg });
+    } else {
+      process.stderr.write(`${xMark} ${msg}\n`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  const url = resolveApiUrl(options.apiUrl);
+  const fetchImpl = options.fetch ?? fetch;
+
+  // Build the request body. Operator inputs travel with the add request so the
+  // API resolves them from the body (precedence flag > config > env) instead of
+  // its own frozen process.env. Only attach a field when relevant + provided.
+  const requestBody: {
+    type: string;
+    relays?: string[];
+    turboToken?: string;
+    settlementChainId?: string;
+    assetCode?: string;
+  } = {
+    type,
+  };
+  if (type === 'mill' && options.relays !== undefined) {
+    const relays = options.relays
+      .split(',')
+      .map((r) => r.trim())
+      .filter(Boolean);
+    if (relays.length > 0) requestBody.relays = relays;
+  }
+  if (type === 'dvm' && options.turboToken) {
+    requestBody.turboToken = options.turboToken;
+  }
+  if (type === 'town') {
+    if (options.settlementChain) {
+      requestBody.settlementChainId = options.settlementChain.trim();
+    }
+    if (options.asset) requestBody.assetCode = options.asset.trim();
+  }
+
+  if (!options.json) {
+    // Print all stages dim while waiting for the blocking POST to return.
+    process.stdout.write(
+      `  ${STAGE_LABELS.map((s) => `${dot} ${s}`).join(' · ')}\n`
+    );
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+
+  let response: Response;
+  try {
+    response = await fetchImpl(`${url}/api/nodes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(timer);
+    const isAborted = err instanceof Error && err.name === 'AbortError';
+    const errMsg = isAborted
+      ? 'Request timed out after 120 seconds.'
+      : "hub hs up isn't running. Run 'hub hs up' first.";
+    if (options.json) {
+      emitJsonError({
+        ok: false,
+        error: isAborted ? 'timeout' : 'econnrefused',
+        message: errMsg,
+      });
+    } else {
+      process.stderr.write(`${xMark} ${errMsg}\n`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+  clearTimeout(timer);
+
+  if (response.status === 201) {
+    const body = (await response.json().catch(() => ({}))) as {
+      id?: string;
+      type?: string;
+      peerId?: string;
+      ilpAddress?: string;
+      hsRoute?: string;
+      healthCheckUrl?: string;
+    };
+    if (options.json) {
+      process.stdout.write(JSON.stringify({ ok: true, ...body }) + '\n');
+    } else {
+      // Re-print all stages green.
+      process.stdout.write(
+        `  ${STAGE_LABELS.map((s) => `${check} ${s}`).join(' · ')}\n`
+      );
+      const addedId = body.id ?? type;
+      const addedPeer = body.peerId ? ` (${body.peerId})` : '';
+      const addedAddr = body.ilpAddress ? ` at ${body.ilpAddress}` : '';
+      process.stdout.write(`  Added ${addedId}${addedPeer}${addedAddr}\n`);
+    }
+    return;
+  }
+
+  // Error path — surface the step field from the response body.
+  const body = (await response.json().catch(() => ({}))) as {
+    step?: string;
+    err?: string;
+    rollbackError?: string;
+    error?: string;
+    type?: string;
+    existingId?: string;
+  };
+
+  if (options.json) {
+    emitJsonError({ ok: false, ...body });
+    return;
+  }
+
+  // 409 node_type_in_use
+  if (response.status === 409 && body.error === 'node_type_in_use') {
+    // The desired node already exists — only one node per type is supported
+    // (v1 constraint). Point the operator at how to inspect it and how to
+    // recreate it, rather than the unhelpful "use a different type" (there are
+    // only three types, and they likely already have the ones they want).
+    const existingId = body.existingId ?? body.type ?? type;
+    process.stderr.write(
+      `${xMark} A '${body.type}' node already exists (id '${existingId}'). ` +
+        `Only one node per type is supported.\n` +
+        `  See your nodes:  hub node list\n` +
+        `  Recreate it:     hub node remove ${existingId} && hub node add ${body.type}\n`
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  // 409 node_lifecycle_in_flight
+  if (response.status === 409 && body.error === 'node_lifecycle_in_flight') {
+    process.stderr.write(
+      `${xMark} Another node operation is in flight. Try again in a moment.\n`
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const step = body.step ?? 'unknown';
+  const errText = body.err ?? '';
+
+  // pull-image → use renderFailure with synthetic error matching classifier.
+  if (step === 'pull-image') {
+    const syntheticErr = new Error(`failed to pull: ${errText}`);
+    renderFailure(syntheticErr);
+  } else if (
+    step === 'start-container' &&
+    (errText.includes('port is already allocated') ||
+      errText.includes('Cannot connect to the Docker daemon'))
+  ) {
+    renderFailure(new Error(errText));
+  } else if (step === 'preflight') {
+    // Preflight failures are configuration errors — the stack is healthy and
+    // must NOT be torn down. Give targeted advice instead of the generic
+    // "hs down && hs up" which would destroy a working stack for no reason.
+    const arrow = ascii ? '->' : '→';
+    process.stderr.write(`${xMark} ${errText}\n`);
+    process.stderr.write(
+      `  ${arrow} Fix the configuration above, then retry 'hub node add'.\n`
+    );
+  } else {
+    // Generic 3-line failure for all other steps.
+    const stageName = STEP_TO_STAGE[step] ?? step;
+    const arrow = ascii ? '->' : '→';
+    process.stderr.write(
+      `${xMark} Step ${step} failed (stage: ${stageName}): ${errText}\n`
+    );
+    process.stderr.write(
+      `  ${arrow} Run 'hub hs down && hub hs up' to reset state, then retry.\n`
+    );
+  }
+
+  if (body.rollbackError) {
+    process.stderr.write(`  Rollback error: ${body.rollbackError}\n`);
+  }
+
+  process.exitCode = 1;
+}
+
+// ── handleNodeRemove ───────────────────────────────────────────────────────────
+
+export interface NodeRemoveOptions {
+  yes: boolean;
+  json: boolean;
+  apiUrl?: string;
+  fetch?: FetchFn;
+  confirm?: (question: string) => Promise<boolean>;
+}
+
+const NODE_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+export async function handleNodeRemove(
+  id: string,
+  options: NodeRemoveOptions
+): Promise<void> {
+  const ascii = useAscii();
+  const check = ascii ? '[OK]' : '✓';
+  const xMark = ascii ? '[X]' : '✕';
+
+  if (!id) {
+    const msg = 'Usage: hub node remove <id> [--yes] [--json]';
+    if (options.json) {
+      emitJsonError({ ok: false, error: 'missing_id', message: msg });
+    } else {
+      process.stderr.write(`${msg}\n`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // Sanitize id against the route pattern before sending (fail fast, no round-trip).
+  if (!NODE_ID_PATTERN.test(id)) {
+    const msg = `Invalid node id '${id}'. IDs must match ^[a-z][a-z0-9-]*$ (lowercase, no leading hyphens or underscores).`;
+    if (options.json) {
+      emitJsonError({ ok: false, error: 'invalid_id', message: msg });
+    } else {
+      process.stderr.write(`${xMark} ${msg}\n`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // Confirmation gate.
+  const skipPrompt = options.yes || options.json;
+  if (!skipPrompt) {
+    if (!process.stdin.isTTY) {
+      const msg =
+        '--yes required when stdin is not a TTY (use --yes for non-interactive removal).';
+      process.stderr.write(`${xMark} ${msg}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    const confirmFn = options.confirm ?? confirmInteractive;
+    const confirmed = await confirmFn(
+      `Remove node '${id}'? This deprovisions the container and deregisters the peer. [y/N] `
+    );
+    if (!confirmed) {
+      process.stdout.write('Cancelled.\n');
+      return;
+    }
+  }
+
+  const url = resolveApiUrl(options.apiUrl);
+  const fetchImpl = options.fetch ?? fetch;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+
+  let response: Response;
+  try {
+    response = await fetchImpl(`${url}/api/nodes/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(timer);
+    const isAborted = err instanceof Error && err.name === 'AbortError';
+    const errMsg = isAborted
+      ? 'Request timed out.'
+      : "hub hs up isn't running. Run 'hub hs up' first.";
+    if (options.json) {
+      emitJsonError({
+        ok: false,
+        error: isAborted ? 'timeout' : 'econnrefused',
+        message: errMsg,
+      });
+    } else {
+      process.stderr.write(`${xMark} ${errMsg}\n`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+  clearTimeout(timer);
+
+  if (response.status === 200) {
+    const body = (await response.json().catch(() => ({}))) as {
+      id?: string;
+      type?: string;
+    };
+    const removedId = body.id ?? id;
+    if (options.json) {
+      process.stdout.write(
+        JSON.stringify({ ok: true, id: removedId, type: body.type }) + '\n'
+      );
+    } else {
+      process.stdout.write(`${check} Removed ${removedId}\n`);
+    }
+    return;
+  }
+
+  const body = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    step?: string;
+    err?: string;
+    id?: string;
+  };
+
+  if (options.json) {
+    emitJsonError({ ok: false, ...body });
+    return;
+  }
+
+  if (response.status === 404) {
+    process.stderr.write(`${xMark} No node with id '${id}'\n`);
+  } else if (
+    response.status === 409 &&
+    body.error === 'node_lifecycle_in_flight'
+  ) {
+    process.stderr.write(
+      `${xMark} Another node operation is in flight. Try again in a moment.\n`
+    );
+  } else {
+    const step = body.step ?? 'unknown';
+    process.stderr.write(`${xMark} Step ${step} failed: ${body.err ?? ''}\n`);
+  }
+  process.exitCode = 1;
+}
+
+// ── handleNodeList ─────────────────────────────────────────────────────────────
+
+export interface NodeListOptions {
+  json: boolean;
+  apiUrl?: string;
+  fetch?: FetchFn;
+}
+
+interface NodeEntry {
+  id: string;
+  type: string;
+  peerId: string;
+  ilpAddress: string;
+  status: 'connected' | 'disconnected' | 'unknown';
+  enabledAt: string;
+  lastSeenAt: string | null;
+  // x-only Nostr pubkey (hex). Optional for backward compatibility with nodes
+  // provisioned before issue #81. Surfaced verbatim in `node list --json`.
+  nostrPubkey?: string;
+}
+
+export async function handleNodeList(options: NodeListOptions): Promise<void> {
+  const ascii = useAscii();
+  const xMark = ascii ? '[X]' : '✕';
+  const emDash = ascii ? '-' : '—';
+
+  const url = resolveApiUrl(options.apiUrl);
+  const fetchImpl = options.fetch ?? fetch;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+
+  let response: Response;
+  try {
+    response = await fetchImpl(`${url}/api/nodes`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(timer);
+    const isAborted = err instanceof Error && err.name === 'AbortError';
+    const errMsg = isAborted
+      ? 'Request timed out.'
+      : "hub hs up isn't running. Run 'hub hs up' first.";
+    if (options.json) {
+      emitJsonError({
+        ok: false,
+        error: isAborted ? 'timeout' : 'econnrefused',
+        message: errMsg,
+      });
+    } else {
+      process.stderr.write(`${xMark} ${errMsg}\n`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+  clearTimeout(timer);
+
+  if (response.status !== 200) {
+    const body = (await response.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    if (options.json) {
+      emitJsonError({ ok: false, ...body });
+    } else {
+      process.stderr.write(
+        `${xMark} Failed to fetch nodes (HTTP ${response.status})\n`
+      );
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  const body = (await response.json().catch(() => ({ nodes: [] }))) as {
+    nodes?: NodeEntry[];
+  };
+  const nodes = body.nodes ?? [];
+
+  if (options.json) {
+    // Emit the API response body verbatim (no `ok` envelope) — consistent with kubectl -o json.
+    process.stdout.write(JSON.stringify({ nodes }) + '\n');
+    return;
+  }
+
+  if (nodes.length === 0) {
+    process.stdout.write(
+      "No nodes provisioned. Run 'hub node add town' to add one.\n"
+    );
+    return;
+  }
+
+  // Print 4-column table. Header labels follow AC #5 literal (`peer · type ·
+  // status · last claim`). Column widths grow to fit the longest value so long
+  // IDs / peer handles are never silently sliced.
+  const rows = nodes.map((node) => ({
+    peer: node.id,
+    type: node.type,
+    status: node.status,
+    lastClaim:
+      node.lastSeenAt !== null ? formatRelativeTime(node.lastSeenAt) : emDash,
+  }));
+
+  const HEADERS = {
+    peer: 'peer',
+    type: 'type',
+    status: 'status',
+    lastClaim: 'last claim',
+  };
+  const widths = {
+    peer: Math.max(HEADERS.peer.length, ...rows.map((r) => r.peer.length)),
+    type: Math.max(HEADERS.type.length, ...rows.map((r) => r.type.length)),
+    status: Math.max(
+      HEADERS.status.length,
+      ...rows.map((r) => r.status.length)
+    ),
+    lastClaim: Math.max(
+      HEADERS.lastClaim.length,
+      ...rows.map((r) => r.lastClaim.length)
+    ),
+  };
+
+  function pad(s: string, width: number): string {
+    return s.length >= width ? s : s + ' '.repeat(width - s.length);
+  }
+
+  const divider = ascii ? '-' : '─';
+  process.stdout.write(
+    `${pad(HEADERS.peer, widths.peer)}  ${pad(HEADERS.type, widths.type)}  ${pad(HEADERS.status, widths.status)}  ${HEADERS.lastClaim}\n`
+  );
+  process.stdout.write(
+    `${divider.repeat(widths.peer)}  ${divider.repeat(widths.type)}  ${divider.repeat(widths.status)}  ${divider.repeat(widths.lastClaim)}\n`
+  );
+
+  for (const row of rows) {
+    process.stdout.write(
+      `${pad(row.peer, widths.peer)}  ${pad(row.type, widths.type)}  ${pad(row.status, widths.status)}  ${row.lastClaim}\n`
+    );
+  }
+}
