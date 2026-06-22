@@ -1,9 +1,9 @@
 #cloud-config
 # Config-driven apex bootstrap — NO SSH. At first boot this installs Docker + Node 20 +
 # the pinned hub CLI, mounts the persistent volume, then a systemd unit (running as the
-# uid-1000 `townhouse` host user so generated configs match the container users)
+# uid-1000 `hub` host user so generated configs match the container users)
 # generates + persists its own encrypted wallet on the volume (no seed/password ever
-# transits CI) and runs `townhouse up`. A timer pushes `townhouse status --json`
+# transits CI) and runs `hub up`. A timer pushes `hub status --json`
 # to Object Storage so health + funding addresses are readable without touching the box.
 #
 # Normal operation: no 'deploy' user and no authorized_keys. For a CI debug run only, an
@@ -24,17 +24,17 @@ users:
 write_files:
   # Runtime env injected into the systemd services. 0600; holds the status-sink
   # credentials. No wallet seed/password here — the box self-generates its wallet
-  # and persists it (+ password) on the volume (see townhouse-boot.sh).
-  - path: /etc/townhouse.env
+  # and persists it (+ password) on the volume (see hub-boot.sh).
+  - path: /etc/hub.env
     permissions: '0600'
     content: |
-      TOWNHOUSE_HOME=/mnt/townhouse/.townhouse
-      TOWNHOUSE_WALLET_DIR=/mnt/townhouse/.townhouse
+      TOWNHOUSE_HOME=/mnt/hub/.hub
+      TOWNHOUSE_WALLET_DIR=/mnt/hub/.hub
       TOWNHOUSE_BTP_BIND=0.0.0.0
       TOWNHOUSE_RELAY_BIND=0.0.0.0
-      # NB: do not pin TOWNHOUSE_UID/TOWNHOUSE_DOCKER_GID here — `townhouse up`
+      # NB: do not pin TOWNHOUSE_UID/TOWNHOUSE_DOCKER_GID here — `hub up`
       # derives them from the running process uid + the docker.sock group (see
-      # cli.ts), and the boot now runs as the uid-1000 `townhouse` user so the
+      # cli.ts), and the boot now runs as the uid-1000 `hub` user so the
       # generated connector.yaml is owned by uid 1000 and the connector container
       # (image-default uid 1000) can read it.
       TOON_NETWORK=${network}
@@ -43,24 +43,24 @@ write_files:
       AWS_ACCESS_KEY_ID=${status_access_key}
       AWS_SECRET_ACCESS_KEY=${status_secret_key}
 
-  - path: /usr/local/sbin/townhouse-mount-volume.sh
+  - path: /usr/local/sbin/hub-mount-volume.sh
     permissions: '0755'
     content: |
       #!/usr/bin/env bash
       set -euo pipefail
       DEV="/dev/disk/by-id/scsi-0Linode_Volume_${volume_label}"
-      MNT="/mnt/townhouse"
+      MNT="/mnt/hub"
       for _ in $(seq 1 30); do [ -e "$DEV" ] && break; sleep 2; done
       if [ ! -e "$DEV" ]; then echo "volume $DEV not found" >&2; exit 1; fi
-      if ! blkid "$DEV" >/dev/null 2>&1; then mkfs.ext4 -m 0 -L townhouse "$DEV"; fi
+      if ! blkid "$DEV" >/dev/null 2>&1; then mkfs.ext4 -m 0 -L hub "$DEV"; fi
       mkdir -p "$MNT"
       grep -q "$MNT" /etc/fstab || echo "$DEV $MNT ext4 defaults,noatime,nofail 0 2" >> /etc/fstab
       mount -a
-      mkdir -p "$MNT/.townhouse"
+      mkdir -p "$MNT/.hub"
 
   # Generate the wallet + config if needed, then bring the apex up. Idempotent across
   # reboots: wallet + config persist on the volume, so init only runs once.
-  - path: /usr/local/sbin/townhouse-boot.sh
+  - path: /usr/local/sbin/hub-boot.sh
     permissions: '0755'
     content: |
       #!/usr/bin/env bash
@@ -89,8 +89,8 @@ write_files:
         # --password: under --preset demo --yes the CLI would otherwise substitute its
         # hardcoded deterministic demo password. --force: overwrite any stale
         # config.yaml/wallet.enc from a prior deploy.
-        townhouse init --config-dir "$TOWNHOUSE_HOME" --preset demo --network "$TOON_NETWORK" --password "$(cat "$PWFILE")" --force --yes --json \
-          || townhouse init --config-dir "$TOWNHOUSE_HOME" --network "$TOON_NETWORK" --password "$(cat "$PWFILE")" --force --yes --json
+        hub init --config-dir "$TOWNHOUSE_HOME" --preset demo --network "$TOON_NETWORK" --password "$(cat "$PWFILE")" --force --yes --json \
+          || hub init --config-dir "$TOWNHOUSE_HOME" --network "$TOON_NETWORK" --password "$(cat "$PWFILE")" --force --yes --json
         touch "$READY"
       fi
       # `up` and `wallet show` read the password from the env. Assign then export
@@ -101,32 +101,32 @@ write_files:
       # `up`: the wallet already exists and its address is stable, so the treasury
       # top-up can proceed without waiting on image pulls. Best-effort; never fails.
       if [ -n "$${STATUS_BUCKET:-}" ]; then
-        if townhouse wallet show -c "$TOWNHOUSE_HOME/config.yaml" --json > "$${TMPDIR:-/tmp}/hub-wallet.json" 2>/dev/null; then
+        if hub wallet show -c "$TOWNHOUSE_HOME/config.yaml" --json > "$${TMPDIR:-/tmp}/hub-wallet.json" 2>/dev/null; then
           aws s3 cp "$${TMPDIR:-/tmp}/hub-wallet.json" "s3://$STATUS_BUCKET/hub/wallet.json" \
             --endpoint-url "$STATUS_ENDPOINT" >/dev/null 2>&1 || true
         fi
       fi
-      townhouse up -c "$TOWNHOUSE_HOME/config.yaml" --transport direct --json
+      hub up -c "$TOWNHOUSE_HOME/config.yaml" --transport direct --json
 
   # Push status (health + funding addresses) to Object Storage. Best-effort; never fails.
-  - path: /usr/local/sbin/townhouse-status-push.sh
+  - path: /usr/local/sbin/hub-status-push.sh
     permissions: '0755'
     content: |
       #!/usr/bin/env bash
       set -uo pipefail
       [ -n "$${STATUS_BUCKET:-}" ] || exit 0
-      # /run is root-owned; this unit runs as the uid-1000 townhouse user, so
+      # /run is root-owned; this unit runs as the uid-1000 hub user, so
       # stage the payload somewhere that user can write.
-      OUT="$${TMPDIR:-/tmp}/townhouse-status.json"
-      townhouse status -c "$TOWNHOUSE_HOME/config.yaml" --json > "$OUT" 2>/dev/null || echo '{"error":"status unavailable"}' > "$OUT"
+      OUT="$${TMPDIR:-/tmp}/hub-status.json"
+      hub status -c "$TOWNHOUSE_HOME/config.yaml" --json > "$OUT" 2>/dev/null || echo '{"error":"status unavailable"}' > "$OUT"
       aws s3 cp "$OUT" "s3://$STATUS_BUCKET/hub/status.json" \
         --endpoint-url "$STATUS_ENDPOINT" >/dev/null 2>&1 || true
 
-  - path: /etc/systemd/system/townhouse.service
+  - path: /etc/systemd/system/hub.service
     permissions: '0644'
     content: |
       [Unit]
-      Description=TOON apex (townhouse up)
+      Description=TOON apex (hub up)
       After=docker.service network-online.target
       Wants=network-online.target
       Requires=docker.service
@@ -138,37 +138,37 @@ write_files:
       # ($${TOWNHOUSE_HOME}/connector.yaml, bind-mounted :ro) is owned by uid 1000
       # and the connector container (image-default uid 1000) can read it. Group
       # docker grants host access to /var/run/docker.sock for `docker compose`.
-      User=townhouse
+      User=hub
       Group=docker
-      EnvironmentFile=/etc/townhouse.env
+      EnvironmentFile=/etc/hub.env
       Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      ExecStart=/usr/local/sbin/townhouse-boot.sh
+      ExecStart=/usr/local/sbin/hub-boot.sh
 
       [Install]
       WantedBy=multi-user.target
 
-  - path: /etc/systemd/system/townhouse-status.service
+  - path: /etc/systemd/system/hub-status.service
     permissions: '0644'
     content: |
       [Unit]
-      Description=Push townhouse status to Object Storage
-      After=townhouse.service
+      Description=Push hub status to Object Storage
+      After=hub.service
 
       [Service]
       Type=oneshot
-      # Match townhouse.service: uid-1000 user owns the config/wallet on the
+      # Match hub.service: uid-1000 user owns the config/wallet on the
       # volume, and docker group access is needed to read container state.
-      User=townhouse
+      User=hub
       Group=docker
-      EnvironmentFile=/etc/townhouse.env
+      EnvironmentFile=/etc/hub.env
       Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      ExecStart=/usr/local/sbin/townhouse-status-push.sh
+      ExecStart=/usr/local/sbin/hub-status-push.sh
 
-  - path: /etc/systemd/system/townhouse-status.timer
+  - path: /etc/systemd/system/hub-status.timer
     permissions: '0644'
     content: |
       [Unit]
-      Description=Periodic townhouse status push
+      Description=Periodic hub status push
 
       [Timer]
       OnBootSec=3min
@@ -178,15 +178,15 @@ write_files:
       WantedBy=timers.target
 
 runcmd:
-  - [ bash, /usr/local/sbin/townhouse-mount-volume.sh ]
+  - [ bash, /usr/local/sbin/hub-mount-volume.sh ]
   # Robust install: wait out the cloud-init apt lock, keep nodejs separate from the
   # AWS CLI v2 (the awscli apt package was dropped in Ubuntu 24.04), add build tools
   # for native npm deps, and retry + verify the CLI.
-  - [ bash, -c, "set -eux; export DEBIAN_FRONTEND=noninteractive; APT='apt-get -o DPkg::Lock::Timeout=600 -y'; curl -fsSL https://get.docker.com | sh; systemctl enable --now docker; curl -fsSL https://deb.nodesource.com/setup_20.x | bash -; $APT install nodejs build-essential python3 unzip; node --version; npm --version; (curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip && unzip -q -o /tmp/awscliv2.zip -d /tmp && /tmp/aws/install --update && aws --version) || echo 'WARN awscli install failed (status push disabled)'; for i in 1 2 3; do npm install -g @toon-protocol/hub@${hub_version} && break || sleep 10; done; command -v townhouse" ]
-  # Create the uid-1000 `townhouse` user that owns the volume and runs the apex,
+  - [ bash, -c, "set -eux; export DEBIAN_FRONTEND=noninteractive; APT='apt-get -o DPkg::Lock::Timeout=600 -y'; curl -fsSL https://get.docker.com | sh; systemctl enable --now docker; curl -fsSL https://deb.nodesource.com/setup_20.x | bash -; $APT install nodejs build-essential python3 unzip; node --version; npm --version; (curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip && unzip -q -o /tmp/awscliv2.zip -d /tmp && /tmp/aws/install --update && aws --version) || echo 'WARN awscli install failed (status push disabled)'; for i in 1 2 3; do npm install -g @toon-protocol/hub@${hub_version} && break || sleep 10; done; command -v hub" ]
+  # Create the uid-1000 `hub` user that owns the volume and runs the apex,
   # so generated configs match the container users (uid 1000) — see hub#34. Must
   # run after Docker (for the `docker` group) and after the volume mount.
-  - [ bash, -c, "set -eux; id -u townhouse >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash townhouse; usermod -aG docker townhouse; chown -R townhouse:townhouse /mnt/townhouse" ]
+  - [ bash, -c, "set -eux; id -u hub >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash hub; usermod -aG docker hub; chown -R hub:hub /mnt/hub" ]
   - [ systemctl, daemon-reload ]
-  - [ systemctl, enable, --now, townhouse.service ]
-  - [ systemctl, enable, --now, townhouse-status.timer ]
+  - [ systemctl, enable, --now, hub.service ]
+  - [ systemctl, enable, --now, hub-status.timer ]

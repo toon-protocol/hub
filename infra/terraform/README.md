@@ -3,7 +3,7 @@
 Provisions one Linode instance + a persistent Block Storage volume + a firewall, and
 hands the (seed-free) config to cloud-init. The box then brings itself up — **no SSH**:
 installs Docker, Node 20, the pinned `@toon-protocol/hub` CLI, **generates + persists its
-own encrypted wallet on the volume**, and runs `townhouse up` (pulling the public GHCR node
+own encrypted wallet on the volume**, and runs `hub up` (pulling the public GHCR node
 images) via systemd, then publishes its funding addresses to Object Storage.
 
 Normally driven by `.github/workflows/deploy-hub.yml`. The notes below are for local runs.

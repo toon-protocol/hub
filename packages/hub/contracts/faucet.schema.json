@@ -1,0 +1,161 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://toon-protocol.org/schemas/faucet.schema.json",
+  "title": "TOON Akash Devnet Faucet Contract",
+  "description": "Wire-shape contract between the dev-faucet HTTP service (packages/faucet/src/index.js, deployed via deploy/akash/faucet.sdl.yaml) and its consumers (foreign-client pods, third-party developers, ad-hoc smoke tests). Drift = build break. See _bmad-output/implementation-artifacts/49-2-akash-devnet-faucets-and-ui.md § \"Schema-Contract Discipline\".",
+  "definitions": {
+    "EvmAddress": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$",
+      "description": "0x-prefixed 40-hex EVM address. Regex must stay in sync with packages/faucet/src/index.js SOLANA_PUBKEY_RE/EVM_ADDRESS_RE and packages/hub/src/api/routes/faucet.ts:119-120."
+    },
+    "SolanaAddress": {
+      "type": "string",
+      "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+      "description": "base58-encoded Solana pubkey, 32-44 chars, no 0OIl. Regex must stay in sync."
+    },
+    "Chain": {
+      "type": "string",
+      "enum": ["evm", "solana"],
+      "description": "Settlement chain — 'evm' targets the Akash-Anvil lease, 'solana' targets the Akash-Solana lease."
+    },
+    "TruncatedAddress": {
+      "type": "string",
+      "description": "Display-truncated address (first-6 + last-4 hex/base58). Output-only; never accepted as input."
+    },
+    "FaucetUnifiedRequest": {
+      "type": "object",
+      "required": ["chain", "recipient"],
+      "additionalProperties": false,
+      "properties": {
+        "chain": { "$ref": "#/definitions/Chain" },
+        "recipient": {
+          "type": "string",
+          "description": "EVM or Solana address — validated against the per-chain regex AFTER chain is dispatched. Schema-level shape is just 'non-empty string'; chain-aware validation lives in the handler.",
+          "minLength": 32,
+          "maxLength": 44
+        },
+        "amount": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Whole USDC to drip (decimals=6 on Solana, decimals=18 on Mock USDC anvil). Optional; defaults to TOKEN_AMOUNT env (10000 on EVM) or SOL_USDC_AMOUNT env (100 on Solana) if omitted."
+        }
+      }
+    },
+    "FaucetPathRequest": {
+      "type": "object",
+      "required": ["address"],
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "EVM or Solana address — chain inferred from the request path (/faucet/evm or /faucet/sol). Validated against the per-chain regex.",
+          "minLength": 32,
+          "maxLength": 44
+        },
+        "amount": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Whole USDC to drip. Optional; defaults to TOKEN_AMOUNT env (10000) for EVM or SOL_USDC_AMOUNT env (100) for Solana."
+        }
+      }
+    },
+    "FaucetSuccessResponse": {
+      "type": "object",
+      "required": ["tx", "chain", "recipient"],
+      "additionalProperties": false,
+      "properties": {
+        "tx": {
+          "type": "string",
+          "description": "Transaction hash (EVM) or signature (Solana). Format depends on chain; consumers should treat as opaque."
+        },
+        "chain": { "$ref": "#/definitions/Chain" },
+        "recipient": {
+          "type": "string",
+          "description": "Echoed recipient address. Same shape as the request — full, not truncated."
+        },
+        "balanceAfter": {
+          "type": "string",
+          "description": "Post-drip USDC balance as a decimal string (avoids JSON number precision loss for large balances). Optional — the standalone faucet emits it when cheap to compute; smoke tests may relax this requirement."
+        },
+        "explorerUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Direct link to the tx in a chain explorer if the operator has configured EVM_EXPLORER_URL_BASE / SOL_EXPLORER_URL_BASE. Optional."
+        }
+      }
+    },
+    "FaucetClientErrorResponse": {
+      "type": "object",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "string",
+          "description": "Human-readable error message. Stable enough to log and grep on; treat as opaque for branching."
+        },
+        "waitMinutes": {
+          "type": "number",
+          "description": "If error == 'rate limit exceeded', the suggested retry delay in minutes. UI uses this OR the Retry-After header (whichever is larger) to render a countdown."
+        }
+      }
+    },
+    "FaucetServerErrorResponse": {
+      "type": "object",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "string",
+          "description": "Human-readable error message."
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "Whether the consumer should retry. True for transient RPC-level errors; false for unrecoverable misconfig (mint not found, etc)."
+        },
+        "airdropSig": {
+          "type": "string",
+          "description": "If a Solana drip partially succeeded (SOL airdrop went through but the SPL transfer failed), the airdrop signature is surfaced here so the caller knows SOL landed."
+        }
+      }
+    },
+    "RecentDripEntry": {
+      "type": "object",
+      "required": ["ts", "address", "chain", "amount", "txid"],
+      "additionalProperties": false,
+      "properties": {
+        "ts": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 UTC timestamp when the drip was emitted."
+        },
+        "address": {
+          "$ref": "#/definitions/TruncatedAddress"
+        },
+        "chain": { "$ref": "#/definitions/Chain" },
+        "amount": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Whole USDC dripped."
+        },
+        "txid": {
+          "type": "string",
+          "description": "Tx hash / signature. Opaque per-chain shape."
+        }
+      }
+    },
+    "RecentDripsResponse": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/RecentDripEntry" },
+      "description": "In-memory ring buffer, sorted desc by ts. Default cap = 100 in the server; per-call limit defaults to 10 (max 100)."
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/definitions/FaucetUnifiedRequest" },
+    { "$ref": "#/definitions/FaucetPathRequest" },
+    { "$ref": "#/definitions/FaucetSuccessResponse" },
+    { "$ref": "#/definitions/FaucetClientErrorResponse" },
+    { "$ref": "#/definitions/FaucetServerErrorResponse" },
+    { "$ref": "#/definitions/RecentDripsResponse" }
+  ]
+}

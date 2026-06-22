@@ -1,0 +1,22 @@
+{
+  "name": "hub",
+  "description": "TOON Protocol Hub operator for Claude — run the apex + town/mill/dvm nodes. Bundles the hub-operator skill and the hub-mcp MCP server (lifecycle, node provisioning, fee tuning, chains, earnings, withdraw, telemetry).",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jonathan Green",
+    "email": "dev.jonathan.green@gmail.com"
+  },
+  "homepage": "https://github.com/toon-protocol/hub/tree/main/hub-plugin",
+  "repository": "https://github.com/toon-protocol/hub",
+  "license": "MIT",
+  "keywords": [
+    "toon",
+    "hub",
+    "nostr",
+    "interledger",
+    "ilp",
+    "mcp",
+    "operator",
+    "pay-to-write"
+  ]
+}

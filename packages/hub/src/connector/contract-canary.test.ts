@@ -1,0 +1,753 @@
+/**
+ * Connector Contract Canary — Hub-Side (Story 21.7.5)
+ *
+ * Stub-driven canary that fails fast (<500ms) when the connector admin API or
+ * the env-var/peer-config contract drifts from what Hub expects.
+ *
+ * The shapes asserted here mirror the connector source-of-truth:
+ *   - HealthStatus from `@toon-protocol/connector` packages/connector/src/http/types.ts
+ *   - AdminMetricsJsonResponse and the GET /admin/peers handler from
+ *     packages/connector/src/http/admin-api.ts
+ *
+ * Coverage:
+ *   Admin API (ConnectorAdminClient):
+ *     - getHealth()   → GET /health on healthCheckPort →
+ *         { status: 'healthy'|'unhealthy'|'starting'|'degraded',
+ *           uptime, peersConnected, totalPeers, timestamp, … }
+ *     - getMetrics()  → GET /admin/metrics.json on adminApi.port →
+ *         { uptimeSeconds, aggregate: {…}, peers: [{peerId, …}], timestamp }
+ *     - getPeers()    → GET /admin/peers on adminApi.port →
+ *         { nodeId, peerCount, connectedCount, peers: [{id, connected, …}] }
+ *
+ *   Each test asserts BOTH the path the client requests AND the shape it
+ *   parses. A path drift (e.g. someone refactors `getMetrics` to call
+ *   `/admin/metrics`) fails the canary just as loudly as a shape drift —
+ *   that's the point of binding the stub to URL/method.
+ *
+ *   Config-generator env-var shape (ConnectorConfigGenerator):
+ *     - Required keys always present for non-empty activeNodes
+ *     - SOCKS_PROXY present iff transport.socksProxy is set
+ *     - CONNECTOR_PEERS round-trips to PeerEntry[] with documented fields
+ *     - toEnvArray() matches toEnvVars() round-tripped
+ *
+ * No Docker, no network. Pure vi.spyOn(global, 'fetch') stub verification.
+ *
+ * If this canary fails, see packages/sdk/CONNECTOR_MIGRATION.md §Hub-Side Contract
+ * for the migration checklist.
+ */
+
+import { describe, it, expect, vi, afterEach } from 'vitest';
+
+import { ConnectorAdminClient } from './admin-client.js';
+import { ConnectorConfigGenerator } from './config-generator.js';
+import { getDefaultConfig } from '../config/defaults.js';
+import type { PeerEntry, PacketLogEntry } from './types.js';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Mock fetch and capture the URL the client requests, so the canary fails
+ * if a future refactor changes the path under `ConnectorAdminClient`.
+ */
+function mockFetchAt(
+  expectedPath: string,
+  body: unknown,
+  status = 200
+): { fetch: ReturnType<typeof vi.fn>; calls: string[] } {
+  const calls: string[] = [];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    calls.push(url);
+    if (!url.endsWith(expectedPath)) {
+      throw new Error(
+        `Canary expected client to request a URL ending in '${expectedPath}', got '${url}'`
+      );
+    }
+    return new Response(JSON.stringify(body), { status });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return { fetch: fetchMock, calls };
+}
+
+const HEALTHY_BODY = {
+  status: 'healthy' as const,
+  uptime: 42,
+  peersConnected: 1,
+  totalPeers: 1,
+  timestamp: '2026-04-29T00:00:00.000Z',
+};
+
+const METRICS_BODY = {
+  uptimeSeconds: 60,
+  aggregate: { packetsForwarded: 10, packetsRejected: 1, bytesSent: 500 },
+  peers: [],
+  timestamp: '2026-04-29T00:00:00.000Z',
+};
+
+const PEERS_BODY = {
+  nodeId: 'hub-canary',
+  peerCount: 1,
+  connectedCount: 1,
+  peers: [
+    {
+      id: 'town',
+      connected: true,
+      ilpAddresses: ['g.toon.town'],
+      routeCount: 1,
+    },
+  ],
+};
+
+const EARNINGS_BODY = {
+  uptimeSeconds: 60,
+  peers: [
+    {
+      peerId: 'town',
+      byAsset: [
+        {
+          assetCode: 'USD',
+          assetScale: 6,
+          claimsReceivedTotal: '1000000',
+          claimsSentTotal: '0',
+          netBalance: '1000000',
+          lastClaimAt: '2026-05-12T00:00:00.000Z',
+        },
+      ],
+    },
+  ],
+  connectorFees: [{ assetCode: 'USD', assetScale: 6, total: '1000' }],
+  recentClaims: [
+    {
+      peerId: 'town',
+      assetCode: 'USD',
+      assetScale: 6,
+      amount: '500000',
+      direction: 'inbound' as const,
+      at: '2026-05-12T00:00:00.000Z',
+    },
+  ],
+  timestamp: '2026-05-12T00:00:00.000Z',
+};
+
+const client = new ConnectorAdminClient('http://localhost:9402');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getHealth() shape + path contract — mirrors connector HealthStatus
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('getHealth() shape contract', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('succeeds on documented HealthStatus shape and requests GET /health', async () => {
+    const stub = mockFetchAt('/health', HEALTHY_BODY);
+    const health = await client.getHealth();
+    expect(health.status).toBe('healthy');
+    expect(health.uptime).toBe(42);
+    expect(health.peersConnected).toBe(1);
+    expect(health.totalPeers).toBe(1);
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it('accepts the four documented status values: healthy/unhealthy/starting/degraded', async () => {
+    for (const status of [
+      'healthy',
+      'unhealthy',
+      'starting',
+      'degraded',
+    ] as const) {
+      mockFetchAt('/health', { ...HEALTHY_BODY, status });
+      const health = await client.getHealth();
+      expect(health.status).toBe(status);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rejects when status field is missing', async () => {
+    mockFetchAt('/health', { ...HEALTHY_BODY, status: undefined });
+    await expect(client.getHealth()).rejects.toThrow(
+      /invalid health response shape/
+    );
+  });
+
+  it('rejects when status has unknown value', async () => {
+    mockFetchAt('/health', { ...HEALTHY_BODY, status: 'unknown' });
+    await expect(client.getHealth()).rejects.toThrow(
+      /invalid health response shape/
+    );
+  });
+
+  it('rejects when uptime field is missing', async () => {
+    mockFetchAt('/health', { ...HEALTHY_BODY, uptime: undefined });
+    await expect(client.getHealth()).rejects.toThrow(
+      /invalid health response shape/
+    );
+  });
+
+  it('rejects when peersConnected is missing', async () => {
+    mockFetchAt('/health', { ...HEALTHY_BODY, peersConnected: undefined });
+    await expect(client.getHealth()).rejects.toThrow(
+      /invalid health response shape/
+    );
+  });
+
+  it('rejects when totalPeers is missing', async () => {
+    mockFetchAt('/health', { ...HEALTHY_BODY, totalPeers: undefined });
+    await expect(client.getHealth()).rejects.toThrow(
+      /invalid health response shape/
+    );
+  });
+
+  it('rejects when timestamp is missing', async () => {
+    mockFetchAt('/health', { ...HEALTHY_BODY, timestamp: undefined });
+    await expect(client.getHealth()).rejects.toThrow(
+      /invalid health response shape/
+    );
+  });
+
+  it('rejects when uptime has wrong type (string instead of number)', async () => {
+    mockFetchAt('/health', { ...HEALTHY_BODY, uptime: '42' });
+    await expect(client.getHealth()).rejects.toThrow(
+      /invalid health response shape/
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getMetrics() shape + path contract — mirrors AdminMetricsJsonResponse
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('getMetrics() shape contract', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('succeeds on AdminMetricsJsonResponse shape and requests GET /admin/metrics.json', async () => {
+    const stub = mockFetchAt('/admin/metrics.json', METRICS_BODY);
+    const metrics = await client.getMetrics();
+    expect(metrics.uptimeSeconds).toBe(60);
+    expect(metrics.aggregate.packetsForwarded).toBe(10);
+    expect(metrics.aggregate.packetsRejected).toBe(1);
+    expect(metrics.aggregate.bytesSent).toBe(500);
+    expect(metrics.peers).toEqual([]);
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it('rejects when aggregate is missing', async () => {
+    mockFetchAt('/admin/metrics.json', {
+      ...METRICS_BODY,
+      aggregate: undefined,
+    });
+    await expect(client.getMetrics()).rejects.toThrow(
+      /invalid metrics response shape/
+    );
+  });
+
+  it('rejects when aggregate.packetsForwarded is missing', async () => {
+    mockFetchAt('/admin/metrics.json', {
+      ...METRICS_BODY,
+      aggregate: { packetsRejected: 0, bytesSent: 0 },
+    });
+    await expect(client.getMetrics()).rejects.toThrow(
+      /invalid metrics response shape/
+    );
+  });
+
+  it('rejects when aggregate.packetsRejected is missing', async () => {
+    mockFetchAt('/admin/metrics.json', {
+      ...METRICS_BODY,
+      aggregate: { packetsForwarded: 0, bytesSent: 0 },
+    });
+    await expect(client.getMetrics()).rejects.toThrow(
+      /invalid metrics response shape/
+    );
+  });
+
+  it('rejects when aggregate.bytesSent is missing', async () => {
+    mockFetchAt('/admin/metrics.json', {
+      ...METRICS_BODY,
+      aggregate: { packetsForwarded: 0, packetsRejected: 0 },
+    });
+    await expect(client.getMetrics()).rejects.toThrow(
+      /invalid metrics response shape/
+    );
+  });
+
+  it('rejects when peers is not an array', async () => {
+    mockFetchAt('/admin/metrics.json', { ...METRICS_BODY, peers: {} });
+    await expect(client.getMetrics()).rejects.toThrow(
+      /invalid metrics response shape/
+    );
+  });
+
+  it('rejects when uptimeSeconds has wrong type', async () => {
+    mockFetchAt('/admin/metrics.json', {
+      ...METRICS_BODY,
+      uptimeSeconds: '60',
+    });
+    await expect(client.getMetrics()).rejects.toThrow(
+      /invalid metrics response shape/
+    );
+  });
+
+  it('rejects when timestamp is missing', async () => {
+    mockFetchAt('/admin/metrics.json', {
+      ...METRICS_BODY,
+      timestamp: undefined,
+    });
+    await expect(client.getMetrics()).rejects.toThrow(
+      /invalid metrics response shape/
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getPeers() shape + path contract — mirrors GET /admin/peers wrapper envelope
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('getPeers() shape contract', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('succeeds on documented wrapper envelope and requests GET /admin/peers', async () => {
+    const stub = mockFetchAt('/admin/peers', PEERS_BODY);
+    const peers = await client.getPeers();
+    expect(peers).toHaveLength(1);
+    expect(peers[0]!.id).toBe('town');
+    expect(peers[0]!.connected).toBe(true);
+    expect(peers[0]!.ilpAddresses).toEqual(['g.toon.town']);
+    expect(peers[0]!.routeCount).toBe(1);
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it('returns empty array when the connector has no peers', async () => {
+    mockFetchAt('/admin/peers', {
+      nodeId: 'hub-canary',
+      peerCount: 0,
+      connectedCount: 0,
+      peers: [],
+    });
+    const peers = await client.getPeers();
+    expect(peers).toEqual([]);
+  });
+
+  it('rejects when peers field is missing from the envelope', async () => {
+    mockFetchAt('/admin/peers', {
+      nodeId: 'hub-canary',
+      peerCount: 0,
+      connectedCount: 0,
+    });
+    await expect(client.getPeers()).rejects.toThrow(
+      /invalid peers response shape/
+    );
+  });
+
+  it('rejects when body is a bare array (legacy shape — pre-3.3.x drift indicator)', async () => {
+    mockFetchAt('/admin/peers', [{ id: 'town' }]);
+    await expect(client.getPeers()).rejects.toThrow(
+      /invalid peers response shape/
+    );
+  });
+
+  it('rejects when body is null', async () => {
+    mockFetchAt('/admin/peers', null);
+    await expect(client.getPeers()).rejects.toThrow(
+      /invalid peers response shape/
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getEarnings() shape + path contract — mirrors AdminEarningsJsonResponse
+// Connector-Side Contract: GET {adminApi.port}/admin/earnings.json (connector v3.2.0+)
+// Response: EarningsResponse — { uptimeSeconds, peers, connectorFees, recentClaims, timestamp }
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('getEarnings() shape contract', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('succeeds on documented shape and requests GET /admin/earnings.json', async () => {
+    const stub = mockFetchAt('/admin/earnings.json', EARNINGS_BODY);
+    const result = await client.getEarnings();
+    expect(result.uptimeSeconds).toBe(60);
+    expect(result.peers[0]!.peerId).toBe('town');
+    expect(result.peers[0]!.byAsset[0]!.claimsReceivedTotal).toBe('1000000');
+    expect(result.connectorFees[0]!.assetCode).toBe('USD');
+    expect(Array.isArray(result.recentClaims)).toBe(true);
+    expect(stub.calls).toHaveLength(1);
+    // AC #3 canonical assertions (required by name in the acceptance criteria)
+    expect(typeof result.uptimeSeconds).toBe('number');
+    expect(typeof result.peers[0]!.byAsset[0]!.claimsReceivedTotal).toBe(
+      'string'
+    );
+    expect(typeof result.connectorFees[0]!.assetCode).toBe('string');
+    expect(Array.isArray(result.recentClaims)).toBe(true);
+  });
+
+  it('rejects when uptimeSeconds has wrong type (string instead of number)', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      ...EARNINGS_BODY,
+      uptimeSeconds: '60',
+    });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when peers is missing (key absent — mirrors JSON wire dropping undefined)', async () => {
+    const { peers: _omitPeers, ...rest } = EARNINGS_BODY;
+    mockFetchAt('/admin/earnings.json', rest);
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when connectorFees is missing (key absent)', async () => {
+    const { connectorFees: _omitFees, ...rest } = EARNINGS_BODY;
+    mockFetchAt('/admin/earnings.json', rest);
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when recentClaims is not an array', async () => {
+    mockFetchAt('/admin/earnings.json', { ...EARNINGS_BODY, recentClaims: {} });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when timestamp is missing (key absent)', async () => {
+    const { timestamp: _omitTs, ...rest } = EARNINGS_BODY;
+    mockFetchAt('/admin/earnings.json', rest);
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('accepts empty arrays — fresh connector with no claims yet', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      uptimeSeconds: 0,
+      peers: [],
+      connectorFees: [],
+      recentClaims: [],
+      timestamp: '2026-05-12T00:00:00.000Z',
+    });
+    const result = await client.getEarnings();
+    expect(result.peers).toHaveLength(0);
+    expect(result.connectorFees).toHaveLength(0);
+    expect(result.recentClaims).toHaveLength(0);
+    expect(result.uptimeSeconds).toBe(0);
+  });
+
+  it('wraps wire timestamp string into EarningsTimestamp value object', async () => {
+    mockFetchAt('/admin/earnings.json', EARNINGS_BODY);
+    const result = await client.getEarnings();
+    expect(typeof result.timestamp.iso).toBe('string');
+    expect(result.timestamp.iso).toBe('2026-05-12T00:00:00.000Z');
+  });
+
+  // Inner-element drift tests — AC #3 names these fields explicitly. The validator
+  // must reject when inner-array elements deviate from the documented shape.
+
+  it('rejects when peers[].byAsset[].claimsReceivedTotal is a number (inner type drift)', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      ...EARNINGS_BODY,
+      peers: [
+        {
+          peerId: 'town',
+          byAsset: [
+            {
+              assetCode: 'USD',
+              assetScale: 6,
+              claimsReceivedTotal: 1000000,
+              claimsSentTotal: '0',
+              netBalance: '1000000',
+              lastClaimAt: '2026-05-12T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
+    });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when connectorFees[].assetCode is missing (inner presence drift)', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      ...EARNINGS_BODY,
+      connectorFees: [{ assetScale: 6, total: '1000' }],
+    });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when recentClaims[].direction is not in the enum (inner enum drift)', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      ...EARNINGS_BODY,
+      recentClaims: [
+        {
+          peerId: 'town',
+          assetCode: 'USD',
+          assetScale: 6,
+          amount: '500000',
+          direction: 'sideways',
+          at: '2026-05-12T00:00:00.000Z',
+        },
+      ],
+    });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+
+  it('rejects when peers[].byAsset is not an array (inner structural drift)', async () => {
+    mockFetchAt('/admin/earnings.json', {
+      ...EARNINGS_BODY,
+      peers: [{ peerId: 'town', byAsset: null }],
+    });
+    await expect(client.getEarnings()).rejects.toThrow(
+      /invalid earnings response shape/
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getPacketLog() shape + path contract — added story 21.10
+// Connector-Side Contract: GET {adminApi.port}/packets?ilpAddress=<>&since=<>&limit=<>
+// Response: PacketLogEntry[] — { ts, ilpAddressFrom, ilpAddressTo, amount, result }
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PACKET_LOG_BODY: PacketLogEntry[] = [
+  {
+    ts: 1714348800000,
+    ilpAddressFrom: 'g.toon.town',
+    ilpAddressTo: 'g.toon.mill',
+    amount: '1000',
+    result: 'fulfill',
+  },
+];
+
+/** Variant of mockFetchAt that matches by path prefix (ignores query params). */
+function mockFetchAtPath(
+  expectedPathPrefix: string,
+  body: unknown,
+  status = 200
+): { calls: string[] } {
+  const calls: string[] = [];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    calls.push(url);
+    const urlPath = url.split('?')[0] ?? url;
+    if (!urlPath.endsWith(expectedPathPrefix)) {
+      throw new Error(
+        `Canary expected client to request path '${expectedPathPrefix}', got path '${urlPath}'`
+      );
+    }
+    return new Response(JSON.stringify(body), { status });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return { calls };
+}
+
+describe('getPacketLog() shape contract', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('succeeds on documented PacketLogEntry[] shape and requests GET /packets', async () => {
+    const stub = mockFetchAtPath('/packets', PACKET_LOG_BODY);
+    const entries = await client.getPacketLog();
+    expect(Array.isArray(entries)).toBe(true);
+    expect(entries).toHaveLength(1);
+    const entry = entries[0]!;
+    expect(typeof entry.ts).toBe('number');
+    expect(entry.ts).toBe(1714348800000);
+    expect(entry.ilpAddressFrom).toBe('g.toon.town');
+    expect(entry.ilpAddressTo).toBe('g.toon.mill');
+    expect(entry.amount).toBe('1000');
+    expect(entry.result).toBe('fulfill');
+    expect(stub.calls).toHaveLength(1);
+    expect(stub.calls[0]).toMatch(/\/packets/);
+  });
+
+  it('passes ilpAddress, since, limit query params when provided', async () => {
+    const stub = mockFetchAtPath('/packets', []);
+    await client.getPacketLog({
+      ilpAddress: 'g.toon.town',
+      since: 1000,
+      limit: 50,
+    });
+    const url = stub.calls[0] ?? '';
+    expect(url).toContain('ilpAddress=g.toon.town');
+    expect(url).toContain('since=1000');
+    expect(url).toContain('limit=50');
+  });
+
+  it('returns empty array when connector returns empty packet log', async () => {
+    mockFetchAtPath('/packets', []);
+    const entries = await client.getPacketLog();
+    expect(entries).toEqual([]);
+  });
+
+  it('throws ConnectorEndpointNotFound when connector returns 404', async () => {
+    mockFetchAtPath('/packets', 'Not Found', 404);
+    const err = await client.getPacketLog().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as NodeJS.ErrnoException).code).toBe(
+      'ConnectorEndpointNotFound'
+    );
+  });
+
+  it('rejects when body is not an array (shape drift indicator)', async () => {
+    mockFetchAtPath('/packets', { entries: [] });
+    await expect(client.getPacketLog()).rejects.toThrow(/expected array/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ConnectorConfigGenerator env-var contract
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('ConnectorConfigGenerator env-var contract', () => {
+  it('emits exactly the required keys for activeNodes=[town,mill,dvm] in direct mode', () => {
+    const config = getDefaultConfig();
+    config.transport = { mode: 'direct' };
+    const gen = new ConnectorConfigGenerator(config);
+    const runtimeCfg = gen.generate(['town', 'mill', 'dvm']);
+    const envVars = gen.toEnvVars(runtimeCfg);
+
+    expect(Object.keys(envVars).sort()).toEqual([
+      'CONNECTOR_ADMIN_PORT',
+      'CONNECTOR_ILP_ADDRESS',
+      'CONNECTOR_PEERS',
+      'TRANSPORT_MODE',
+    ]);
+    expect(envVars['TRANSPORT_MODE']).toBe('direct');
+  });
+
+  it('additionally emits SOCKS_PROXY when transport.mode is hs with proxy set', () => {
+    const config = getDefaultConfig();
+    config.transport = {
+      mode: 'hs',
+      socksProxy: 'socks5h://proxy.ator.io:9050',
+    };
+    const gen = new ConnectorConfigGenerator(config);
+    const runtimeCfg = gen.generate(['town']);
+    const envVars = gen.toEnvVars(runtimeCfg);
+
+    expect(Object.keys(envVars).sort()).toEqual([
+      'CONNECTOR_ADMIN_PORT',
+      'CONNECTOR_ILP_ADDRESS',
+      'CONNECTOR_PEERS',
+      'SOCKS_PROXY',
+      'TRANSPORT_MODE',
+    ]);
+    expect(envVars['SOCKS_PROXY']).toBe('socks5h://proxy.ator.io:9050');
+  });
+
+  it('CONNECTOR_PEERS round-trips to PeerEntry[] with documented fields for each activeNode', () => {
+    const config = getDefaultConfig();
+    config.transport = { mode: 'direct' };
+    const gen = new ConnectorConfigGenerator(config);
+    const runtimeCfg = gen.generate(['town', 'mill', 'dvm']);
+    const envVars = gen.toEnvVars(runtimeCfg);
+
+    const peers = JSON.parse(envVars['CONNECTOR_PEERS']!) as PeerEntry[];
+    expect(Array.isArray(peers)).toBe(true);
+    expect(peers).toHaveLength(3);
+
+    for (const [i, nodeType] of (['town', 'mill', 'dvm'] as const).entries()) {
+      const peer = peers[i]!;
+      expect(peer.id).toBe(nodeType);
+      expect(peer.relation).toBe('child');
+      expect(peer.btpUrl).toBe(`btp+ws://hub-${nodeType}:3000`);
+      expect(peer.assetCode).toBe('USD');
+      expect(peer.assetScale).toBe(6);
+    }
+  });
+
+  it('toEnvArray() produces KEY=VALUE strings whose set matches toEnvVars()', () => {
+    const config = getDefaultConfig();
+    const gen = new ConnectorConfigGenerator(config);
+    const runtimeCfg = gen.generate(['town']);
+    const envVars = gen.toEnvVars(runtimeCfg);
+    const envArray = gen.toEnvArray(runtimeCfg);
+
+    // Re-derive a Record from the array and compare
+    const roundTripped = Object.fromEntries(
+      envArray.map((entry) => {
+        const eqIdx = entry.indexOf('=');
+        return [entry.slice(0, eqIdx), entry.slice(eqIdx + 1)];
+      })
+    );
+    expect(roundTripped).toEqual(envVars);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getChannels() shape + path contract — mirrors GET /admin/channels
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CHANNELS_BODY = [
+  {
+    channelId: 'ch-001',
+    peerId: 'town',
+    chain: 'evm:1',
+    status: 'open',
+    deposit: '1000000',
+    lastActivity: '2026-05-14T00:00:00.000Z',
+  },
+];
+
+describe('getChannels() shape contract', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('succeeds on ChannelSummary[] shape and requests GET /admin/channels', async () => {
+    const stub = mockFetchAt('/admin/channels', CHANNELS_BODY);
+    const channels = await client.getChannels();
+    expect(channels).toHaveLength(1);
+    expect(channels[0]!.channelId).toBe('ch-001');
+    expect(channels[0]!.peerId).toBe('town');
+    expect(channels[0]!.chain).toBe('evm:1');
+    expect(channels[0]!.status).toBe('open');
+    expect(channels[0]!.deposit).toBe('1000000');
+    expect(channels[0]!.lastActivity).toBe('2026-05-14T00:00:00.000Z');
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it('returns empty array when no channels are open', async () => {
+    mockFetchAt('/admin/channels', []);
+    const channels = await client.getChannels();
+    expect(channels).toEqual([]);
+  });
+
+  it('rejects when body is not an array (shape drift indicator)', async () => {
+    mockFetchAt('/admin/channels', { channels: CHANNELS_BODY });
+    await expect(client.getChannels()).rejects.toThrow(
+      /invalid channels response shape/
+    );
+  });
+
+  it('rejects when channelId is missing from an entry (field drift indicator)', async () => {
+    mockFetchAt('/admin/channels', [
+      {
+        peerId: 'town',
+        chain: 'evm:1',
+        status: 'open',
+        deposit: '0',
+        lastActivity: '2026-05-14T00:00:00.000Z',
+      },
+    ]);
+    await expect(client.getChannels()).rejects.toThrow(
+      /invalid channels response shape/
+    );
+  });
+
+  it('rejects when deposit is a number instead of string (type drift indicator)', async () => {
+    mockFetchAt('/admin/channels', [
+      { ...CHANNELS_BODY[0]!, deposit: 1000000 },
+    ]);
+    await expect(client.getChannels()).rejects.toThrow(
+      /invalid channels response shape/
+    );
+  });
+});

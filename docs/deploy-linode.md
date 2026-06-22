@@ -4,8 +4,8 @@ Stands the operator hub up on a Linode (Akamai Connected Cloud) VPS with reprodu
 Terraform infra. **There is no SSH.** Terraform creates the box; the box brings *itself*
 up via cloud-init: it installs the `@toon-protocol/hub` CLI, **generates its own encrypted
 wallet and persists it (+ its password) on the volume** — no seed or password ever transits
-CI or Terraform state — and runs `townhouse up` (which pulls the pinned, public GHCR node
-images: `connector`, `townhouse-api`, `town`, `mill`, `dvm`). The box then **publishes its
+CI or Terraform state — and runs `hub up` (which pulls the pinned, public GHCR node
+images: `connector`, `hub-api`, `town`, `mill`, `dvm`). The box then **publishes its
 funding addresses** to Object Storage, so the treasury can fund it and you can observe it
 without ever opening a shell.
 
@@ -20,7 +20,7 @@ without ever opening a shell.
 | Infra (instance, volume, firewall, cloud-init) | [`infra/terraform/`](../infra/terraform/) |
 | Provision pipeline | [`.github/workflows/deploy-hub.yml`](../.github/workflows/deploy-hub.yml) |
 | Pinned hub version | [`infra/hub-version.txt`](../infra/hub-version.txt) |
-| Durable state (config, **wallet + password**, `.anon` identity, settlement DB) | Block Storage volume → `/mnt/townhouse` |
+| Durable state (config, **wallet + password**, `.anon` identity, settlement DB) | Block Storage volume → `/mnt/hub` |
 | Health (no SSH) | `s3://<state-bucket>/hub/status.json` |
 | Self-generated funding addresses | `s3://<state-bucket>/hub/wallet.json` |
 
@@ -54,7 +54,7 @@ locally — see [`infra/terraform/README.md`](../infra/terraform/README.md)). Th
 **creates the Object Storage state bucket if it doesn't exist** (idempotent, using the OBJ
 keys), then Terraform creates the instance + volume + firewall and hands the (seed-free)
 config to cloud-init. The box then self-installs, **self-generates + persists its wallet**,
-starts the apex via the `townhouse.service` systemd unit, and **publishes its funding
+starts the apex via the `hub.service` systemd unit, and **publishes its funding
 addresses** to `hub/wallet.json`. The workflow polls for that object, reads the apex
 address, and **auto-funds it** from the treasury (cloud-init takes a few minutes for image
 pulls).
