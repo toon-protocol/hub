@@ -94,6 +94,9 @@ __pycache__/
 # Nix build output (symlink to /nix/store result)
 /result
 
+# Devbox local Nix symlinks/cache (devbox.json + devbox.lock are committed)
+.devbox/
+
 # Generated deployment files
 docker-compose-peer*.yml
 genesis.env

@@ -13,11 +13,11 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 8.15.0
+          version: 8.15.9
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '22'
           cache: pnpm
 
       - run: pnpm install --no-frozen-lockfile
@@ -28,3 +28,29 @@ jobs:
       - run: pnpm -r build
 
       - run: pnpm -r test --if-present
+
+  devbox-validate:
+    name: Devbox Environment Validation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install devbox
+        uses: jetify-com/devbox-install-action@v0.15.0
+        with:
+          enable-cache: true
+
+      - name: Assert tool versions
+        run: |
+          cat > "${RUNNER_TEMP:-/tmp}/assert-versions.sh" <<'ASSERT'
+          set -euo pipefail
+          node --version | grep -E '^v22\.'
+          pnpm --version | grep -E '^8\.15\.'
+          ASSERT
+          devbox run -- bash "${RUNNER_TEMP:-/tmp}/assert-versions.sh"
+          echo "✅ All devbox tools resolved at expected versions"
+
+      - name: Smoke build
+        run: devbox run -- bash -c "pnpm install --no-frozen-lockfile && pnpm build"
