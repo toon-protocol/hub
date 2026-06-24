@@ -3,6 +3,13 @@ name: Release
 # Publishes @toon-protocol/core and @toon-protocol/sdk to npm via changesets.
 # Auth comes from the org-level NPM_TOKEN secret (no local `npm login`).
 # changesets rewrites `workspace:*` -> the real version at publish time.
+#
+# The Release PR is opened with the org GitHub App token (APP_ID/APP_PRIVATE_KEY),
+# NOT the default GITHUB_TOKEN: the org forbids GitHub Actions from creating PRs
+# ("GitHub Actions is not permitted to create or approve pull requests"), and that
+# policy can't be overridden per-repo. An App is a distinct actor, so its PRs are
+# exempt. If the App isn't installed the token step is skipped and we fall back to
+# GITHUB_TOKEN (publish still works; only the Release-PR step would be blocked).
 
 on:
   push:
@@ -17,6 +24,14 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        continue-on-error: true # App not installed -> fall back to GITHUB_TOKEN
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -41,5 +56,5 @@ jobs:
           version: pnpm changeset version
           publish: pnpm changeset publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
